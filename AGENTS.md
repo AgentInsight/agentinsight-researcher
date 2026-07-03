@@ -135,7 +135,7 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 
 **启动时数据初始化（硬约束）**：
 - Agent 容器启动时（`server.py` lifespan）必须执行两项初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
-  1. **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `packages/sql/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。禁止在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
+  1. **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。禁止在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
   2. **GICS 行业知识库 bootstrap**：`src/rag/knowledge_bootstrap.py` 的 `bootstrap_industry_knowledge()` 读取 `config/researcher/industry_prompts/*.yaml`（68 套 GICS 行业），为每个行业构建描述文本，经 `EmbeddingsClient` 嵌入后调用 `QdrantManager.upsert_points` 写入共享知识库（`namespace = agent_id`，不含 `user_id`）；`point_id` 用 `uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")` 幂等生成，相同内容覆盖旧数据（upsert 语义），支持重复启动与数据更新。
 
 ## 7. 数据隔离与检索核心规则
@@ -225,7 +225,10 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 
 ## 12. 部署规则
 
-**容器清单（6 个独立容器，全部支持离线部署）**：
+**容器清单（生产 5 个独立容器 + 外部 PostgreSQL；QA 6 个独立容器含本地 PostgreSQL）**：
+
+> 生产模式（联网/离线）PostgreSQL 由外部托管服务提供（env 配置 `POSTGRES_HOST`/`PORT`/`USER`/`PASSWORD`/`DB`），不在 compose 内构建；业务表由 Agent 启动时执行 `scripts/init.sql` 创建（幂等）。
+> QA 模式（离线）保留本地 `postgres` 容器（见 `docker-compose-qa.yaml`），与 redis/qdrant/embeddings 同属 compose 编排，便于无外部数据库的离线测试环境。
 
 | 服务 | 镜像/构建 | 端口 | 健康检查 |
 |------|----------|------|---------|
@@ -233,8 +236,8 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 | `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8088 | `GET /health` |
 | `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8089 | `GET /health` |
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
-| `postgres` | `postgres:≥17`（官方镜像，业务表由 Agent 启动时执行 `init.sql` 创建） | 5432 | `pg_isready -U <user>` |
 | `redis` | `redis:≥7` | 6379 | `redis-cli ping` |
+| `postgres`（仅 QA 模式） | `postgres:≥17`（业务表由 Agent 启动时执行 `scripts/init.sql` 创建） | 5432 | `pg_isready -U <user>` |
 
 **APIKey 鉴权（硬约束）**：
 - Qdrant 通过 `QDRANT__SERVICE__STATIC_API_KEY` 环境变量开启静态 API Key 鉴权；客户端通过 `QDRANT_API_KEY` 传递。
@@ -251,9 +254,9 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 **容器编排硬约束**：
 - `restart: always`（生产）/ `unless-stopped`（开发）。
 - `depends_on` 必须用 `condition: service_healthy`，禁止裸依赖（无健康检查直连）。
-- 依赖顺序：`postgres` → `redis` → `qdrant` → `embeddings` → `agent`；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
+- 依赖顺序：生产模式 `redis` → `qdrant` → `embeddings` → `agent`（PostgreSQL 由外部托管，不在 `depends_on` 内）；QA 模式 `postgres` → `redis` → `qdrant` → `embeddings` → `agent`；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
 - 健康检查 `interval ≤ 30s` / `timeout ≤ 10s` / `retries ≥ 3` / `start_period ≥ 10s`。
-- 数据卷必须用 `driver: local`，命名卷 `postgres_data` / `redis_data` / `qdrant_data` / `session_data`。
+- 数据卷必须用 `driver: local`，命名卷 `redis_data` / `qdrant_data` / `session_data` / `embeddings_models` / `rerank_models` / `uploads_data`（QA 模式额外含 `postgres_data`）。
 - 端口绑定：生产仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
 
 **Agent 容器硬约束**：

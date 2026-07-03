@@ -44,7 +44,6 @@ packages/wheels/
 packages/debs/
 packages/models/
 packages/images/
-!packages/sql/
 !packages/wheels/.gitkeep
 !packages/debs/.gitkeep
 !packages/models/.gitkeep

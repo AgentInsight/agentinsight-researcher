@@ -1,29 +1,12 @@
 # agentinsight-researcher 容器编排 (生产/联网模式)
-# 严格遵循 AGENTS.md 第 12 章: 6 容器 + depends_on service_healthy + 命名卷
+# 严格遵循 AGENTS.md 第 12 章: depends_on service_healthy + 命名卷
 # 联网模式: 构建时从 PyPI/Docker Hub 下载依赖与镜像, 适用于开源社区
-# 依赖顺序: postgres → redis → qdrant → embeddings → agent (rerank 可选)
+# PostgreSQL 由外部托管 (env 配置 POSTGRES_HOST/PORT/USER/PASSWORD/DB), 不在 compose 内构建
+# 依赖顺序: redis → qdrant → embeddings → agent (rerank 可选)
 # 所有环境变量统一从 .env 加载 (env_file + compose 插值), compose 文件不含硬编码
 # rerank 容器通过 profile 控制, 默认不启动; 启用: docker compose --profile rerank up -d
 
 services:
-  postgres:
-    # 生产模式: postgres 官方镜像, 业务表由 Agent 启动时执行 init.sql 创建 (幂等)
-    image: docker.io/postgres:${POSTGRES_VERSION:-17}
-    restart: always
-    env_file:
-      - .env
-    ports:
-      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-    networks:
-      - agentinsight-net
-
   redis:
     image: docker.io/redis:${REDIS_VERSION:-7}
     restart: always
@@ -141,8 +124,6 @@ services:
       - session_data:/app/data/sessions
       - uploads_data:/tmp/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
@@ -150,6 +131,7 @@ services:
       embeddings:
         condition: service_healthy
       # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
+      # PostgreSQL 由外部托管, 不在 depends_on 内
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
       interval: 30s
@@ -160,8 +142,6 @@ services:
       - agentinsight-net
 
 volumes:
-  postgres_data:
-    driver: local
   redis_data:
     driver: local
   qdrant_data:

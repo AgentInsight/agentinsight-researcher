@@ -4,8 +4,7 @@ AGENTS.md 第 6/7 章硬约束:
 - 单一数据库 agents, 业务表含 agent_id+user_id 双列复合索引
 - LangGraph Checkpointer 表由官方 SDK 管理
 
-原本 packages/sql/init.sql 在 Docker 构建时通过 Dockerfile.postgres 内嵌执行,
-现改为 Agent 容器启动时读取并执行 (用户需求):
+scripts/init.sql 由 Agent 容器启动时读取并执行 (用户需求):
 - 所有 DDL 使用 CREATE TABLE/INDEX IF NOT EXISTS, 天然幂等, 支持重复启动
 - 表结构变更需追加 ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ... (PostgreSQL 9.6+)
 - 失败不阻断启动, 仅告警 (depends_on service_healthy 已保证 Postgres 就绪)
@@ -23,9 +22,9 @@ from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# init.sql 路径: 项目根/packages/sql/init.sql
-# Agent 容器内: /app/packages/sql/init.sql (Dockerfile COPY . . 已包含)
-INIT_SQL_PATH = Path(__file__).parent.parent.parent / "packages" / "sql" / "init.sql"
+# init.sql 路径: 项目根/scripts/init.sql
+# Agent 容器内: /app/scripts/init.sql (Dockerfile COPY . . 已包含)
+INIT_SQL_PATH = Path(__file__).parent.parent.parent / "scripts" / "init.sql"
 
 
 def _read_init_sql() -> str:
@@ -39,7 +38,7 @@ def _read_init_sql() -> str:
 async def init_database(settings: Settings | None = None) -> bool:
     """初始化 PostgreSQL 业务表 (Agent 启动时触发).
 
-    读取 packages/sql/init.sql 并执行, 所有语句幂等 (IF NOT EXISTS).
+    读取 scripts/init.sql 并执行, 所有语句幂等 (IF NOT EXISTS).
     已存在的表不会被重建, 已存在的索引不会被重建.
     如需表结构变更, 在 init.sql 中追加 ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...
 
