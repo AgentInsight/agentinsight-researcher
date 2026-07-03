@@ -39,9 +39,15 @@ class EmbeddingsClient:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章): 服务端开启 API_KEY 时,
+        # 客户端必须携带 Authorization: Bearer <key> 请求头
+        headers: dict[str, str] = {}
+        if self.settings.embeddings_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.embeddings_api_key}"
         self._client = httpx.AsyncClient(
             base_url=self.settings.embeddings_base_url,
             timeout=30.0,
+            headers=headers,
         )
 
     async def embed_texts(

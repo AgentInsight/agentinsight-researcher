@@ -46,9 +46,15 @@ class HybridRetriever:
         self.settings = settings or get_settings()
         self._embeddings = EmbeddingsClient(self.settings)
         self._qdrant = QdrantManager(self.settings)
+        # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章): rerank 服务端开启 API_KEY 时,
+        # 客户端必须携带 Authorization: Bearer <key> 请求头
+        headers: dict[str, str] = {}
+        if self.settings.rerank_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.rerank_api_key}"
         self._rerank_client = httpx.AsyncClient(
             base_url=self.settings.rerank_base_url,
             timeout=30.0,
+            headers=headers,
         )
         self._bm25_corpus = []
         self._bm25_docs = []

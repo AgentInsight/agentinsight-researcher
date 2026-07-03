@@ -32,6 +32,16 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=settings.log_level)
     logger.info("agentinsight-researcher 启动中 (env=%s)", settings.env)
 
+    # 启动时初始化业务数据 (用户需求):
+    # 1. PostgreSQL 业务表 (原 Docker 构建时执行, 现改为 Agent 启动时触发, 幂等)
+    # 2. GICS 行业知识库 (读取 industry_prompts/*.yaml, embedding 后 upsert 到 Qdrant)
+    # 两者均失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
+    from src.memory.db_initializer import init_database
+    from src.rag.knowledge_bootstrap import bootstrap_industry_knowledge
+
+    await init_database(settings)
+    await bootstrap_industry_knowledge(settings)
+
     # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
     # 阶段 3: 可预热图
 

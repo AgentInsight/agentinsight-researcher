@@ -60,15 +60,17 @@ class Settings(BaseSettings):
     qdrant_distance: str = "Cosine"
 
     # ========== Embeddings (AGENTS.md 第 1/7 章, 远程 TEI) ==========
-    embeddings_base_url: str = "http://embeddings:8100"
+    embeddings_base_url: str = "http://embeddings:8088"
     embeddings_model: str = "BAAI/bge-large-zh-v1.5"
     embeddings_dimension: int = 1024
+    embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
 
     # ========== Rerank (AGENTS.md 第 7 章) ==========
     rerank_enabled: bool = False  # 默认不启用, rerank_enabled=True 时启用 bge-reranker-v2-m3
-    rerank_base_url: str = "http://rerank:8101"
+    rerank_base_url: str = "http://rerank:8089"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_top_k: int = 5
+    rerank_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
 
     # ========== PostgreSQL (AGENTS.md 第 6/12 章) ==========
     postgres_host: str = "postgres"
@@ -96,7 +98,7 @@ class Settings(BaseSettings):
 
     # ========== Redis (AGENTS.md 第 1/6 章) ==========
     redis_url: str = "redis://redis:6379/0"
-    redis_password: str | None = None
+    redis_auth: str | None = None  # Redis 鉴权密码 (与 docker-compose REDIS_AUTH 对齐)
 
     # ========== 可观测性 (AGENTS.md 第 10 章) ==========
     agentinsight_public_key: str | None = None

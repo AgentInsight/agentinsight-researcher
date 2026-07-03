@@ -133,6 +133,11 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 会话删除必须级联清理：Checkpoint + Redis 缓存 + 业务元数据。
 - 写入防抖 `DEBOUNCE_SECONDS = 1.0`，后台 flush 线程 `FLUSH_INTERVAL_SECONDS = 0.5`。
 
+**启动时数据初始化（硬约束）**：
+- Agent 容器启动时（`server.py` lifespan）必须执行两项初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
+  1. **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `packages/sql/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。禁止在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
+  2. **GICS 行业知识库 bootstrap**：`src/rag/knowledge_bootstrap.py` 的 `bootstrap_industry_knowledge()` 读取 `config/researcher/industry_prompts/*.yaml`（68 套 GICS 行业），为每个行业构建描述文本，经 `EmbeddingsClient` 嵌入后调用 `QdrantManager.upsert_points` 写入共享知识库（`namespace = agent_id`，不含 `user_id`）；`point_id` 用 `uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")` 幂等生成，相同内容覆盖旧数据（upsert 语义），支持重复启动与数据更新。
+
 ## 7. 数据隔离与检索核心规则
 
 **多 Agent 数据隔离总则（硬约束）**：
@@ -146,11 +151,15 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - **共享知识库**（非用户导入数据）：`namespace = agent_id`（即 `agent_name`），payload 不含 `user_id`，所有用户共享，检索时默认召回。
 - **用户私有数据**（用户导入数据）：`namespace = {agent_id}:{user_id}`（即 `{agent_name}:{user_id}`），payload 含 `user_id` 字段，仅该用户可检索，禁止跨用户召回。
 
-点 id 用 `uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")` 幂等生成。写入 payload 必须含 `content`+`metadata`+`namespace` 三键（用户私有数据额外含 `user_id`）。检索时必须显式传目标 namespace 列表（共享 + 当前用户私有），禁止无 namespace 过滤的全集合扫描。
+点 id 用 `uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")` 幂等生成。写入 payload 必须含 `content`+`metadata`+`namespace` 三键（用户私有数据额外含 `user_id`）。检索时必须显式传目标 namespace 列表（共享 + 当前用户私有），禁止无 namespace 过滤的全集合扫描。Qdrant 服务端通过环境变量 `QDRANT__SERVICE__STATIC_API_KEY` 开启静态 API Key 鉴权，客户端（`rag/qdrant_manager.py`）必须通过 `qdrant_api_key` 配置传递 API Key；API Key 仅在 `.env`/`.env.qa` 配置，禁止硬编码。
 
 **Redis 约定**：所有键必须加前缀 `{agent_id}:{user_id}:`，完整键格式 `{agent_id}:{user_id}:{module}:{type}:{id}`。禁止使用无 `agent_id` 或 `user_id` 前缀的裸键。会话级数据按 `{agent_id}:{user_id}:{session_id}` 三级分键。TTL 强制，禁用永久键（配置数据除外）。
 
-**RAG 流水线**：检索必须混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，禁止直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，禁止业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产必须告警并失败转移。
+**RAG 流水线**：检索必须混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，禁止直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，禁止业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产必须告警并失败转移。Embeddings/Rerank TEI 服务通过环境变量 `API_KEY` 开启鉴权，客户端（`rag/embeddings.py`/`rag/retriever.py`）必须通过 `embeddings_api_key`/`rerank_api_key` 配置传递 `Authorization: Bearer <key>` 请求头；API Key 仅在 `.env`/`.env.qa` 配置，禁止硬编码。
+
+**GICS 行业知识库（硬约束）**：
+- 共享知识库（`namespace = agent_id`）必须包含 68 套 GICS 行业描述，由 Agent 启动时 `src/rag/knowledge_bootstrap.py` 从 `config/researcher/industry_prompts/*.yaml` 自动构建并 upsert 到 Qdrant（见第 6 章启动时数据初始化）。
+- `IndustryClassifier`（`src/skills/researcher/industry_classifier.py`）通过向量检索 GICS 知识库识别行业，命中失败时 LLM 兜底；禁止业务代码绕过 `IndustryClassifier` 直接读取 YAML。
 
 ## 8. 用户身份解析规则
 
@@ -221,13 +230,18 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 | 服务 | 镜像/构建 | 端口 | 健康检查 |
 |------|----------|------|---------|
 | `agent` | 本仓 `Dockerfile`（Python 3.12-slim） | 8066 | `GET /health` |
-| `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8100 | `GET /health` |
-| `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8101 | `GET /health` |
+| `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8088 | `GET /health` |
+| `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8089 | `GET /health` |
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
-| `postgres` | `postgres:≥16` | 5432 | `pg_isready -U <user>` |
+| `postgres` | `postgres:≥17`（官方镜像，业务表由 Agent 启动时执行 `init.sql` 创建） | 5432 | `pg_isready -U <user>` |
 | `redis` | `redis:≥7` | 6379 | `redis-cli ping` |
 
-**离线部署硬约束**（参考 AgentInsightService 模式）：
+**APIKey 鉴权（硬约束）**：
+- Qdrant 通过 `QDRANT__SERVICE__STATIC_API_KEY` 环境变量开启静态 API Key 鉴权；客户端通过 `QDRANT_API_KEY` 传递。
+- Embeddings/Rerank TEI 服务通过 `API_KEY` 环境变量开启鉴权；客户端通过 `EMBEDDINGS_API_KEY`/`RERANK_API_KEY` 传递 `Authorization: Bearer <key>` 请求头。
+- 所有 API Key 仅在 `.env`/`.env.qa` 配置，禁止硬编码；compose 文件通过 `${VAR:-}` 插值引用。
+
+**QA 部署硬约束**（参考 AgentInsightService 模式）：
 - 所有镜像必须预下载为 tarball（`docker save -o packages/images/<image>.tar`），部署机 `docker load` 导入，禁止部署时 `docker pull`。
 - Python 依赖必须预下载 wheel 到 `packages/`，构建时 `pip install --no-index --find-links=/app/packages -r requirements.txt`，禁止联网安装。
 - 系统依赖（.deb）必须预下载到 `packages/debs/`，构建时 `dpkg -i /tmp/debs/*.deb`，禁止 `apt-get update`。
@@ -246,23 +260,26 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 基础镜像 `python:3.12-slim`，非 root 用户运行。
 - 多阶段构建：builder 阶段装依赖，runtime 阶段仅复制产物。
 - `EXPOSE 8066`，`CMD ["python", "server.py"]`。
-- env_file 分层：`.env`（公共）+ `.env.agent`（Agent 专属）+ `.env.{env}`（环境覆盖）。
+- env_file 分层：生产 `.env`（公共）+ `.env.agent`（Agent 专属）+ `.env.{env}`（环境覆盖）；QA `.env.qa`（QA 专属，全离线配置）；生产离线 `.env`（与生产联网共享配置）。
 
-**双套构建模式**：
-项目提供两套构建文件，按部署场景选择：
+**三套构建模式**：
+项目提供三套构建文件，按部署场景选择：
 
-| 模式 | 构建文件 | 编排文件 | 构建脚本 | 适用场景 |
-|------|---------|---------|---------|---------|
-| 离线模式 | `Dockerfile.offline` | `docker-compose.offline.yml` | `scripts/build-offline.ps1` | 本地测试、离线部署、内网环境 |
-| 联网模式 | `Dockerfile` | `docker-compose.yml` | `scripts/build-online.ps1` | 开源社区、CI、外网环境 |
+| 模式 | 构建文件 | 编排文件 | 环境文件 | 构建脚本 | 适用场景 |
+|------|---------|---------|---------|---------|---------|
+| QA 模式（离线） | `Dockerfile.qa` | `docker-compose-qa.yaml` | `.env.qa` | `docker-build.qa.bat` | QA 测试、内网环境 |
+| 生产模式（联网） | `Dockerfile` | `docker-compose.yml` | `.env` | `docker-build.sh` | 开源社区、CI、外网环境 |
+| 生产模式（离线） | `Dockerfile.offline` | `docker-compose-offline.yaml` | `.env` | `docker-build.offline.sh` | 内网生产环境、离线部署 |
 
-- **离线模式**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。适用于无外网环境或本地测试。
-- **联网模式**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像，无需预下载 `packages/`。适用于开源社区贡献者快速起栈。
-- 离线模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.offline`、`docker-compose.offline.yml`、`scripts/build-offline.ps1`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
-- "禁止部署时联网拉镜像/装依赖/下模型" 约束仅适用于**离线模式**；联网模式允许构建时联网。
+- **QA 模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。适用于 QA 测试。所有端口绑定 `127.0.0.1`，仅本机访问。
+- **生产模式（联网）**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像，无需预下载 `packages/`。适用于开源社区贡献者快速起栈。仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
+- **生产模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。镜像版本由 `packages/images/` 中的 tarball 决定，compose 文件中硬编码以确保匹配。适用于内网生产环境或离线部署。仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
+- QA 模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.qa`、`docker-compose-qa.yaml`、`docker-build.qa.bat`、`scripts/build-offline.ps1`、`scripts/offline-deploy.ps1`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
+- 生产离线模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.offline`、`docker-compose-offline.yaml`、`docker-build.offline.sh`。
+- "禁止部署时联网拉镜像/装依赖/下模型" 约束适用于**QA 模式**和**生产离线模式**；生产联网模式允许构建时联网。
 
 **禁止**：
-- 离线模式部署时联网拉镜像/装依赖/下模型。
+- QA 模式和生产离线模式部署时联网拉镜像/装依赖/下模型。
 - 单容器混装多服务（如 agent + qdrant 同容器）。
 - 绕过 `depends_on: service_healthy` 直接连未就绪服务。
 - 使用 `latest` 标签（必须锁版本）。

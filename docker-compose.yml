@@ -1,113 +1,129 @@
-# agentinsight-researcher 容器编排 (联网模式)
+# agentinsight-researcher 容器编排 (生产/联网模式)
 # 严格遵循 AGENTS.md 第 12 章: 6 容器 + depends_on service_healthy + 命名卷
 # 联网模式: 构建时从 PyPI/Docker Hub 下载依赖与镜像, 适用于开源社区
 # 依赖顺序: postgres → redis → qdrant → embeddings → agent (rerank 可选)
+# 所有环境变量统一从 .env 加载 (env_file + compose 插值), compose 文件不含硬编码
 # rerank 容器通过 profile 控制, 默认不启动; 启用: docker compose --profile rerank up -d
 
 services:
   postgres:
+    # 生产模式: postgres 官方镜像, 业务表由 Agent 启动时执行 init.sql 创建 (幂等)
     image: docker.io/postgres:${POSTGRES_VERSION:-17}
     restart: always
     env_file:
       - .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agis -d agentinsight"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 10
-    ports:
-      - 5432:5432
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      
+    networks:
+      - agentinsight-net
+
   redis:
-    image: docker.io/redis:7
+    image: docker.io/redis:${REDIS_VERSION:-7}
     restart: always
-    # CHANGEME: row below to secure redis password
-    command: >
-      --requirepass ${REDIS_AUTH:-7097053B469745F5BC538BE94B76F716}
-      --maxmemory-policy noeviction
     env_file:
       - .env
+    command: >
+      sh -c "redis-server
+      $${REDIS_AUTH:+--requirepass \"$$REDIS_AUTH\"}
+      --maxmemory-policy noeviction"
     ports:
-      - 6379:6379
+      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "7097053B469745F5BC538BE94B76F716", "ping"]
+      test: ["CMD-SHELL", "redis-cli $${REDIS_AUTH:+-a \"$$REDIS_AUTH\"} ping"]
       interval: 3s
       timeout: 10s
       retries: 10
+    networks:
+      - agentinsight-net
 
   qdrant:
-    image: qdrant/qdrant:v1.18.0
+    image: qdrant/qdrant:${QDRANT_VERSION:-v1.18.0}
     restart: always
+    env_file:
+      - .env
     environment:
-      QDRANT__LOG_LEVEL: INFO
-      QDRANT__SERVICE__GRPC_PORT: 6334
-      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__LOG_LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
+      QDRANT__SERVICE__GRPC_PORT: ${QDRANT_GRPC_PORT:-6334}
+      QDRANT__SERVICE__HTTP_PORT: ${QDRANT_HTTP_PORT:-6333}
+      QDRANT__SERVICE__STATIC_API_KEY: ${QDRANT_API_KEY:-}
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "${QDRANT_HTTP_PORT:-6333}:${QDRANT_HTTP_PORT:-6333}"
+      - "${QDRANT_GRPC_PORT:-6334}:${QDRANT_GRPC_PORT:-6334}"
     volumes:
-      - qdrant-storage:/qdrant/storage
+      - qdrant_data:/qdrant/storage
     healthcheck:
-      # qdrant 镜像无 wget/curl, 用 bash /dev/tcp 探活
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/$${QDRANT_HTTP_PORT:-6333}' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - agentinsight-net
 
   embeddings:
-    # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取 TEI 1.5
-    image: tei-embedding:cpu-1.9
+    # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取
+    image: ${TEI_IMAGE:-tei-embedding}:${TEI_TAG:-cpu-1.9}
     restart: always
+    env_file:
+      - .env
     environment:
-      MODEL_ID: /data/bge-large-zh-v1.5
-      DTYPE: float32
-      MAX_BATCH_TOKENS: "16384"
-      MAX_CLIENT_BATCH_SIZE: "32"
-      MAX_CONCURRENT_REQUESTS: "512"
-      AUTO_TRUNCATE: "true"
-      PORT: "8088"
+      MODEL_ID: ${EMBEDDINGS_MODEL_PATH:-/data/bge-large-zh-v1.5}
+      DTYPE: ${EMBEDDINGS_DTYPE:-float32}
+      MAX_BATCH_TOKENS: ${EMBEDDINGS_MAX_BATCH_TOKENS:-16384}
+      MAX_CLIENT_BATCH_SIZE: ${EMBEDDINGS_MAX_CLIENT_BATCH_SIZE:-32}
+      MAX_CONCURRENT_REQUESTS: ${EMBEDDINGS_MAX_CONCURRENT_REQUESTS:-512}
+      AUTO_TRUNCATE: ${EMBEDDINGS_AUTO_TRUNCATE:-true}
+      PORT: "${EMBEDDINGS_PORT:-8088}"
+      API_KEY: ${EMBEDDINGS_API_KEY:-}
     ports:
-      - "8088:8088"
+      - "${EMBEDDINGS_PORT:-8088}:${EMBEDDINGS_PORT:-8088}"
     volumes:
-      - embeddings_models:/data  # named volume 避免 bind mount 权限问题
+      - embeddings_models:/data
     healthcheck:
-      # TEI 1.5 内置 curl, 探活 8100 端口
-      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${EMBEDDINGS_PORT:-8088}/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 180s  # 模型加载较慢, 给 3 分钟
+      start_period: 180s
+    networks:
+      - agentinsight-net
 
   rerank:
     # BGE Reranker 服务镜像 (bge-reranker-v2-m3), 可选容器
     # 默认不启动; 启用方式: docker compose --profile rerank up -d
     # 同时需在 .env 设置 RERANK_ENABLED=true
     profiles: ["rerank"]
-    image: tei-embedding:cpu-1.9
+    image: ${TEI_IMAGE:-tei-embedding}:${TEI_TAG:-cpu-1.9}
     restart: always
+    env_file:
+      - .env
     environment:
-      MODEL_ID: /data/bge-reranker-v2-m3
-      DTYPE: float16
-      MAX_BATCH_TOKENS: "16384"
-      MAX_CLIENT_BATCH_SIZE: "32"
-      MAX_CONCURRENT_REQUESTS: "512"
-      PORT: "8089"
+      MODEL_ID: ${RERANK_MODEL_PATH:-/data/bge-reranker-v2-m3}
+      DTYPE: ${RERANK_DTYPE:-float16}
+      MAX_BATCH_TOKENS: ${RERANK_MAX_BATCH_TOKENS:-16384}
+      MAX_CLIENT_BATCH_SIZE: ${RERANK_MAX_CLIENT_BATCH_SIZE:-32}
+      MAX_CONCURRENT_REQUESTS: ${RERANK_MAX_CONCURRENT_REQUESTS:-512}
+      PORT: "${RERANK_PORT:-8089}"
+      API_KEY: ${RERANK_API_KEY:-}
     ports:
-      - "8089:8089"
+      - "${RERANK_PORT:-8089}:${RERANK_PORT:-8089}"
     volumes:
       - rerank_models:/data
     healthcheck:
-      # TEI 1.5 内置 curl, 探活 8101 端口
-      test: ["CMD", "curl", "-f", "http://localhost:8101/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${RERANK_PORT:-8089}/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 180s  # 模型加载较慢, 给 3 分钟
+      start_period: 180s
     networks:
       - agentinsight-net
 
@@ -119,13 +135,8 @@ services:
     restart: always
     env_file:
       - .env
-    environment:
-      - ENV=${ENV:-dev}
-      - PYTHONUNBUFFERED=1
-      - LANG=C.UTF-8
-      - PYTHONIOENCODING=utf-8
     ports:
-      - "8066:8066"  # 唯一对外端口, AGENTS.md 第 12 章
+      - "${AGENT_PORT:-8066}:${AGENT_PORT:-8066}"
     volumes:
       - session_data:/app/data/sessions
       - uploads_data:/tmp/uploads
@@ -139,7 +150,6 @@ services:
       embeddings:
         condition: service_healthy
       # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
-      # 启用 rerank 时需手动确保 rerank 容器健康, 或在此添加 depends_on
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
       interval: 30s
@@ -164,3 +174,7 @@ volumes:
     driver: local
   rerank_models:
     driver: local
+
+networks:
+  agentinsight-net:
+    driver: bridge
