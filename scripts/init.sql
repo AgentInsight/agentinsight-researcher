@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     query TEXT NOT NULL,                       -- 原始研究请求
     report_type VARCHAR(32) NOT NULL DEFAULT 'basic_report',
     report_format VARCHAR(16) NOT NULL DEFAULT 'markdown',
-    industry_code VARCHAR(16),                 -- GICS 行业代码
-    industry_name VARCHAR(128),                -- GICS 行业名称
+    agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona (对标 GPTR agent_role)
+    agent_role_server VARCHAR(64),             -- 角色简称 (对标 GPTR server, 如 financial_analyst)
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/running/completed/failed
     total_cost_usd NUMERIC(12,6) DEFAULT 0,
     total_tokens BIGINT DEFAULT 0,
@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS research_sessions (
 CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user ON research_sessions(agent_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_research_sessions_session ON research_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_sessions_expires ON research_sessions(expires_at);
+
+-- ========== 迁移: 行业重构 (V3, 对标 GPTR 4 层机制, 删除 GICS 行业分类) ==========
+-- 旧列 industry_code/industry_name 已弃用并删除
+-- 新列 agent_role/agent_role_server 由 LLM 动态角色生成器写入 (对标 GPTR choose_agent)
+ALTER TABLE IF EXISTS research_sessions DROP COLUMN IF EXISTS industry_code;
+ALTER TABLE IF EXISTS research_sessions DROP COLUMN IF EXISTS industry_name;
+ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS agent_role VARCHAR(256);
+ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS agent_role_server VARCHAR(64);
 
 -- ========== 业务表: 研究报告 ==========
 CREATE TABLE IF NOT EXISTS research_reports (

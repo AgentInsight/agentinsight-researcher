@@ -37,6 +37,7 @@ class BochaSearcher(BaseSearcher):
         query: str,
         *,
         max_results: int = 5,
+        query_domains: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """博查搜索.
@@ -83,6 +84,7 @@ class BochaSearcher(BaseSearcher):
                         )
                     )
 
+                results = self._filter_by_domains(results, query_domains)
                 span.update(
                     output={"results_count": len(results)},
                     metadata={"tool_name": "bocha", "success": True},

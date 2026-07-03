@@ -15,7 +15,7 @@ import logging
 from typing import Any
 
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient
+from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_tool
 
 logger = logging.getLogger(__name__)
@@ -136,9 +136,9 @@ class MCPCoordinator:
                 logger.warning("MCP 未返回任何工具")
                 return []
 
-            # LLM 智能选工具 (对标 GPT Researcher MCPToolSelector)
+            # LLM 智能选工具 + 生成参数 (对标 GPT Researcher MCPToolSelector)
             max_tools = self.settings.mcp_max_tools
-            selected_tools = await self._select_tools(
+            selected = await self._select_tool_with_llm(
                 query,
                 tools,
                 max_tools,
@@ -146,15 +146,15 @@ class MCPCoordinator:
                 session_id=session_id,
             )
 
-            # 执行工具调用
+            # 执行工具调用 (动态参数, 不再固定 {"query": query})
             contexts: list[str] = []
-            for tool in selected_tools:
+            for tool, tool_args in selected:
                 try:
-                    result = await tool.ainvoke({"query": query})
+                    result = await tool.ainvoke(tool_args)
                     if result:
                         contexts.append(str(result))
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("MCP 工具 %s 调用失败: %s", tool.name, e)
+                    logger.warning("MCP 工具 %s 调用失败: %s", getattr(tool, "name", "?"), e)
 
             return contexts
         except ImportError:
@@ -163,6 +163,125 @@ class MCPCoordinator:
         except Exception as e:  # noqa: BLE001
             logger.warning("MCP 执行失败: %s", e)
             return []
+
+    async def _select_tool_with_llm(
+        self,
+        query: str,
+        available_tools: list[Any],
+        max_tools: int,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[tuple[Any, dict[str, Any]]]:
+        """LLM 智能选工具 + 生成参数 (对标 GPT Researcher MCPToolSelector).
+
+        返回 [(tool, tool_args), ...], 最多 max_tools 个.
+        LLM 不可用或失败时降级到关键词匹配 (_select_tools).
+        """
+        if not available_tools:
+            return []
+
+        # 1. 构造工具描述 (含 name/description/参数 schema)
+        tools_desc: list[dict[str, Any]] = []
+        for t in available_tools:
+            name = getattr(t, "name", "")
+            desc = getattr(t, "description", "")
+            # args_schema 可能是 pydantic model 或 dict
+            args_schema = getattr(t, "args_schema", None)
+            if args_schema is None:
+                args: Any = getattr(t, "args", {})
+            else:
+                try:
+                    args = (
+                        args_schema.model_json_schema()
+                        if hasattr(args_schema, "model_json_schema")
+                        else dict(args_schema)
+                    )
+                except Exception:  # noqa: BLE001
+                    args = {}
+            tools_desc.append(
+                {
+                    "name": name,
+                    "description": desc,
+                    "parameters": args,
+                }
+            )
+
+        import json
+
+        tools_json = json.dumps(tools_desc, ensure_ascii=False, indent=2)
+
+        prompt = f"""你是 MCP 工具选择专家. 根据用户查询选择最合适的 {max_tools} 个 MCP 工具并生成调用参数.
+
+可用工具:
+{tools_json}
+
+用户查询: {query}
+
+请返回 JSON 数组, 每项含 name 与 args:
+[
+  {{"name": "tool_name", "args": {{"param1": "value1"}}}},
+  ...
+]
+
+仅返回 JSON, 不要其他内容:"""
+
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            response = await self._llm.achat(
+                messages,
+                tier=LLMTier.FAST,
+                temperature=0.0,
+                max_tokens=2000,
+                user_id=user_id,
+                session_id=session_id,
+                span_name="mcp-tool-select",
+                step="mcp",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("MCP LLM 选工具失败, 降级关键词匹配: %s", e)
+            fallback_tools = await self._select_tools(query, available_tools, max_tools)
+            return [(t, {"query": query}) for t in fallback_tools[:max_tools]]
+
+        # 三级 JSON 容错解析 (json_utils 由并行 sub-agent 创建, 兜底本地解析)
+        def _fallback_parse(text: str, fallback: Any = None) -> Any:
+            try:
+                return json.loads(text)
+            except Exception:  # noqa: BLE001
+                return fallback
+
+        try:
+            from src.common.json_utils import safe_json_parse
+        except ImportError:
+            safe_json_parse = _fallback_parse
+
+        parsed: Any = safe_json_parse(response.content, fallback=[])
+        if not isinstance(parsed, list):
+            parsed = []
+
+        # 映射回 tool 对象
+        tool_map = {getattr(t, "name", ""): t for t in available_tools}
+        selected: list[tuple[Any, dict[str, Any]]] = []
+        for item in parsed[:max_tools]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name", "")
+            args = item.get("args", {})
+            if not isinstance(args, dict):
+                args = {"query": query}
+            # 确保 args 含 query (兜底)
+            if "query" not in args:
+                args["query"] = query
+            tool = tool_map.get(name)
+            if tool is not None:
+                selected.append((tool, args))
+
+        # 若 LLM 选了 0 个, 降级关键词匹配
+        if not selected:
+            fallback_tools = await self._select_tools(query, available_tools, max_tools)
+            return [(t, {"query": query}) for t in fallback_tools[:max_tools]]
+
+        return selected
 
     async def _select_tools(
         self,

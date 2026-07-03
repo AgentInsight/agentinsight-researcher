@@ -5,6 +5,11 @@ AGENTS.md 用户需求 3: Reviewer (质量审查).
 
 用 LLM 评估来源可信度与相关性, 过滤低质量来源.
 cfg.CURATE_SOURCES=True 时启用 (默认 False).
+
+行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
+- agent_role 参数 (对标 GPTR AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+
+P1-Future-04: curator prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
 
 from __future__ import annotations
@@ -12,9 +17,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_chain
+from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +35,17 @@ class SourceCurator:
 
     settings: Settings
     _llm: LLMClient
+    _prompt_family: PromptFamily
 
     def __init__(
         self,
         settings: Settings | None = None,
         llm: LLMClient | None = None,
+        prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._llm = llm or LLMClient(self.settings)
+        self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     async def curate_sources(
         self,
@@ -43,7 +53,7 @@ class SourceCurator:
         sources: list[dict[str, Any]],
         *,
         max_results: int = 10,
-        industry_prompt_family: dict[str, Any] | None = None,
+        agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -51,6 +61,8 @@ class SourceCurator:
 
         对标 GPT Researcher curate_sources.
         用 smart_llm (temperature=0.2) 评估来源.
+        agent_role (对标 GPTR AGENT_ROLE): 角色 persona 字符串,
+        由 AgentCreator LLM 动态生成或调用方注入.
         """
         if not sources:
             return []
@@ -61,14 +73,8 @@ class SourceCurator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            industry_name = (
-                industry_prompt_family.get("industry_name", "通用研究")
-                if industry_prompt_family
-                else "通用研究"
-            )
-            reviewer_prompt = (
-                industry_prompt_family.get("reviewer_prompt", "") if industry_prompt_family else ""
-            )
+            # 对标 GPTR: agent_role 作为角色 persona
+            role_persona = agent_role or "你是一位资深研究分析专家, 擅长多领域综合研究."
 
             # 截断避免 token 过大
             sources_text = "\n".join(
@@ -76,25 +82,13 @@ class SourceCurator:
                 for i, s in enumerate(sources[:30])  # 最多 30 条
             )
 
-            prompt = f"""你是一位{industry_name}行业的研究分析专家. {reviewer_prompt}
-
-你的任务是: 评估以下搜索来源的相关性与可信度, 选出最值得引用的 {max_results} 条.
-
-评估标准:
-1. 相关性: 与研究问题的相关程度 (0-10 分)
-2. 可信度: 来源权威性 (官方机构 > 学术期刊 > 行业媒体 > 自媒体)
-3. 时效性: 信息新鲜度
-4. 深度: 内容详实程度
-
-研究问题: {query}
-
-来源列表:
-{sources_text}
-
-请返回 JSON 数组, 每项含 index (1-based) 与 score (0-10):
-[{{"index": 1, "score": 9, "reason": "官方权威数据"}}, ...]
-
-仅返回最相关的 {max_results} 条的 JSON 数组:"""
+            # P1-Future-04: prompt 经 PromptFamily 策略注入
+            prompt = self._prompt_family.curator_prompt(
+                query=query,
+                sources_text=sources_text,
+                agent_role=role_persona,
+                max_results=max_results,
+            )
 
             messages = [{"role": "user", "content": prompt}]
             response = await self._llm.achat(
@@ -105,13 +99,12 @@ class SourceCurator:
                 user_id=user_id,
                 session_id=session_id,
                 span_name="curator-llm",
+                step="curator",
             )
 
             # 解析 JSON
             try:
-                import json_repair
-
-                scored = json_repair.loads(response.content)
+                scored = safe_json_parse(response.content, fallback=[])
                 if isinstance(scored, list) and scored:
                     # 按 score 降序排序
                     scored.sort(key=lambda x: x.get("score", 0), reverse=True)

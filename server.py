@@ -10,6 +10,7 @@ AGENTS.md 第 3/8/14 章: API 入口, JWT 中间件, OpenAI 兼容端点, 前端
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.api.agent_discovery import router as discovery_router
 from src.api.middleware import JWTAuthMiddleware, SecurityHeadersMiddleware
 from src.api.routes import router as api_router
 from src.config.settings import get_settings
@@ -26,21 +28,19 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期: 启动时初始化, 关闭时清理."""
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
     logger.info("agentinsight-researcher 启动中 (env=%s)", settings.env)
 
-    # 启动时初始化业务数据 (用户需求):
-    # 1. PostgreSQL 业务表 (原 Docker 构建时执行, 现改为 Agent 启动时触发, 幂等)
-    # 2. GICS 行业知识库 (读取 industry_prompts/*.yaml, embedding 后 upsert 到 Qdrant)
-    # 两者均失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
+    # 启动时初始化业务数据 (AGENTS.md 第 6 章):
+    # PostgreSQL 业务表 (原 Docker 构建时执行, 现改为 Agent 启动时触发, 幂等)
+    # 失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
+    # 注: 行业适配采用 GPTR 风格 4 层机制 (Prompt/Config/Retriever/MCP), 不再 bootstrap GICS 行业知识库
     from src.memory.db_initializer import init_database
-    from src.rag.knowledge_bootstrap import bootstrap_industry_knowledge
 
     await init_database(settings)
-    await bootstrap_industry_knowledge(settings)
 
     # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
     # 阶段 3: 可预热图
@@ -90,6 +90,16 @@ def create_app() -> FastAPI:
 
     # OpenAI 兼容端点 (AGENTS.md 第 14 章)
     app.include_router(api_router)
+
+    # Agent Discovery Protocol 公开发现端点 (P1-Future-03, 无需鉴权)
+    app.include_router(discovery_router)
+
+    # WebSocket 双向实时通信端点 (P2-Future-02, AGENTS.md 第 14 章允许端点)
+    # SSE 仍是主通道, WebSocket 是增强通道 (人在回路审核请求 + 实时进度)
+    if settings.websocket_enabled:
+        from src.api.websocket import router as ws_router
+
+        app.include_router(ws_router)
 
     # 前端测试页面 (AGENTS.md 第 14 章)
     if settings.enable_test_page:

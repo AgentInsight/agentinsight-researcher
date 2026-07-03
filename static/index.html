@@ -198,6 +198,24 @@
     .source-item:last-child { border-bottom: none; }
     .source-item .idx { color: var(--text-muted); margin-right: 6px; }
     .source-item a { word-break: break-all; }
+    .source-item .score-badge {
+      display: inline-block; margin-left: 6px; font-size: 11px; font-family: var(--font-mono);
+      color: var(--primary); background: var(--primary-soft); padding: 1px 6px; border-radius: 8px;
+    }
+
+    /* 工具调用面板 (P2-04) */
+    .tool-item { padding: 6px 0; border-bottom: 1px dashed var(--border); }
+    .tool-item:last-child { border-bottom: none; }
+    .tool-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .tool-head .tool-icon { font-size: 13px; }
+    .tool-head .tool-name { font-weight: 600; font-size: 12.5px; word-break: break-all; }
+    .tool-head .tool-status { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+    .tool-label { font-size: 11px; color: var(--text-muted); margin: 4px 0 2px; }
+    .tool-pre {
+      font-family: var(--font-mono); font-size: 11.5px; background: var(--code-bg);
+      padding: 8px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border);
+      white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;
+    }
 
     .status-line { font-size: 12px; color: var(--text-muted); margin-top: 6px; display: flex; align-items: center; gap: 6px; }
     .typing-dot { display: inline-flex; gap: 3px; }
@@ -422,6 +440,22 @@
       return (bytes / 1024 / 1024).toFixed(2) + ' MB';
     }
 
+    /** 美化 JSON (工具参数/结果展示): 字符串尝试解析, 对象直接序列化 */
+    function formatJson(v) {
+      if (v == null || v === '') return '';
+      if (typeof v === 'string') {
+        try { return JSON.stringify(JSON.parse(v), null, 2); } catch { return v; }
+      }
+      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+    }
+
+    /** 格式化检索分数: 保留 3 位小数 */
+    function formatScore(s) {
+      const n = parseFloat(s);
+      if (isNaN(n)) return String(s);
+      return n.toFixed(3);
+    }
+
     // ========== 状态 ==========
     const state = {
       sessionId: uuidv4(),
@@ -630,7 +664,7 @@
       scrollBottom();
     }
 
-    /** 创建 assistant 气泡骨架, 返回 {root, contentEl, progressEl, sourcesEl, statusEl} */
+    /** 创建 assistant 气泡骨架, 返回 {root, contentEl, progressEl, toolsEl, sourcesEl, statusEl, ...} */
     function createAssistantBubble() {
       removeEmptyHint();
       const el = document.createElement('div');
@@ -640,6 +674,7 @@
         '<div class="bubble">' +
           '<div class="progress-wrap"></div>' +
           '<div class="content"></div>' +
+          '<div class="tools-wrap"></div>' +
           '<div class="sources-wrap"></div>' +
           '<div class="status-line"><span class="typing-dot"><span></span><span></span><span></span></span>生成中…</div>' +
         '</div>';
@@ -649,8 +684,12 @@
         root: el,
         contentEl: el.querySelector('.content'),
         progressEl: el.querySelector('.progress-wrap'),
+        toolsEl: el.querySelector('.tools-wrap'),
         sourcesEl: el.querySelector('.sources-wrap'),
         statusEl: el.querySelector('.status-line'),
+        // P2-04: SSE 元数据 (工具调用 / 检索来源, 含 score)
+        toolCalls: [],
+        sourcesMeta: [],
       };
     }
 
@@ -728,15 +767,47 @@
       // 正文 (Markdown)
       bubble.contentEl.innerHTML = main ? renderMarkdown(main) : '';
 
-      // 来源面板
-      if (sources.length) {
-        const items = sources.map((s, i) =>
-          '<div class="source-item"><span class="idx">' + (i + 1) + '.</span>' +
-          '<a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer">' +
-          escapeHtml(s.title || s.url) + '</a></div>'
-        ).join('');
+      // 工具调用面板 (P2-04, 默认折叠)
+      const tools = bubble.toolCalls || [];
+      if (tools.length) {
+        const items = tools.map((t) => {
+          const argsStr = formatJson(t.arguments);
+          const outStr = t.output != null ? formatJson(t.output) : '';
+          return '<div class="tool-item">' +
+            '<div class="tool-head"><span class="tool-icon">🔧</span>' +
+            '<span class="tool-name">' + escapeHtml(t.name || '(unknown)') + '</span>' +
+            (t.status ? '<span class="tool-status">' + escapeHtml(t.status) + '</span>' : '') +
+            '</div>' +
+            (argsStr ? '<div class="tool-label">参数</div><pre class="tool-pre">' + escapeHtml(argsStr) + '</pre>' : '') +
+            (outStr ? '<div class="tool-label">结果</div><pre class="tool-pre">' + escapeHtml(outStr) + '</pre>' : '') +
+            '</div>';
+        }).join('');
+        bubble.toolsEl.innerHTML =
+          '<details class="panel"><summary>工具调用<span class="badge">' + tools.length + '</span></summary>' +
+          '<div class="panel-body">' + items + '</div></details>';
+      } else {
+        bubble.toolsEl.innerHTML = '';
+      }
+
+      // 来源面板 (P2-04): 优先用 SSE 元数据 (含 score), 否则回退到 markdown 解析
+      const metaSources = bubble.sourcesMeta || [];
+      const effectiveSources = metaSources.length
+        ? metaSources
+        : sources.map((s) => ({ title: s.title, url: s.url, score: null }));
+      if (effectiveSources.length) {
+        const items = effectiveSources.map((s, i) => {
+          const score = (s.score != null && s.score !== '')
+            ? '<span class="score-badge">score ' + formatScore(s.score) + '</span>'
+            : '';
+          const title = s.title || s.url || '(无标题)';
+          const url = s.url || '';
+          return '<div class="source-item"><span class="idx">' + (i + 1) + '.</span>' +
+            (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' +
+              escapeHtml(title) + '</a>' : escapeHtml(title)) +
+            score + '</div>';
+        }).join('');
         bubble.sourcesEl.innerHTML =
-          '<details class="panel"><summary>参考来源<span class="badge">' + sources.length + '</span></summary>' +
+          '<details class="panel"><summary>参考来源<span class="badge">' + effectiveSources.length + '</span></summary>' +
           '<div class="panel-body">' + items + '</div></details>';
       } else {
         bubble.sourcesEl.innerHTML = '';
@@ -797,6 +868,46 @@
         });
       };
 
+      // P2-04: 工具调用 / 检索来源元数据处理 (从 SSE 流解析)
+      // OpenAI 标准 delta.tool_calls 按 index 累加 arguments; 自定义事件提供完整对象
+      const mergeToolCall = (tc) => {
+        const idx = (typeof tc.index === 'number') ? tc.index : bubble.toolCalls.length;
+        while (bubble.toolCalls.length <= idx) {
+          bubble.toolCalls.push({ name: '', arguments: '', output: null });
+        }
+        const slot = bubble.toolCalls[idx];
+        if (tc.id) slot.id = tc.id;
+        const fn = tc.function || {};
+        if (fn.name) slot.name = fn.name;
+        if (fn.arguments) slot.arguments = (slot.arguments || '') + fn.arguments;
+        // 自定义事件字段 (name/arguments/input/output/result/status)
+        if (tc.name || tc.tool_name) slot.name = tc.name || tc.tool_name;
+        if (tc.arguments && typeof tc.arguments !== 'string') slot.arguments = tc.arguments;
+        else if (tc.input) slot.arguments = tc.input;
+        if (tc.output != null) slot.output = tc.output;
+        else if (tc.result != null) slot.output = tc.result;
+        if (tc.status) slot.status = tc.status;
+        scheduleRender();
+      };
+      const mergeSources = (arr) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((s) => {
+          if (!s || typeof s !== 'object') return;
+          const url = s.url || s.link || '';
+          const score = (s.score != null) ? s.score : (s.relevance_score != null ? s.relevance_score : null);
+          const item = {
+            title: s.title || s.name || url || '(无标题)',
+            url: url,
+            score: score,
+            snippet: s.snippet || s.content || '',
+          };
+          const existing = url ? bubble.sourcesMeta.find((x) => x.url === url) : null;
+          if (existing) Object.assign(existing, item);
+          else bubble.sourcesMeta.push(item);
+        });
+        scheduleRender();
+      };
+
       try {
         const resp = await fetch(base + '/v1/chat/completions', {
           method: 'POST',
@@ -819,6 +930,7 @@
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let currentEvent = null; // P2-04: 自定义 SSE 事件名 (event: tool_call / event: sources)
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -826,17 +938,48 @@
           const lines = buffer.split('\n');
           buffer = lines.pop(); // 保留最后不完整行
           for (const line of lines) {
+            // 空行: SSE 帧分隔, 重置事件名
+            if (line === '') { currentEvent = null; continue; }
+            // SSE 注释 / 心跳
+            if (line.startsWith(':')) continue;
+            // 命名事件 (后端自定义: event: tool_call / event: sources)
+            if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); continue; }
             if (!line.startsWith('data: ')) continue;
             const data = line.slice(6);
             if (data === '[DONE]') { break; }
             try {
               const chunk = JSON.parse(data);
+              // 命名事件: tool_call (完整工具调用对象) / sources (来源数组)
+              if (currentEvent === 'tool_call') {
+                mergeToolCall({
+                  index: chunk.index,
+                  function: { name: chunk.name || chunk.tool_name, arguments: chunk.arguments || chunk.input || '' },
+                  output: chunk.output != null ? chunk.output : chunk.result,
+                  status: chunk.status || 'done',
+                });
+                currentEvent = null;
+                continue;
+              }
+              if (currentEvent === 'sources') {
+                mergeSources(Array.isArray(chunk) ? chunk : (chunk.sources || chunk.data || [chunk]));
+                currentEvent = null;
+                continue;
+              }
+              // 默认: OpenAI chat completion chunk
               const choice = chunk.choices && chunk.choices[0];
               if (!choice) continue;
               const delta = choice.delta || {};
               if (delta.content) {
                 accumulated += delta.content;
                 scheduleRender();
+              }
+              // P2-04: 工具调用增量 (OpenAI 标准 delta.tool_calls, 按 index 累加)
+              if (delta.tool_calls) {
+                delta.tool_calls.forEach((tc) => mergeToolCall(tc));
+              }
+              // P2-04: 检索来源元数据 (自定义扩展字段 delta.sources)
+              if (delta.sources) {
+                mergeSources(delta.sources);
               }
               if (choice.finish_reason === 'stop') {
                 // 流结束

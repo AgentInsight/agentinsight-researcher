@@ -7,8 +7,8 @@ AGENTS.md 第 5 章硬约束:
 - 节点内禁止直连厂商 LLM SDK, 统一走 llm/ 网关 (LiteLLM)
 - 每个节点必须包裹在 AgentInsight trace span 内 (AGENTS.md 第 10 章)
 
-流水线 (对标 GPT Researcher Skills):
-    industry_classifier → research_conductor → source_curator → report_generator → publisher
+流水线 (对标 GPT Researcher Skills, 行业适配采用 GPTR 4 层机制):
+    agent_creator → research_conductor → source_curator → report_generator → publisher
 """
 
 from __future__ import annotations
@@ -16,10 +16,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.agents.researcher.fact_checker import FactChecker
+from src.agents.researcher.reviewer import Reviewer
+from src.agents.researcher.reviser import Reviser
 from src.config.settings import Settings
 from src.graph.state import ResearcherState
 from src.observability.tracing import trace_chain
-from src.skills.researcher.industry_classifier import IndustryClassifier
+from src.skills.researcher.agent_creator import AgentCreator
 from src.skills.researcher.publisher import Publisher
 from src.skills.researcher.report_generator import ReportGenerator
 from src.skills.researcher.research_conductor import ResearchConductor
@@ -28,37 +31,36 @@ from src.skills.researcher.source_curator import SourceCurator
 logger = logging.getLogger(__name__)
 
 
-async def industry_classifier_node(
+async def agent_creator_node(
     state: ResearcherState,
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """IndustryClassifier 行业识别节点.
+    """AgentCreator 动态角色生成节点 (对标 GPTR choose_agent).
 
-    用户需求 4:
-    1. Qdrant 检索 GICS 知识库识别行业
-    2. 命中失败时 LLM 兜底识别
-    3. 加载对应行业 prompt_family
+    GPTR 4 层隐形机制 (Prompt 层):
+    1. settings.agent_role 配置注入 (优先级最高, 对标 GPTR AGENT_ROLE)
+    2. 否则 LLM 根据 query 语义动态生成行业 persona
     """
     async with trace_chain(
-        name="industry-classifier",
+        name="agent-creator",
         input={"query": state.get("query", "")[:200]},
         session_id=state.get("session_id"),
         user_id=state.get("user_id"),
     ):
-        classifier = IndustryClassifier(settings)
-        result = await classifier.classify(
+        creator = AgentCreator(settings)
+        # 优先用 state 中已注入的 agent_role (来自 ChatRequest / settings),
+        # 否则 LLM 动态生成 (AgentCreator 内部判断 agent_role 优先级)
+        preset_role = state.get("agent_role") or settings.agent_role
+        result = await creator.create_agent(
             state.get("query", ""),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
+            agent_role=preset_role,
         )
         return {
-            "industry_code": result["industry_code"],
-            "industry_name": result["industry_name"],
-            "industry_sector": result.get("industry_sector", ""),
-            "industry_group": result.get("industry_group", ""),
-            "industry_sub": result.get("industry_sub", ""),
-            "industry_prompt_family": result["industry_prompt_family"],
+            "agent_role": result["agent_role_prompt"],
+            "agent_role_server": result["server"],
             "status": "running",
         }
 
@@ -71,7 +73,7 @@ async def research_conductor_node(
     """ResearchConductor 研究总指挥节点.
 
     对标 GPT Researcher skills/researcher.py:
-    1. plan_research: 按行业提示词拆解子查询
+    1. plan_research: 按动态角色 persona 拆解子查询
     2. asyncio.gather 并行 _process_sub_query:
        - 搜索 (中文优先路由)
        - 抓取 (BrowserManager)
@@ -89,16 +91,54 @@ async def research_conductor_node(
             uploaded_files_ctx = []
         result = await conductor.conduct_research(
             state.get("query", ""),
-            industry_prompt_family=state.get("industry_prompt_family"),
+            mode=state.get("research_mode", ""),
+            agent_role=state.get("agent_role"),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
             uploaded_files_context=uploaded_files_ctx,
+            query_domains=state.get("query_domains"),
         )
         return {
             "sub_queries": result["sub_queries"],
             "contexts": result["contexts"],
             "sources": result["sources"],
             "visited_urls": result["visited_urls"],
+        }
+
+
+async def deep_research_node(
+    state: ResearcherState,
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
+    """DeepResearch 递归深度研究节点 (P0-01).
+
+    对标 GPT Researcher deep_research.
+    通过 breadth×depth 递归树探索, 每层聚合上下文.
+    agent_creator 条件边: research_mode == "deep" 时路由到此节点.
+    """
+    async with trace_chain(
+        name="deep-research",
+        input={"query": state.get("query", "")[:200], "mode": "deep"},
+        session_id=state.get("session_id"),
+        user_id=state.get("user_id"),
+    ):
+        from src.skills.researcher.deep_research import DeepResearcher
+
+        researcher = DeepResearcher(settings)
+        result = await researcher.research(
+            state.get("query", ""),
+            breadth=state.get("deep_research_breadth", settings.deep_research_breadth),
+            depth=state.get("deep_research_depth", settings.deep_research_depth),
+            user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
+            query_domains=state.get("query_domains"),
+        )
+        return {
+            "sub_queries": [],  # DeepResearch 内部递归, 不走外层 sub_queries
+            "contexts": [result["context"]] if result["context"] else [],
+            "sources": result["sources"],
+            "visited_urls": list(researcher._visited_urls),
         }
 
 
@@ -131,7 +171,7 @@ async def source_curator_node(
             state.get("query", ""),
             sources,
             max_results=10,
-            industry_prompt_family=state.get("industry_prompt_family"),
+            agent_role=state.get("agent_role"),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
@@ -146,13 +186,14 @@ async def report_generator_node(
     """ReportGenerator 报告生成节点.
 
     对标 GPT Researcher skills/writer.py:
-    按行业模板合成长报告 (Writer 职责).
+    按动态角色 persona 合成长报告 (Writer 职责).
+    P2-06: image_generation_enabled=True 时报告含配图 (deepseek-v4-flash).
     """
     async with trace_chain(
         name="report-generator",
         input={
             "contexts_count": len(state.get("contexts", [])),
-            "industry": state.get("industry_name", "通用研究"),
+            "agent_role_server": state.get("agent_role_server", "researcher"),
         },
         session_id=state.get("session_id"),
         user_id=state.get("user_id"),
@@ -160,21 +201,27 @@ async def report_generator_node(
         generator = ReportGenerator(settings)
         # 优先用策展后的来源, 否则用原来源
         sources = state.get("curated_sources") or state.get("sources", [])
-        report_md = await generator.generate_report(
+        result = await generator.generate_report(
             state.get("query", ""),
             state.get("contexts", []),
             sources,
             report_type=state.get("report_type", settings.default_report_type),
             tone=state.get("tone", "objective"),
             total_words=state.get("total_words", settings.total_words),
-            industry_prompt_family=state.get("industry_prompt_family"),
+            agent_role=state.get("agent_role"),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
-        return {
-            "report_md": report_md,
+        delta: dict[str, Any] = {
+            "report_md": result["report_md"],
             "status": "completed",
         }
+        # P2-06: 补充报告配图字段 (若生成了图像)
+        if result.get("image_url"):
+            delta["report_image_url"] = result["image_url"]
+        if result.get("image_b64"):
+            delta["report_image_b64"] = result["image_b64"]
+        return delta
 
 
 async def publisher_node(
@@ -197,6 +244,10 @@ async def publisher_node(
         result = await publisher.publish(
             state.get("report_md", ""),
             output_format=state.get("report_format", "markdown"),
+            title=state.get("query", ""),
+            sources=state.get("curated_sources") or state.get("sources", []),
+            agent_role_server=state.get("agent_role_server", ""),
+            research_mode=state.get("research_mode", ""),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
@@ -205,4 +256,110 @@ async def publisher_node(
             delta["report_html"] = result["content"]
         elif result.get("format") == "pdf":
             delta["report_pdf_path"] = result["path"]
+        elif result.get("format") == "docx":
+            delta["report_docx"] = result["content"]
+        elif result.get("format") == "json":
+            delta["report_json"] = result["content"]
+        return delta
+
+
+async def fact_checker_node(
+    state: ResearcherState,
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
+    """FactChecker 事实核查节点 (P0-Future-02).
+
+    核查报告中的事实声明是否与上下文一致.
+    fact_check_enabled=False 时节点内部跳过 (返回 accepted=True).
+    条件边: accept → reviewer | revise → writer.
+    """
+    async with trace_chain(
+        name="fact-checker-node",
+        input={
+            "report_len": len(state.get("report_md", "")),
+            "enabled": settings.fact_check_enabled,
+        },
+        session_id=state.get("session_id"),
+        user_id=state.get("user_id"),
+    ):
+        checker = FactChecker(settings)
+        result = await checker.check(
+            state,
+            user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
+        )
+        # iteration_count 累加 1: fact_checker 为分支节点, 用于 graph_max_iterations 守卫
+        # 防止 fact_checker revise → writer 无限循环 (AGENTS.md 第 5 章 max_iterations 硬上限)
+        return {
+            "fact_check_accepted": result["fact_check_accepted"],
+            "fact_check_issues": result["fact_check_issues"],
+            "iteration_count": 1,
+        }
+
+
+async def reviewer_node(
+    state: ResearcherState,
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Reviewer 报告评审节点 (P0-Future-01).
+
+    评审报告质量 (上下文覆盖/幻觉/结构完整性), 返回 accept|revise 决策.
+    条件边: accept → publisher | revise → reviser (含 max_revisions 守卫).
+    """
+    async with trace_chain(
+        name="reviewer-node",
+        input={
+            "query": state.get("query", "")[:200],
+            "report_len": len(state.get("report_md", "")),
+            "revision_count": state.get("revision_count", 0),
+        },
+        session_id=state.get("session_id"),
+        user_id=state.get("user_id"),
+    ):
+        reviewer = Reviewer(settings)
+        result = await reviewer.review(
+            state,
+            user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
+        )
+        return {
+            "review_decision": result["review_decision"],
+            "review_feedback": result["review_feedback"],
+        }
+
+
+async def reviser_node(
+    state: ResearcherState,
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Reviser 报告修订节点 (P0-Future-01).
+
+    根据 Reviewer 反馈修订报告, 返回新的 report_md.
+    revision_count 用 Annotated[int, operator.add] reducer, 返回 1 累加.
+    修订完成后回到 reviewer (由 multi_agent_builder 边定义).
+    """
+    async with trace_chain(
+        name="reviser-node",
+        input={
+            "query": state.get("query", "")[:200],
+            "report_len": len(state.get("report_md", "")),
+            "revision_count": state.get("revision_count", 0),
+        },
+        session_id=state.get("session_id"),
+        user_id=state.get("user_id"),
+    ):
+        reviser = Reviser(settings)
+        result = await reviser.revise(
+            state,
+            user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
+        )
+        # revision_count 累加 1 (Annotated[int, operator.add] reducer)
+        delta: dict[str, Any] = {
+            "report_md": result["report_md"],
+            "revision_count": 1,
+        }
         return delta

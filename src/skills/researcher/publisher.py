@@ -19,7 +19,7 @@ class Publisher:
     """报告发布器.
 
     对标 GPT Researcher Publisher.
-    支持 Markdown (默认) / HTML / PDF 输出.
+    支持 Markdown (默认) / HTML / PDF / DOCX / JSON 输出 (P1-05 扩展 docx + json).
     """
 
     settings: Settings
@@ -32,6 +32,10 @@ class Publisher:
         report_md: str,
         *,
         output_format: str = "markdown",
+        title: str = "",
+        sources: list[dict[str, Any]] | None = None,
+        agent_role_server: str = "",
+        research_mode: str = "",
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -41,6 +45,8 @@ class Publisher:
         - markdown: 返回 Markdown 原文
         - html: 返回 HTML 渲染
         - pdf: 返回 PDF 文件路径
+        - docx: 返回 DOCX 二进制 (P1-05)
+        - json: 返回结构化 JSON 字符串 (P1-05)
         """
         async with trace_chain(
             name="publisher",
@@ -62,9 +68,89 @@ class Publisher:
                 span.update(output={"format": "pdf", "pdf_path": pdf_path})
                 return {"format": "pdf", "content": None, "path": pdf_path}
 
+            if output_format == "docx":
+                docx_bytes = self._to_docx(report_md, title=title)
+                span.update(output={"format": "docx", "size": len(docx_bytes)})
+                return {"format": "docx", "content": docx_bytes, "path": None}
+
+            if output_format == "json":
+                json_str = self._to_json(
+                    report_md,
+                    title=title,
+                    sources=sources or [],
+                    agent_role_server=agent_role_server,
+                    research_mode=research_mode,
+                )
+                span.update(output={"format": "json", "len": len(json_str)})
+                return {"format": "json", "content": json_str, "path": None}
+
             # 默认 markdown
             span.update(output={"format": "markdown"})
             return {"format": "markdown", "content": report_md, "path": None}
+
+    def _to_docx(self, content: str, *, title: str = "") -> bytes:
+        """Markdown → DOCX (python-docx, P1-05).
+
+        简易 Markdown 解析 (标题/段落/列表), 失败返回空 bytes.
+        """
+        try:
+            import io
+
+            from docx import Document
+
+            doc = Document()
+            if title:
+                doc.add_heading(title, level=0)
+            # 简易 Markdown 解析 (标题/段落/列表)
+            for line in content.split("\n"):
+                line = line.rstrip()
+                if not line:
+                    continue
+                if line.startswith("# "):
+                    doc.add_heading(line[2:], level=1)
+                elif line.startswith("## "):
+                    doc.add_heading(line[3:], level=2)
+                elif line.startswith("### "):
+                    doc.add_heading(line[4:], level=3)
+                elif line.startswith("- ") or line.startswith("* "):
+                    doc.add_paragraph(line[2:], style="List Bullet")
+                elif line[:2].lstrip().isdigit() and ". " in line:
+                    # 简单数字列表 (1. xxx / 2. xxx)
+                    text = line.split(". ", 1)[-1]
+                    doc.add_paragraph(text, style="List Number")
+                else:
+                    doc.add_paragraph(line)
+            buf = io.BytesIO()
+            doc.save(buf)
+            return buf.getvalue()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("DOCX 生成失败: %s", e)
+            return b""
+
+    def _to_json(
+        self,
+        content: str,
+        *,
+        title: str = "",
+        sources: list[dict[str, Any]] | None = None,
+        agent_role_server: str = "",
+        research_mode: str = "",
+    ) -> str:
+        """报告 → JSON (结构化输出, P1-05)."""
+        import json
+        from datetime import datetime
+
+        report_data = {
+            "title": title or "研究报告",
+            "content": content,
+            "sources": sources or [],
+            "metadata": {
+                "agent_role_server": agent_role_server,
+                "research_mode": research_mode,
+                "generated_at": datetime.now().isoformat(),
+            },
+        }
+        return json.dumps(report_data, ensure_ascii=False, indent=2)
 
     def _md_to_html(self, md: str) -> str:
         """Markdown 转 HTML (用 mistune + jinja2 模板)."""

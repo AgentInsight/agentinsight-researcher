@@ -125,6 +125,7 @@ def get_scraper(
     对标 GPT Researcher scraper/scraper.py 的 get_scraper 路由逻辑.
     - URL 以 .pdf 结尾 → PyMuPDFScraper
     - URL 含 arxiv.org → ArxivScraper
+    - URL 以 Office 文档后缀结尾 → MarkItDownScraper (P2-03)
     - 否则 → 按配置 (bs/playwright)
     """
     url_lower = url.lower()
@@ -139,6 +140,11 @@ def get_scraper(
 
         return ArxivScraper(url, session)
 
+    if url_lower.endswith((".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls")):
+        from src.skills.researcher.scrapers.markitdown_scraper import MarkItDownScraper
+
+        return MarkItDownScraper(url, session)
+
     if scraper_type == "playwright":
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
 
@@ -150,6 +156,71 @@ def get_scraper(
     return BeautifulSoupScraper(url, session)
 
 
+async def _safe_scrape(scraper: BaseScraper) -> dict[str, Any]:
+    """安全抓取 (异常返回空结果).
+
+    对标 GPT Researcher scrape_with_fallback 的容错语义.
+    """
+    try:
+        return await scraper.scrape()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("抓取失败 %s: %s", scraper.url, e)
+        return {"url": scraper.url, "content": None, "title": "", "image_urls": []}
+
+
+async def scrape_with_fallback(
+    url: str,
+    *,
+    session: Any | None = None,
+    enable_fallback: bool = True,
+    min_content_length: int = 100,
+    user_agent: str = "",
+) -> dict[str, Any]:
+    """带降级链的抓取 (P1-04, 对标 GPT Researcher).
+
+    降级链: BS → Playwright → 失败.
+    PDF/Arxiv 不降级 (专用抓取器).
+    user_agent 参数预留 (session 已含 UA, 由调用方在构建 session 时注入).
+    """
+    url_lower = url.lower()
+
+    # PDF / Arxiv 不降级 (专用抓取器)
+    if url_lower.endswith(".pdf"):
+        from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
+
+        return await _safe_scrape(PyMuPDFScraper(url, session))
+
+    if "arxiv.org" in url_lower:
+        from src.skills.researcher.scrapers.arxiv_scraper import ArxivScraper
+
+        return await _safe_scrape(ArxivScraper(url, session))
+
+    # 第一级: BeautifulSoup
+    from src.skills.researcher.scrapers.beautiful_soup_scraper import BeautifulSoupScraper
+
+    bs_result = await _safe_scrape(BeautifulSoupScraper(url, session))
+    content = bs_result.get("content", "") or ""
+    if content and len(content) >= min_content_length:
+        return bs_result
+
+    if not enable_fallback:
+        return bs_result
+
+    # 第二级: Playwright 降级
+    logger.info("BS 抓取内容过短(%d), 降级 Playwright: %s", len(content), url)
+    try:
+        from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
+
+        pw_result = await _safe_scrape(PlaywrightScraper(url, session))
+        # Playwright 结果更好则使用
+        if len(pw_result.get("content", "") or "") > len(content):
+            return pw_result
+        return bs_result  # 否则保留 BS 结果
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Playwright 降级失败 %s: %s", url, e)
+        return bs_result
+
+
 async def scrape_urls(
     urls: list[str],
     *,
@@ -157,11 +228,14 @@ async def scrape_urls(
     max_workers: int = 15,
     rate_limit_delay: float = 0.0,
     user_agent: str = "",
+    enable_fallback: bool = True,
 ) -> list[dict[str, Any]]:
     """并发抓取多个 URL.
 
     对标 GPT Researcher actions/web_scraping.py 的 scrape_urls.
     返回 [{"url","content","title","image_urls","content_type"}].
+    enable_fallback=True 时启用 BS → Playwright 降级链 (P1-04).
+    scraper_type 仅在非降级路径 (enable_fallback=False) 生效.
     """
     if not urls:
         return []
@@ -180,12 +254,25 @@ async def scrape_urls(
 
         async def _scrape_one(url: str) -> dict[str, Any]:
             async with worker_pool.throttle():
+                if enable_fallback:
+                    return await scrape_with_fallback(
+                        url,
+                        session=session,
+                        enable_fallback=True,
+                        min_content_length=100,
+                        user_agent=user_agent,
+                    )
                 try:
                     scraper = get_scraper(url, scraper_type, session)
                     result = await scraper.scrape()
                     # 内容过短直接丢弃 (对标 GPT Researcher)
                     if len(result.get("content", "")) < 100:
-                        return {"url": url, "content": None, "title": "", "image_urls": []}
+                        return {
+                            "url": url,
+                            "content": None,
+                            "title": "",
+                            "image_urls": [],
+                        }
                     return result
                 except Exception as e:  # noqa: BLE001
                     logger.warning("抓取失败 %s: %s", url, e)

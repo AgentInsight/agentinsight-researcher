@@ -10,6 +10,13 @@ GPT Researcher 三级 LLM 模式 (用户需求 10 Token 优化):
 - FAST_LLM: 快速任务 (摘要)
 - SMART_LLM: 复杂推理 (报告写作, 支持 2k+ 字长响应)
 - STRATEGIC_LLM: 规划 (agent 选择, 慢但精)
+
+P1-Future-01 step_costs 分步成本追踪:
+- _accumulate(step, ...) 按步骤累加成本, get_session_cost 返回 step_costs 分布.
+
+P1-Future-05 LLM 降级链 (strategic → smart → fast):
+- achat/achat_stream 在 tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出.
+- 降级仅在 "调用失败" 时触发; 流式已开始 yield 后不降级 (无法回滚已输出内容).
 """
 
 from __future__ import annotations
@@ -18,12 +25,62 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_generation
 
 logger = logging.getLogger(__name__)
+
+
+# ========== 模块级定价表 (USD per 1K tokens, 参考 2026 年公开定价) ==========
+# 支持模型名前缀匹配: 如 "deepseek/deepseek-chat-2026-01-01" 命中 "deepseek/deepseek-chat".
+# 命中失败时 _compute_cost 返回 0.0 并记录 warning 日志 (不再用兜底费率避免误算,
+# 详见 AGENTS.md 第 4 章避免静默错误).
+LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
+    # ========== DeepSeek ==========
+    "deepseek/deepseek-chat": {"input": 0.0014, "output": 0.0028},
+    "deepseek/deepseek-reasoner": {"input": 0.0055, "output": 0.022},
+    # deepseek-v4-flash (新模型, 用于图像生成): 待官方公布精确价格, 暂用 deepseek-chat 同档.
+    "deepseek/deepseek-v4-flash": {"input": 0.0014, "output": 0.0028},
+    # ========== OpenAI ==========
+    "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "openai/gpt-4o": {"input": 0.0025, "output": 0.01},
+    "openai/gpt-4.1": {"input": 0.002, "output": 0.008},
+    "openai/gpt-4.1-mini": {"input": 0.0004, "output": 0.0016},
+    "openai/gpt-4-turbo": {"input": 0.01, "output": 0.03},
+    "openai/gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
+    "openai/o1-mini": {"input": 0.0011, "output": 0.0044},
+    "openai/o1-preview": {"input": 0.0015, "output": 0.006},
+    # ========== Anthropic ==========
+    "anthropic/claude-3-5-sonnet": {"input": 0.003, "output": 0.015},
+    "anthropic/claude-3-5-haiku": {"input": 0.0008, "output": 0.004},
+    "anthropic/claude-3-opus": {"input": 0.015, "output": 0.075},
+    "anthropic/claude-3-sonnet": {"input": 0.003, "output": 0.015},
+    "anthropic/claude-3-haiku": {"input": 0.00025, "output": 0.00125},
+    # ========== Google Gemini ==========
+    "gemini/gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
+    "gemini/gemini-1.5-pro": {"input": 0.00125, "output": 0.005},
+    "gemini/gemini-2.0-flash": {"input": 0.0001, "output": 0.0004},
+    # ========== 通义 Qwen (DashScope) ==========
+    "dashscope/qwen-plus": {"input": 0.00057, "output": 0.00171},
+    "dashscope/qwen-turbo": {"input": 0.00014, "output": 0.00028},
+    "dashscope/qwen-max": {"input": 0.0028, "output": 0.0084},
+    # ========== 智谱 GLM ==========
+    "zhipu/glm-4-plus": {"input": 0.007, "output": 0.007},
+    "zhipu/glm-4-flash": {"input": 0.0001, "output": 0.0001},
+    "zhipu/glm-4-air": {"input": 0.0005, "output": 0.0005},
+    # ========== 月之暗面 Moonshot ==========
+    "moonshot/moonshot-v1-8k": {"input": 0.0017, "output": 0.0017},
+    "moonshot/moonshot-v1-32k": {"input": 0.0034, "output": 0.0034},
+    "moonshot/moonshot-v1-128k": {"input": 0.0085, "output": 0.0085},
+    # ========== Mistral ==========
+    "mistral/mistral-large-latest": {"input": 0.002, "output": 0.006},
+    "mistral/mistral-small-latest": {"input": 0.0002, "output": 0.0006},
+    # ========== Meta Llama via Together ==========
+    "together_ai/Meta-Llama-3.1-70B-Instruct-Turbo": {"input": 0.00088, "output": 0.00088},
+    "together_ai/Meta-Llama-3.1-405B-Instruct-Turbo": {"input": 0.005, "output": 0.005},
+}
 
 
 class LLMTier(StrEnum):
@@ -43,6 +100,8 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    # 成本明细: input_cost/output_cost/total_cost (USD, 各项保留 6 位小数)
+    cost_breakdown: dict[str, float] | None = None
     raw: Any = None
 
 
@@ -52,9 +111,26 @@ class LLMClient:
 
     AGENTS.md 第 9 章: 全部 LLM 调用经此客户端, 禁厂商 SDK 直连.
     所有调用必须包裹在 trace_generation span 内 (AGENTS.md 第 10 章).
+
+    P1-Future-01: _step_costs 按业务步骤累计成本, get_session_cost 返回分布.
+    P1-Future-05: achat/achat_stream 支持 tier 降级链 (strategic → smart → fast).
     """
 
     settings: Settings = field(default_factory=get_settings)
+    # 会话级累计成本追踪 (实例变量, 每次 achat/achat_stream 成功后累加)
+    _call_count: int = field(default=0, init=False)
+    _total_input_tokens: int = field(default=0, init=False)
+    _total_output_tokens: int = field(default=0, init=False)
+    _total_cost_usd: float = field(default=0.0, init=False)
+    # P1-Future-01: 分步成本追踪 {step: cost_usd}, 每项保留 6 位小数
+    _step_costs: dict[str, float] = field(default_factory=dict, init=False)
+
+    # P1-Future-05: tier 降级链映射. FAST 失败后无降级 (None), 抛出原异常.
+    _FALLBACK_TIER: ClassVar[dict[LLMTier, LLMTier | None]] = {
+        LLMTier.STRATEGIC: LLMTier.SMART,
+        LLMTier.SMART: LLMTier.FAST,
+        LLMTier.FAST: None,
+    }
 
     def _get_model(self, tier: LLMTier) -> str:
         """按层级获取模型名."""
@@ -88,28 +164,93 @@ class LLMClient:
             return self.settings.zhipu_api_key
         return None
 
-    async def achat(
+    @staticmethod
+    def _lookup_pricing(model: str) -> dict[str, float] | None:
+        """查定价表, 支持前缀匹配.
+
+        - 精确匹配优先.
+        - 前缀匹配: 如 "deepseek/deepseek-chat-2026-01-01" 命中 "deepseek/deepseek-chat".
+        - 多个前缀命中时取最长前缀 (最精确), 避免短前缀误命中.
+        """
+        # 1. 精确命中
+        if model in LITELLM_PRICING_TABLE:
+            return LITELLM_PRICING_TABLE[model]
+        # 2. 前缀匹配 (取最长 key, 避免短前缀冲突)
+        matched: dict[str, float] | None = None
+        matched_key_len = -1
+        for key, rate in LITELLM_PRICING_TABLE.items():
+            if model.startswith(key) and len(key) > matched_key_len:
+                matched = rate
+                matched_key_len = len(key)
+        return matched
+
+    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> dict[str, float]:
+        """计算 LLM 调用成本 (USD).
+
+        返回 {"input_cost", "output_cost", "total_cost"} dict.
+        - 单价: USD per 1K tokens (参考 2026 公开定价, 见 LITELLM_PRICING_TABLE).
+        - 支持模型名前缀匹配 (如 "deepseek/deepseek-chat-2026-01-01" 也能命中).
+        - 命中失败时记录 warning 日志, 返回全 0 (不再用兜底 0.001/0.002, 避免误算).
+        - 各项保留 6 位小数.
+        """
+        rate = self._lookup_pricing(model)
+        if rate is None:
+            logger.warning("未找到模型定价: %s, cost 返回 0.0", model)
+            return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+        input_cost = (input_tokens / 1000) * rate["input"]
+        output_cost = (output_tokens / 1000) * rate["output"]
+        return {
+            "input_cost": round(input_cost, 6),
+            "output_cost": round(output_cost, 6),
+            "total_cost": round(input_cost + output_cost, 6),
+        }
+
+    def _accumulate(
+        self, step: str, input_tokens: int, output_tokens: int, cost_usd: float
+    ) -> None:
+        """累加会话级成本统计 (每次 achat/achat_stream 成功后调用).
+
+        P1-Future-01: 同时按 step 累计分步成本, 供 get_session_cost 返回分布.
+        """
+        self._call_count += 1
+        self._total_input_tokens += input_tokens
+        self._total_output_tokens += output_tokens
+        self._total_cost_usd += cost_usd
+        self._step_costs[step] = round(self._step_costs.get(step, 0.0) + cost_usd, 6)
+
+    def get_session_cost(self) -> dict[str, Any]:
+        """返回会话级累计成本统计.
+
+        含: call_count / input_tokens / output_tokens / cost_usd / step_costs.
+        每次成功 achat/achat_stream 后自动累加; 失败调用不计入.
+        step_costs: {step: cost_usd} 分步成本分布 (P1-Future-01).
+        """
+        return {
+            "call_count": self._call_count,
+            "input_tokens": self._total_input_tokens,
+            "output_tokens": self._total_output_tokens,
+            "cost_usd": round(self._total_cost_usd, 6),
+            "step_costs": dict(self._step_costs),
+        }
+
+    async def _achat_with_tier(
         self,
         messages: list[dict[str, str]],
+        tier: LLMTier,
         *,
-        tier: LLMTier = LLMTier.SMART,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        stop: list[str] | None = None,
-        user_id: str | None = None,
-        session_id: str | None = None,
-        span_name: str = "llm-chat",
+        temperature: float | None,
+        max_tokens: int | None,
+        stop: list[str] | None,
     ) -> LLMResponse:
-        """异步 LLM 调用 (非流式).
+        """按指定 tier 执行单次非流式 LLM 调用 (不含 trace span, 由 achat 包裹).
 
-        AGENTS.md 第 10 章: 必须包裹在 trace_generation span 内.
+        P1-Future-05: 抽取为独立方法, 供 achat 降级链逐 tier 调用.
         """
         model = self._get_model(tier)
         token_limit = max_tokens or self._get_token_limit(tier)
         temp = temperature if temperature is not None else self.settings.temperature
         api_key = self._get_api_key(model)
 
-        # 构建调用参数
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -123,55 +264,141 @@ class LLMClient:
         if api_key:
             kwargs["api_key"] = api_key
 
-        model_params = {
-            "temperature": temp,
-            "max_tokens": token_limit,
+        # 延迟导入 litellm, 避免模块加载时强依赖
+        import litellm
+
+        response = await litellm.acompletion(**kwargs)
+
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+        breakdown = self._compute_cost(model, input_tokens, output_tokens)
+        cost_usd = breakdown["total_cost"]
+        content = response.choices[0].message.content or ""
+
+        return LLMResponse(
+            content=content,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            cost_breakdown=breakdown,
+            raw=response,
+        )
+
+    async def achat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tier: LLMTier = LLMTier.SMART,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: list[str] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        span_name: str = "llm-chat",
+        step: str = "unknown",
+    ) -> LLMResponse:
+        """异步 LLM 调用 (非流式), 含降级链 (strategic → smart → fast).
+
+        AGENTS.md 第 10 章: 必须包裹在 trace_generation span 内.
+        P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
+        P1-Future-05: tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
+        外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
+        """
+        # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
+        initial_model = self._get_model(tier)
+        initial_token_limit = max_tokens or self._get_token_limit(tier)
+        initial_temp = temperature if temperature is not None else self.settings.temperature
+        model_params: dict[str, Any] = {
+            "temperature": initial_temp,
+            "max_tokens": initial_token_limit,
             "timeout": self.settings.llm_timeout,
         }
 
+        attempted_tiers: list[str] = []
         async with trace_generation(
             name=span_name,
             input=messages,
-            model=model,
+            model=initial_model,
             model_parameters=model_params,
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            try:
-                # 延迟导入 litellm, 避免模块加载时强依赖
-                import litellm
-
-                response = await litellm.acompletion(**kwargs)
-
-                # 提取 usage 信息
-                usage = getattr(response, "usage", None)
-                input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
-                output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-                cost_usd = self._compute_cost(model, input_tokens, output_tokens)
-
-                content = response.choices[0].message.content or ""
-
-                span.update(
-                    output=content[:2000],  # 截断避免 span 过大
-                    usage_details={
-                        "prompt_tokens": input_tokens,
-                        "completion_tokens": output_tokens,
-                    },
-                    cost_details={"cost_usd": cost_usd},
-                )
-
-                return LLMResponse(
-                    content=content,
-                    model=model,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost_usd=cost_usd,
-                    raw=response,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.error("LLM 调用失败 (model=%s): %s", model, e)
-                span.update(metadata={"error": str(e)})
-                raise
+            current_tier = tier
+            last_exc: Exception | None = None
+            while current_tier is not None:
+                try:
+                    response = await self._achat_with_tier(
+                        messages,
+                        current_tier,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stop=stop,
+                    )
+                    # 成功: 更新 span (含最终 tier 与全部尝试记录)
+                    # cost_breakdown 由 _achat_with_tier 保证非 None, 兜底满足 mypy --strict
+                    breakdown = response.cost_breakdown or {
+                        "input_cost": 0.0,
+                        "output_cost": 0.0,
+                        "total_cost": response.cost_usd,
+                    }
+                    span.update(
+                        output=response.content[:2000],  # 截断避免 span 过大
+                        usage_details={
+                            "prompt_tokens": response.input_tokens,
+                            "completion_tokens": response.output_tokens,
+                        },
+                        cost_details={
+                            "cost_usd": response.cost_usd,
+                            "input_cost": breakdown["input_cost"],
+                            "output_cost": breakdown["output_cost"],
+                            "model": response.model,
+                        },
+                        metadata={
+                            "step": step,
+                            "final_tier": current_tier.value,
+                            "attempted_tiers": attempted_tiers + [current_tier.value],
+                        },
+                    )
+                    # 累计会话级 + 分步成本 (成功后)
+                    self._accumulate(
+                        step,
+                        response.input_tokens,
+                        response.output_tokens,
+                        response.cost_usd,
+                    )
+                    return response
+                except Exception as e:  # noqa: BLE001
+                    last_exc = e
+                    attempted_tiers.append(current_tier.value)
+                    fallback = self._FALLBACK_TIER.get(current_tier)
+                    if fallback is None:
+                        # 降级链耗尽: 记录错误并抛出
+                        logger.error(
+                            "LLM 调用失败且降级链耗尽 (tier=%s): %s",
+                            current_tier.value,
+                            e,
+                        )
+                        span.update(
+                            metadata={
+                                "step": step,
+                                "error": str(e),
+                                "attempted_tiers": attempted_tiers,
+                            }
+                        )
+                        raise
+                    logger.warning(
+                        "LLM 调用 tier=%s 失败, 降级到 %s: %s",
+                        current_tier.value,
+                        fallback.value,
+                        e,
+                    )
+                    current_tier = fallback
+            # 理论上不会到达 (降级链耗尽会在循环内 raise)
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("LLM 降级链耗尽但无异常")
 
     async def achat_stream(
         self,
@@ -184,89 +411,159 @@ class LLMClient:
         user_id: str | None = None,
         session_id: str | None = None,
         span_name: str = "llm-chat-stream",
+        step: str = "unknown",
     ) -> AsyncIterator[str]:
-        """异步流式 LLM 调用 (SSE 流式统一入口).
+        """异步流式 LLM 调用 (SSE 流式统一入口), 含降级链.
 
         AGENTS.md 第 9 章: 流式统一 achat_stream.
         yield 逐块文本 (delta content).
+        P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
+        P1-Future-05: 流式连接建立失败时按 _FALLBACK_TIER 逐级降级;
+        一旦开始 yield 内容后不降级 (已输出内容无法回滚).
         """
-        model = self._get_model(tier)
-        token_limit = max_tokens or self._get_token_limit(tier)
-        temp = temperature if temperature is not None else self.settings.temperature
-        api_key = self._get_api_key(model)
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temp,
-            "max_tokens": token_limit,
-            "timeout": self.settings.llm_timeout,
-            "num_retries": self.settings.llm_max_retries,
-            "stream": True,
-        }
-        if stop:
-            kwargs["stop"] = stop
-        if api_key:
-            kwargs["api_key"] = api_key
-
-        model_params = {
-            "temperature": temp,
-            "max_tokens": token_limit,
+        # span 用初始 tier 的 model/params
+        initial_model = self._get_model(tier)
+        initial_token_limit = max_tokens or self._get_token_limit(tier)
+        initial_temp = temperature if temperature is not None else self.settings.temperature
+        model_params: dict[str, Any] = {
+            "temperature": initial_temp,
+            "max_tokens": initial_token_limit,
             "stream": True,
         }
 
-        total_input = 0
-        total_output = 0
+        # 流式 usage: litellm ≥1.6 在末块聚合时返回, 优先用真实 prompt_tokens/completion_tokens.
+        # 退化路径: 字符数粗估 (//4 ≈ token 估算), 仅在 usage 缺失时使用.
+        total_input_chars = sum(len(m.get("content", "")) for m in messages)
+        total_output_chars = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        stream_usage: Any = None
+        attempted_tiers: list[str] = []
+        used_model = initial_model
+        used_tier = tier
 
         async with trace_generation(
             name=span_name,
             input=messages,
-            model=model,
+            model=initial_model,
             model_parameters=model_params,
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            try:
-                import litellm
+            # Phase 1: 建立流式连接 (含降级链)
+            stream: Any = None
+            current_tier = tier
+            last_exc: Exception | None = None
+            while current_tier is not None:
+                used_model = self._get_model(current_tier)
+                used_tier = current_tier
+                token_limit = max_tokens or self._get_token_limit(current_tier)
+                temp = temperature if temperature is not None else self.settings.temperature
+                api_key = self._get_api_key(used_model)
+                kwargs: dict[str, Any] = {
+                    "model": used_model,
+                    "messages": messages,
+                    "temperature": temp,
+                    "max_tokens": token_limit,
+                    "timeout": self.settings.llm_timeout,
+                    "num_retries": self.settings.llm_max_retries,
+                    "stream": True,
+                }
+                if stop:
+                    kwargs["stop"] = stop
+                if api_key:
+                    kwargs["api_key"] = api_key
+                try:
+                    import litellm
 
-                stream = await litellm.acompletion(**kwargs)
+                    stream = await litellm.acompletion(**kwargs)
+                    break  # 流式连接建立成功
+                except Exception as e:  # noqa: BLE001
+                    last_exc = e
+                    attempted_tiers.append(current_tier.value)
+                    fallback = self._FALLBACK_TIER.get(current_tier)
+                    if fallback is None:
+                        logger.error(
+                            "LLM 流式连接失败且降级链耗尽 (tier=%s): %s",
+                            current_tier.value,
+                            e,
+                        )
+                        span.update(
+                            metadata={
+                                "step": step,
+                                "error": str(e),
+                                "attempted_tiers": attempted_tiers,
+                            }
+                        )
+                        raise
+                    logger.warning(
+                        "LLM 流式 tier=%s 失败, 降级到 %s: %s",
+                        current_tier.value,
+                        fallback.value,
+                        e,
+                    )
+                    current_tier = fallback
+
+            if stream is None:
+                # 理论上不会到达 (降级链耗尽会在循环内 raise)
+                if last_exc is not None:
+                    raise last_exc
+                raise RuntimeError("LLM 流式降级链耗尽但无异常")
+
+            # Phase 2: 消费流 (mid-stream 失败不降级, 已 yield 部分内容无法回滚)
+            try:
                 async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
                         delta = chunk.choices[0].delta.content
-                        total_output += len(delta)
+                        total_output_chars += len(delta)
                         yield delta
+                    # 部分模型在末块返回 usage (litellm 已聚合)
+                    chunk_usage = getattr(chunk, "usage", None)
+                    if chunk_usage is not None:
+                        stream_usage = chunk_usage
 
-                # 流式调用 usage 可能不完整, 用字符数粗估
-                total_input = sum(len(m.get("content", "")) for m in messages) // 4
-                cost_usd = self._compute_cost(model, total_input, total_output)
+                # 真实 usage 优先 (litellm 流式末块聚合), 否则字符数粗估 (//4)
+                if stream_usage is not None:
+                    total_input_tokens = int(getattr(stream_usage, "prompt_tokens", 0) or 0)
+                    total_output_tokens = int(getattr(stream_usage, "completion_tokens", 0) or 0)
+                else:
+                    total_input_tokens = total_input_chars // 4
+                    total_output_tokens = total_output_chars // 4
+
+                breakdown = self._compute_cost(used_model, total_input_tokens, total_output_tokens)
+                cost_usd = breakdown["total_cost"]
 
                 span.update(
-                    output=f"[streamed {total_output} chars]",
+                    output=f"[streamed {total_output_chars} chars]",
                     usage_details={
-                        "prompt_tokens": total_input,
-                        "completion_tokens": total_output,
+                        "prompt_tokens": total_input_tokens,
+                        "completion_tokens": total_output_tokens,
                     },
-                    cost_details={"cost_usd": cost_usd},
+                    cost_details={
+                        "cost_usd": cost_usd,
+                        "input_cost": breakdown["input_cost"],
+                        "output_cost": breakdown["output_cost"],
+                        "model": used_model,
+                    },
+                    metadata={
+                        "step": step,
+                        "final_tier": used_tier.value,
+                        "attempted_tiers": attempted_tiers + [used_tier.value],
+                    },
                 )
+
+                # 累计会话级 + 分步成本 (成功后)
+                self._accumulate(step, total_input_tokens, total_output_tokens, cost_usd)
             except Exception as e:  # noqa: BLE001
-                logger.error("LLM 流式调用失败 (model=%s): %s", model, e)
-                span.update(metadata={"error": str(e)})
+                logger.error("LLM 流式调用失败 (model=%s): %s", used_model, e)
+                span.update(
+                    metadata={
+                        "step": step,
+                        "error": str(e),
+                        "attempted_tiers": attempted_tiers + [used_tier.value],
+                    }
+                )
                 raise
-
-    def _compute_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
-        """粗略计算 LLM 调用成本 (USD).
-
-        简化模型, 精确成本由 LiteLLM 内置 cost_calculator 处理.
-        """
-        # 简化定价表 (每 1K token, USD), 实际由 litellm.completion_cost 精确计算
-        pricing = {
-            "deepseek/deepseek-chat": {"input": 0.0014, "output": 0.0028},
-            "deepseek/deepseek-reasoner": {"input": 0.0055, "output": 0.022},
-            "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-            "openai/gpt-4.1": {"input": 0.002, "output": 0.008},
-        }
-        rate = pricing.get(model, {"input": 0.001, "output": 0.002})
-        return (input_tokens / 1000) * rate["input"] + (output_tokens / 1000) * rate["output"]
 
 
 # ========== 全局单例 ==========

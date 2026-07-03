@@ -37,6 +37,7 @@ class TavilySearcher(BaseSearcher):
         query: str,
         *,
         max_results: int = 5,
+        query_domains: list[str] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Tavily 搜索."""
@@ -58,6 +59,8 @@ class TavilySearcher(BaseSearcher):
                     "include_answer": False,
                     "include_raw_content": False,
                 }
+                if query_domains:
+                    payload["include_domains"] = query_domains
                 response = await self._client.post(self._api_url, json=payload)
                 response.raise_for_status()
                 data = response.json()

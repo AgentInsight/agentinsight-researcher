@@ -31,8 +31,8 @@ echo "========== 2. 构建并启动容器 (生产/联网模式) =========="
 docker compose -p agentinsight -f docker-compose.yml up --build -d
 
 echo "========== 3. 清理悬空镜像 =========="
-# 清理 <none> 标签的悬空镜像 (构建过程产生的中间层)
-DANGLING_IMAGES=$(docker image ls | grep "^<none>" | awk '{print $3}')
+# 用 docker image ls -f dangling=true 直接获取悬空镜像 ID, 避免列解析错位
+DANGLING_IMAGES=$(docker image ls -f "dangling=true" -q)
 if [ -n "$DANGLING_IMAGES" ]; then
     echo "$DANGLING_IMAGES" | xargs -r docker rmi -f 2>/dev/null || true
 fi

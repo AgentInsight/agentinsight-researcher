@@ -66,6 +66,7 @@ PyMuPDF>=1.24  # PDF 抓取与解析
 python-docx>=1.1  # DOCX 文件解析
 openpyxl>=3.1  # XLSX 文件解析
 python-pptx>=0.6  # PPTX 文件解析
+markitdown>=0.0.1a2  # Office 文档转 Markdown (P2-03)
 
 # === 报告输出 (用户需求 6, MD/HTML/PDF) ===
 jinja2>=3.1  # HTML 模板

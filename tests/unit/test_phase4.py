@@ -1,10 +1,17 @@
-"""单元测试: Phase 4 扩展功能 (文件上传 + 行业提示词 + 静态页面).
+"""单元测试: Phase 4 扩展功能 (文件上传 + 动态角色 + 静态页面).
 
 AGENTS.md 第 13/14 章硬约束:
 - 单元测试在构建期执行, 不得依赖外部服务 (Postgres/Qdrant/Redis/LLM)
 - 文件上传按 agent_id + user_id 隔离 (AGENTS.md 第 7 章)
-- 行业提示词加载 (用户需求 4: GICS 68 行业)
+- 动态角色生成 (对标 GPTR choose_agent, AgentCreator LLM 动态生成行业 persona)
 - 前端测试页面单文件托管 (AGENTS.md 第 14 章)
+
+行业适配采用 GPTR 风格 4 层机制 (对标 GPT Researcher):
+- Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
+- Config 层: settings.agent_role 静态注入角色 persona (优先级高于 LLM)
+- Retriever 层: searchers/ 含 arxiv/pubmed/semantic_scholar 等专业数据源
+- MCP 层: MCP_SERVERS 注册行业专用工具服务器
+不再使用 IndustryClassifier / industry_prompts/*.yaml / knowledge_bootstrap.py.
 """
 
 from __future__ import annotations
@@ -17,7 +24,6 @@ from fastapi.testclient import TestClient
 
 from server import app
 from src.config.settings import Settings
-from src.skills.researcher.industry_classifier import IndustryClassifier
 
 # ========== 文件上传 (用户需求 8) ==========
 
@@ -84,115 +90,46 @@ class TestFileUpload:
         assert response.json()["extension"] == "md"
 
 
-# ========== 行业提示词加载 (用户需求 4) ==========
+# ========== 动态角色配置 (对标 GPTR AGENT_ROLE, AGENTS.md 第 5/7 章) ==========
 
 
-class TestIndustryPrompts:
-    """GICS 行业专家提示词 YAML 加载测试."""
+class TestAgentRoleConfig:
+    """AgentCreator 动态角色配置测试 (对标 GPTR AGENT_ROLE).
 
-    def test_load_software_services_prompt(self) -> None:
-        """测试加载软件与服务行业提示词 (industry_code=451020)."""
+    行业适配采用 GPTR 4 层机制, 不再使用 IndustryClassifier.
+    仅测试配置项与默认值, 不测试 LLM 调用 (依赖外部服务).
+    """
+
+    def test_agent_role_default_is_none(self) -> None:
+        """测试 settings.agent_role 默认为 None (对标 GPTR 默认无 AGENT_ROLE)."""
         settings = Settings(_env_file=None)
-        classifier = IndustryClassifier(settings)
-        prompt_family = classifier._load_prompt_family("451020")
-        assert prompt_family["industry_code"] == "451020"
-        assert (
-            "软件" in prompt_family["industry_name"]
-            or "software" in prompt_family["industry_name"].lower()
+        assert settings.agent_role is None
+
+    def test_agent_role_can_be_injected(self) -> None:
+        """测试 settings.agent_role 可注入行业 persona 字符串 (对标 GPTR AGENT_ROLE)."""
+        settings = Settings(
+            _env_file=None, agent_role="你是一位资深金融分析师, 擅长财务建模与投资研究."
         )
-        assert "planner_prompt" in prompt_family
-        assert "writer_prompt" in prompt_family
-        assert len(prompt_family["key_dimensions"]) >= 4
-        # 提示词必须中文
-        assert len(prompt_family["planner_prompt"]) > 50
+        assert settings.agent_role is not None
+        assert "金融分析师" in settings.agent_role
 
-    def test_load_banks_prompt(self) -> None:
-        """测试加载银行业提示词."""
-        settings = Settings(_env_file=None)
-        classifier = IndustryClassifier(settings)
-        # 银行 industry_code 在 401010 附近, 找到 banks.yaml 对应的 code
-        prompts_dir = (
-            Path(__file__).parent.parent.parent / "config" / "researcher" / "industry_prompts"
+    def test_chat_request_supports_agent_role_field(self) -> None:
+        """测试 ChatCompletionRequest 支持 agent_role 字段 (Config 层注入点)."""
+        from src.api.routes import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            messages=[{"role": "user", "content": "AI 对医药供应链的影响"}],
+            agent_role="你是一位资深医药行业研究专家.",
         )
-        banks_yaml = prompts_dir / "banks.yaml"
-        if banks_yaml.exists():
-            import yaml
+        assert req.agent_role is not None
+        assert "医药" in req.agent_role
 
-            with open(banks_yaml, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            code = data["industry_code"]
-            prompt_family = classifier._load_prompt_family(code)
-            assert prompt_family["industry_code"] == code
-            assert "银行" in prompt_family["industry_name"]
+    def test_chat_request_agent_role_optional(self) -> None:
+        """测试 ChatCompletionRequest agent_role 字段可选 (默认 None, 走 LLM 动态生成)."""
+        from src.api.routes import ChatCompletionRequest
 
-    def test_unknown_industry_returns_default(self) -> None:
-        """测试未知行业代码返回默认通用研究提示词."""
-        settings = Settings(_env_file=None)
-        classifier = IndustryClassifier(settings)
-        prompt_family = classifier._load_prompt_family("999999")
-        assert prompt_family["industry_code"] == "UNKNOWN"
-        assert prompt_family["industry_name"] == "通用研究"
-        assert len(prompt_family["key_dimensions"]) >= 4
-
-    def test_prompt_family_caching(self) -> None:
-        """测试提示词族缓存机制 (同一 code 二次加载命中缓存)."""
-        settings = Settings(_env_file=None)
-        classifier = IndustryClassifier(settings)
-        first = classifier._load_prompt_family("451020")
-        second = classifier._load_prompt_family("451020")
-        # 缓存返回同一对象引用
-        assert first is second
-
-    def test_all_yaml_files_valid_schema(self) -> None:
-        """测试所有 YAML 文件 schema 完整性 (用户需求 4: 68 行业)."""
-        prompts_dir = (
-            Path(__file__).parent.parent.parent / "config" / "researcher" / "industry_prompts"
-        )
-        if not prompts_dir.exists():
-            pytest.skip("行业提示词目录不存在")
-
-        yaml_files = list(prompts_dir.glob("*.yaml"))
-        # 至少 60 个 (用户需求 68, 实际生成 74)
-        assert len(yaml_files) >= 60, f"行业提示词数量不足: {len(yaml_files)}"
-
-        import yaml
-
-        required_keys = {
-            "industry_code",
-            "industry_name",
-            "industry_sector",
-            "industry_group",
-            "industry_sub",
-            "planner_prompt",
-            "researcher_prompt",
-            "reviewer_prompt",
-            "writer_prompt",
-            "key_dimensions",
-            "data_sources_preference",
-        }
-
-        codes_seen: set[str] = set()
-        for yaml_file in yaml_files:
-            with open(yaml_file, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            assert isinstance(data, dict), f"{yaml_file.name} 不是 dict"
-            missing = required_keys - set(data.keys())
-            assert not missing, f"{yaml_file.name} 缺字段: {missing}"
-            assert isinstance(data["key_dimensions"], list), (
-                f"{yaml_file.name} key_dimensions 不是 list"
-            )
-            assert len(data["key_dimensions"]) >= 4, f"{yaml_file.name} 维度不足 4 个"
-            # industry_code 唯一
-            code = data["industry_code"]
-            assert code not in codes_seen, f"{yaml_file.name} industry_code 重复: {code}"
-            codes_seen.add(code)
-            # 提示词必须非空 + 中文
-            for prompt_key in ("planner_prompt", "writer_prompt"):
-                assert len(data[prompt_key]) > 50, f"{yaml_file.name} {prompt_key} 过短"
-                # 含中文字符 (简单判断)
-                assert any("\u4e00" <= ch <= "\u9fff" for ch in data[prompt_key]), (
-                    f"{yaml_file.name} {prompt_key} 缺中文"
-                )
+        req = ChatCompletionRequest(messages=[{"role": "user", "content": "查询"}])
+        assert req.agent_role is None
 
 
 # ========== 静态页面 (AGENTS.md 第 14 章) ==========

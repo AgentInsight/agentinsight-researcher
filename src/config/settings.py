@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     zhipu_api_key: str | None = None
 
+    # ========== 图像生成 (P2-06 报告配图, deepseek-v4-flash) ==========
+    # 用户明确要求: 用 deepseek-v4-flash (非 gemini). 通过 LiteLLM aimage_generation 调用.
+    # 注意: deepseek-v4-flash 图像生成能力假设支持, 实际以官方文档为准.
+    image_generation_enabled: bool = False  # 默认关闭, 启用后报告生成配图
+    image_model: str = "deepseek/deepseek-v4-flash"  # LiteLLM 路由前缀 (复用 deepseek_api_key)
+    image_size: str = "1024x1024"
+    image_quality: str = "standard"
+    image_api_key: str | None = None  # 单独 Key (可选, 留空则复用 deepseek_api_key)
+
     # ========== Qdrant (AGENTS.md 第 7/12 章) ==========
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str | None = None
@@ -132,6 +141,13 @@ class Settings(BaseSettings):
     # ========== 搜索引擎 (用户需求 5, 中文优先) ==========
     bocha_api_key: str | None = None
     tavily_api_key: str | None = None
+    # 新增 6 个搜索引擎 (P0-03 + P2-02)
+    brave_api_key: str | None = None  # Brave Search (全球)
+    bing_api_key: str | None = None  # Bing Web Search API (全球)
+    serpapi_key: str | None = None  # SerpApi Google 代理 (全球)
+    serper_api_key: str | None = None  # Serper.dev Google Search (全球)
+    pubmed_email: str = ""  # PubMed NCBI 建议邮箱 (无需 Key)
+    semantic_scholar_api_key: str | None = None  # Semantic Scholar Graph API (可选 Key)
     max_search_results_per_query: int = 5
 
     # ========== 抓取 (GPT Researcher 模式) ==========
@@ -144,12 +160,32 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.35
     compression_threshold: int = 8000
     max_context_words: int = 25_000
-    max_iterations: int = 3
+    max_iterations: int = 3  # Planner 拆解子查询数量 (非图迭代上限)
+    graph_max_iterations: int = 10  # 图迭代硬上限 (AGENTS.md 第 5 章, P0-05 守卫用)
     max_subtopics: int = 3
     deep_research_breadth: int = 3
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
     curate_sources: bool = False
+
+    # ========== 评审与事实核查 (P0-Future-01/02) ==========
+    max_revisions: int = 3  # Reviewer→Reviser 修订循环上限 (P0-Future-01 守卫)
+    fact_check_enabled: bool = True  # FactChecker 事实核查开关 (P0-Future-02)
+
+    # ========== 人在回路 (P0-Future-03 Human-in-the-loop) ==========
+    # human_review_enabled=True 时, 多 Agent 图在 agent_creator 之后、supervisor 之前
+    # 插入 human 节点: agent_creator → human → (accept → supervisor | revise → agent_creator)
+    # HumanAgent 通过 WebSocket 推送计划给前端, 阻塞等待用户反馈 (asyncio.Future, 带超时).
+    human_review_enabled: bool = False  # 默认关闭, 启用后需前端 WebSocket 配合
+    human_review_timeout: int = 300  # 等待用户反馈超时 (秒), 超时自动通过
+    max_plan_revisions: int = 3  # 研究计划修订上限, 达上限强制通过 (守卫防死循环)
+
+    # ========== WebSocket 双向实时通信 (P2-Future-02) ==========
+    # SSE (/v1/chat/completions stream=true) 仍是主通道, WebSocket 是增强通道:
+    #   1. 推送人在回路审核请求 (human_feedback_request) 给前端
+    #   2. 接收用户反馈 (human_feedback) 提交到 feedback_queue
+    #   3. 可选: 节点进度结构化推送 (node_progress)
+    websocket_enabled: bool = True
 
     # ========== MCP (用户需求 9) ==========
     mcp_strategy: Literal["fast", "deep", "disabled"] = "fast"
@@ -157,12 +193,27 @@ class Settings(BaseSettings):
     mcp_max_tools: int = 3
 
     # ========== 报告输出 (用户需求 6) ==========
-    default_report_format: Literal["markdown", "html", "pdf"] = "markdown"
-    default_report_type: Literal["basic_report", "detailed_report", "deep_research"] = (
-        "basic_report"
-    )
+    default_report_format: Literal["markdown", "html", "pdf", "docx", "json"] = "markdown"
+    default_report_type: Literal[
+        "basic_report", "detailed_report", "deep_research", "summary", "subtopics"
+    ] = "basic_report"
     total_words: int = 1200
     report_format_style: str = "APA"
+
+    # ========== PromptFamily 策略模式 (P1-Future-04) ==========
+    # 选择 prompt 策略: "default" 中文优先 | "english" 英文
+    # 由 src/skills/researcher/prompts.py 的 get_prompt_family() 路由.
+    prompt_family: Literal["default", "english"] = "default"
+
+    # ========== 行业适配 GPTR 4 层机制 (对标 GPT Researcher) ==========
+    # 对标 GPTR AGENT_ROLE 配置 (config/variables/default.py:23):
+    # 用户可注入行业 persona 字符串, 优先级高于 LLM 动态生成 (agent_creator.py).
+    # 行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
+    #   1. Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
+    #   2. Config 层: 本字段 (agent_role) 静态注入角色 persona
+    #   3. Retriever 层: searchers/ 含 arxiv/pubmed/semantic_scholar 等专业数据源
+    #   4. MCP 层: MCP_SERVERS 注册行业专用工具服务器 (mcp_coordinator.py)
+    agent_role: str | None = None
 
     # ========== 文件上传 (用户需求 8) ==========
     upload_dir: str = "/tmp/uploads"

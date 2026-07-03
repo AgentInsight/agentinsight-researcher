@@ -4,13 +4,18 @@
 AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬取).
 
 核心流程:
-1. plan_research: 按行业提示词拆解子查询 (Planner)
+1. plan_research: 按动态角色 persona 拆解子查询 (Planner, 对标 GPTR AGENT_ROLE)
 2. asyncio.gather 并行 _process_sub_query (Researcher):
    - 搜索 (中文优先路由)
    - 抓取 (BrowserManager)
    - 压缩去重 (ContextManager)
    - MCP (可选, fast/deep/disabled)
 3. 聚合上下文
+
+行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
+- agent_role 参数 (对标 GPTR AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+
+P1-Future-04: planner prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
 
 from __future__ import annotations
@@ -19,17 +24,25 @@ import asyncio
 import logging
 from typing import Any, cast
 
+from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_chain
 from src.skills.researcher.context_manager import ContextManager
+from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
+    BaseSearcher,
     detect_region,
     get_searchers,
 )
 
 logger = logging.getLogger(__name__)
+
+# 兜底角色 persona (对标 GPTR 默认 researcher role)
+_DEFAULT_AGENT_ROLE = (
+    "你是一位资深研究分析专家, 擅长多领域综合研究, 研究重点是全面、客观地分析问题."
+)
 
 
 class ResearchConductor:
@@ -41,6 +54,7 @@ class ResearchConductor:
     settings: Settings
     _llm: LLMClient
     _context_manager: ContextManager
+    _prompt_family: PromptFamily
     _mcp_cache: list[str] | None
     _mcp_query_count: int
 
@@ -49,10 +63,12 @@ class ResearchConductor:
         settings: Settings | None = None,
         llm: LLMClient | None = None,
         context_manager: ContextManager | None = None,
+        prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._llm = llm or LLMClient(self.settings)
         self._context_manager = context_manager or ContextManager(self.settings)
+        self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
         self._mcp_cache = None
         self._mcp_query_count = 0
 
@@ -60,51 +76,36 @@ class ResearchConductor:
         self,
         query: str,
         *,
-        industry_prompt_family: dict[str, Any] | None = None,
+        agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """Planner: 按行业提示词拆解子查询.
+        """Planner: 按动态角色 persona 拆解子查询.
 
         对标 GPT Researcher generate_sub_queries.
         用 strategic_llm (规划专用, 慢但精).
+        agent_role (对标 GPTR AGENT_ROLE) 注入角色 persona.
         """
         async with trace_chain(
             name="planner",
             input={
                 "query": query[:100],
-                "industry": industry_prompt_family.get("industry_name", "")
-                if industry_prompt_family
-                else "",
+                "has_agent_role": bool(agent_role),
             },
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 构建拆解提示词 (按行业专家角色)
-            industry_name = (
-                industry_prompt_family.get("industry_name", "通用研究")
-                if industry_prompt_family
-                else "通用研究"
-            )
-            industry_role = (
-                industry_prompt_family.get("planner_prompt", "") if industry_prompt_family else ""
-            )
-
             max_iterations = self.settings.max_iterations
 
-            prompt = f"""你是一位{industry_name}行业的研究分析专家. {industry_role}
+            # 对标 GPTR: agent_role (来自 LLM 动态生成或调用方注入) 作为角色 persona
+            role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
-你的任务是: 将用户的研究问题拆解为 {max_iterations} 个具体的子查询, 用于搜索引擎检索.
-
-要求:
-1. 子查询应覆盖问题的不同维度 (市场/技术/竞争/政策/趋势等)
-2. 子查询应为搜索引擎友好的关键词组合
-3. 子查询应中文优先 (中文问题用中文子查询, 英文问题用英文子查询)
-4. 返回 JSON 数组格式: ["子查询1", "子查询2", ...]
-
-用户问题: {query}
-
-请返回 {max_iterations} 个子查询的 JSON 数组:"""
+            # P1-Future-04: prompt 经 PromptFamily 策略注入
+            prompt = self._prompt_family.planner_prompt(
+                query=query,
+                agent_role=role_persona,
+                max_iterations=max_iterations,
+            )
 
             messages = [{"role": "user", "content": prompt}]
             response = await self._llm.achat(
@@ -114,13 +115,12 @@ class ResearchConductor:
                 user_id=user_id,
                 session_id=session_id,
                 span_name="planner-llm",
+                step="planner",
             )
 
-            # 解析 JSON (用 json_repair 容错)
+            # 解析 JSON (三级容错)
             try:
-                import json_repair
-
-                sub_queries = json_repair.loads(response.content)
+                sub_queries = safe_json_parse(response.content, fallback=[])
                 if isinstance(sub_queries, list) and sub_queries:
                     # 确保是字符串列表
                     sub_queries = [str(q) for q in sub_queries if q][:max_iterations]
@@ -138,26 +138,73 @@ class ResearchConductor:
         self,
         query: str,
         *,
-        industry_prompt_family: dict[str, Any] | None = None,
+        mode: str = "",
+        agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
         uploaded_files_context: list[str] | None = None,
+        query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
         """完整研究流程: 规划 + 并行检索 + 抓取 + 压缩.
 
         对标 GPT Researcher conduct_research + _get_context_by_web_search.
-        返回 {"contexts","sources","sub_queries"}.
+        返回 {"contexts","sources","sub_queries","visited_urls"}.
+
+        mode 路由 (P2-01):
+        - "summary": 摘要模式 (快速检索 + 简要摘要)
+        - "subtopics": 子主题模式 (按子主题分章节)
+        - 其他/默认: 现有 basic/detailed 逻辑
         """
         async with trace_chain(
             name="research-conductor",
-            input={"query": query[:100]},
+            input={"query": query[:100], "mode": mode},
             user_id=user_id,
             session_id=session_id,
         ) as span:
+            # P2-01: 摘要模式路由
+            if mode == "summary":
+                result = await self._conduct_summary(
+                    query,
+                    agent_role=agent_role,
+                    user_id=user_id,
+                    session_id=session_id,
+                    uploaded_files_context=uploaded_files_context,
+                    query_domains=query_domains,
+                )
+                span.update(
+                    output={
+                        "mode": "summary",
+                        "sub_queries_count": len(result.get("sub_queries", [])),
+                        "contexts_count": len(result.get("contexts", [])),
+                        "sources_count": len(result.get("sources", [])),
+                    },
+                )
+                return result
+
+            # P2-01: 子主题模式路由
+            if mode == "subtopics":
+                result = await self._conduct_subtopics(
+                    query,
+                    agent_role=agent_role,
+                    user_id=user_id,
+                    session_id=session_id,
+                    uploaded_files_context=uploaded_files_context,
+                    query_domains=query_domains,
+                )
+                span.update(
+                    output={
+                        "mode": "subtopics",
+                        "sub_queries_count": len(result.get("sub_queries", [])),
+                        "contexts_count": len(result.get("contexts", [])),
+                        "sources_count": len(result.get("sources", [])),
+                    },
+                )
+                return result
+
             # 1. Planner: 拆解子查询
             sub_queries = await self.plan_research(
                 query,
-                industry_prompt_family=industry_prompt_family,
+                agent_role=agent_role,
                 user_id=user_id,
                 session_id=session_id,
             )
@@ -170,9 +217,9 @@ class ResearchConductor:
             tasks = [
                 self._process_sub_query(
                     sq,
-                    industry_prompt_family=industry_prompt_family,
                     user_id=user_id,
                     session_id=session_id,
+                    query_domains=query_domains,
                 )
                 for sq in sub_queries
             ]
@@ -213,13 +260,206 @@ class ResearchConductor:
                 "visited_urls": visited_urls,
             }
 
+    async def _conduct_summary(
+        self,
+        query: str,
+        *,
+        agent_role: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        uploaded_files_context: list[str] | None = None,
+        query_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """摘要模式: 快速检索 + 简要摘要 (P2-01).
+
+        - 少量子查询 (2-3 个)
+        - max_results=5
+        - LLM 摘要 max_tokens=1000
+        """
+        # 1. 生成 2 个子查询
+        planned = await self.plan_research(
+            query,
+            agent_role=agent_role,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        sub_queries = planned[:2] or [query]
+
+        # 2. 检索
+        results = await asyncio.gather(
+            *[
+                self._process_sub_query(
+                    sq,
+                    user_id=user_id,
+                    session_id=session_id,
+                    query_domains=query_domains,
+                )
+                for sq in sub_queries
+            ],
+            return_exceptions=True,
+        )
+
+        contexts: list[str] = []
+        sources: list[dict[str, Any]] = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("摘要模式子查询处理失败: %s", r)
+                continue
+            r = cast(dict[str, Any], r)
+            if r.get("context"):
+                contexts.append(r["context"])
+            if r.get("sources"):
+                sources.extend(r["sources"])
+
+        # 3. 简要摘要
+        combined = "\n\n".join(contexts)[:4000]
+        prompt = f"""请用 500 字以内总结以下内容:
+
+{combined}
+
+摘要:"""
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        response = await self._llm.achat(
+            messages,
+            tier=LLMTier.FAST,
+            max_tokens=1000,
+            temperature=0.3,
+            user_id=user_id,
+            session_id=session_id,
+            span_name="summary-mode",
+            step="researcher",
+        )
+        summary_contexts: list[str] = [response.content]
+        # 合并上传文件上下文 (用户需求 8)
+        if uploaded_files_context:
+            summary_contexts.extend(uploaded_files_context)
+        return {
+            "sub_queries": sub_queries,
+            "contexts": summary_contexts,
+            "sources": sources,
+            "visited_urls": {s["url"] for s in sources if s.get("url")},
+        }
+
+    async def _conduct_subtopics(
+        self,
+        query: str,
+        *,
+        agent_role: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        uploaded_files_context: list[str] | None = None,
+        query_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """子主题模式: 按子主题分章节 (P2-01).
+
+        - LLM 生成 3-5 个子主题
+        - 每个子主题独立研究
+        - 拼接为分章节报告
+        """
+        # 1. LLM 生成 3-5 个子主题
+        subtopics = await self._generate_subtopics(
+            query,
+            agent_role=agent_role,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        # 2. 每个子主题独立研究
+        sections = await asyncio.gather(
+            *[
+                self._research_subtopic(
+                    query,
+                    topic,
+                    user_id=user_id,
+                    session_id=session_id,
+                    query_domains=query_domains,
+                )
+                for topic in subtopics
+            ],
+            return_exceptions=True,
+        )
+
+        # 3. 拼接为分章节报告
+        all_contexts: list[str] = []
+        all_sources: list[dict[str, Any]] = []
+        for topic, section in zip(subtopics, sections, strict=False):
+            if isinstance(section, Exception):
+                logger.warning("子主题 '%s' 研究失败: %s", topic, section)
+                continue
+            section = cast(dict[str, Any], section)
+            ctx = section.get("context", "")
+            all_contexts.append(f"## {topic}\n\n{ctx}")
+            if section.get("sources"):
+                all_sources.extend(section["sources"])
+
+        # 合并上传文件上下文 (用户需求 8)
+        if uploaded_files_context:
+            all_contexts.extend(uploaded_files_context)
+        return {
+            "sub_queries": subtopics,
+            "contexts": all_contexts,
+            "sources": all_sources,
+            "visited_urls": {s["url"] for s in all_sources if s.get("url")},
+        }
+
+    async def _generate_subtopics(
+        self,
+        query: str,
+        *,
+        agent_role: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[str]:
+        """LLM 生成 3-5 个子主题 (P2-01)."""
+        role_persona = agent_role or _DEFAULT_AGENT_ROLE
+        prompt = f"""{role_persona}
+
+请将以下研究问题拆解为 3-5 个子主题, 用于分章节研究.
+
+研究问题: {query}
+
+返回 JSON 数组, 每项为字符串:"""
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        response = await self._llm.achat(
+            messages,
+            tier=LLMTier.STRATEGIC,
+            temperature=0.4,
+            max_tokens=800,
+            user_id=user_id,
+            session_id=session_id,
+            span_name="subtopics-gen",
+            step="planner",
+        )
+        topics = safe_json_parse(response.content, fallback=[query])
+        if isinstance(topics, list) and topics:
+            return [str(t) for t in topics[:5]]
+        return [query]
+
+    async def _research_subtopic(
+        self,
+        parent_query: str,
+        subtopic: str,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        query_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """单个子主题研究 (复用 _process_sub_query, P2-01)."""
+        sq = f"{parent_query} - {subtopic}"
+        return await self._process_sub_query(
+            sq,
+            user_id=user_id,
+            session_id=session_id,
+            query_domains=query_domains,
+        )
+
     async def _process_sub_query(
         self,
         sub_query: str,
         *,
-        industry_prompt_family: dict[str, Any] | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
         """处理单个子查询: 搜索 → 抓取 → 压缩.
 
@@ -234,6 +474,7 @@ class ResearchConductor:
             s.search(
                 sub_query,
                 max_results=self.settings.max_search_results_per_query,
+                query_domains=query_domains,
             )
             for s in searchers
         ]
@@ -251,6 +492,11 @@ class ResearchConductor:
                 if url and url not in urls:
                     urls.add(url)
                     all_results.append(item)
+
+        # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
+        if query_domains:
+            all_results = BaseSearcher._filter_by_domains(all_results, query_domains)
+            urls = {r.get("url", "") for r in all_results if r.get("url")}
 
         if not all_results:
             return {"context": "", "sources": [], "urls": set()}

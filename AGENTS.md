@@ -134,9 +134,9 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 写入防抖 `DEBOUNCE_SECONDS = 1.0`，后台 flush 线程 `FLUSH_INTERVAL_SECONDS = 0.5`。
 
 **启动时数据初始化（硬约束）**：
-- Agent 容器启动时（`server.py` lifespan）必须执行两项初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
-  1. **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。禁止在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
-  2. **GICS 行业知识库 bootstrap**：`src/rag/knowledge_bootstrap.py` 的 `bootstrap_industry_knowledge()` 读取 `config/researcher/industry_prompts/*.yaml`（68 套 GICS 行业），为每个行业构建描述文本，经 `EmbeddingsClient` 嵌入后调用 `QdrantManager.upsert_points` 写入共享知识库（`namespace = agent_id`，不含 `user_id`）；`point_id` 用 `uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")` 幂等生成，相同内容覆盖旧数据（upsert 语义），支持重复启动与数据更新。
+- Agent 容器启动时（`server.py` lifespan）必须执行 PostgreSQL 业务表初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
+  - **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。禁止在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
+- 行业适配采用 GPTR 风格 4 层机制（见第 5 章），不再 bootstrap GICS 行业知识库。
 
 ## 7. 数据隔离与检索核心规则
 
@@ -157,9 +157,14 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 
 **RAG 流水线**：检索必须混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，禁止直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，禁止业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产必须告警并失败转移。Embeddings/Rerank TEI 服务通过环境变量 `API_KEY` 开启鉴权，客户端（`rag/embeddings.py`/`rag/retriever.py`）必须通过 `embeddings_api_key`/`rerank_api_key` 配置传递 `Authorization: Bearer <key>` 请求头；API Key 仅在 `.env`/`.env.qa` 配置，禁止硬编码。
 
-**GICS 行业知识库（硬约束）**：
-- 共享知识库（`namespace = agent_id`）必须包含 68 套 GICS 行业描述，由 Agent 启动时 `src/rag/knowledge_bootstrap.py` 从 `config/researcher/industry_prompts/*.yaml` 自动构建并 upsert 到 Qdrant（见第 6 章启动时数据初始化）。
-- `IndustryClassifier`（`src/skills/researcher/industry_classifier.py`）通过向量检索 GICS 知识库识别行业，命中失败时 LLM 兜底；禁止业务代码绕过 `IndustryClassifier` 直接读取 YAML。
+**行业适配 GPTR 4 层机制（硬约束，对标 GPT Researcher）**：
+行业适配刻意不引入 `IndustrySkill`，用 4 层隐形机制替代，禁止业务代码 if-else 行业分支：
+1. **Prompt 层**：`src/skills/researcher/agent_creator.py` 的 `AgentCreator.AUTO_AGENT_INSTRUCTIONS` 给 LLM few-shot 例子，让 LLM 运行时自主生成行业 persona（对标 GPTR `auto_agent_instructions()` + `choose_agent()`），无 if-else 行业分支。
+2. **Config 层**：`Settings.agent_role` / `ChatRequest.agent_role` 可注入任意行业 persona 字符串（对标 GPTR `AGENT_ROLE` 配置），优先级高于 LLM 自动生成。
+3. **Retriever 层**：`src/skills/researcher/searchers/` 下含 `arxiv`/`pubmed`/`semantic_scholar` 等专业数据源（对标 GPTR 20 个 retriever），可按区域路由组合。
+4. **MCP 层**：`MCP_SERVERS` 注册行业专用工具服务器，`mcp_coordinator.py` 让 LLM 自动选工具（对标 GPTR `MCPToolSelector`）。
+
+禁止：新增 `IndustryClassifier` / `industry_prompts/*.yaml` / `knowledge_bootstrap.py` 等基于行业分类器的实现；节点内 `if industry == "xxx"` 分支；硬编码行业 prompt 字典。
 
 ## 8. 用户身份解析规则
 
@@ -248,7 +253,7 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 所有镜像必须预下载为 tarball（`docker save -o packages/images/<image>.tar`），部署机 `docker load` 导入，禁止部署时 `docker pull`。
 - Python 依赖必须预下载 wheel 到 `packages/`，构建时 `pip install --no-index --find-links=/app/packages -r requirements.txt`，禁止联网安装。
 - 系统依赖（.deb）必须预下载到 `packages/debs/`，构建时 `dpkg -i /tmp/debs/*.deb`，禁止 `apt-get update`。
-- BGE 模型权重必须预下载到 `packages/models/`，构建时 `COPY` 进镜像，禁止运行时从 HuggingFace 下载。
+- BGE 模型权重必须预下载到 `packages/models/`（`bge-large-zh-v1.5`/`bge-reranker-v2-m3`），禁止运行时从 HuggingFace 下载。embeddings/rerank 容器（第三方 TEI 镜像）通过 bind mount 挂载到容器内 `/data/<model_name>:ro`（只读），compose 文件中与命名卷 `embeddings_models`/`rerank_models`（可写 HF cache）并列配置。
 - 环境变量强制 `LANG=C.UTF-8` / `PYTHONIOENCODING=utf-8`。
 
 **容器编排硬约束**：
@@ -346,6 +351,10 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 统一调用 OpenAI 兼容端点 `POST /v1/chat/completions`，请求体带 `stream: true`。
 - 请求头 `Authorization: Bearer <jwt_token>`：若页面 Token 输入框非空则携带该值，为空则不发该头（后端按第 8 章降级 `DEFAULT_USER_ID`）。
 - 禁止调用后端私有端点（如 `/internal/*`）；测试页面只能走对外 OpenAI 兼容接口。
+- 人在回路端点（P0-Future-03，仅 `human_review_enabled=True` 时使用）：
+  - `POST /v1/feedback`：提交研究计划/大纲审核反馈，请求体 `{"session_id": str, "feedback": str}`；`feedback` 为空字符串或 `approve`/`accept`/`通过` 等关键词表示接受，其他内容视为修订意见。
+  - `WS /v1/ws/{session_id}`：WebSocket 双向通道，接收 `{"type":"ping"}`（回 pong）、`{"type":"human_feedback","feedback":"..."}`（提交反馈）；服务端推送 8 类结构化消息（logs/content/node_progress/sources/tool_call/report/human_feedback_request/error）。
+  - SSE（`/v1/chat/completions stream=true`）仍是主通道，WebSocket 是增强通道（仅人在回路审核请求推送与反馈接收）。
 
 **部署约束**：
 - `static/index.html` 由 Agent 容器内 FastAPI 直接托管，不新增独立容器。
@@ -360,4 +369,4 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - 引入前端构建工具链（webpack/vite/rollup）。
 - 引入前端框架（React/Vue/Svelte）。
 - 在测试页面写业务逻辑（路由/鉴权/权限）；页面仅做联调展示。
-- 测试页面调用除 `/v1/chat/completions`、`/health` 外的任何端点。
+- 测试页面调用除 `/v1/chat/completions`、`/health`、`/v1/feedback`、`/v1/ws/{session_id}` 外的任何端点。`/v1/feedback` 与 `/v1/ws/{session_id}` 仅用于人在回路审核反馈（P0-Future-03），未启用 `human_review_enabled` 时前端不应调用。
