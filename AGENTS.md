@@ -150,7 +150,7 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 
 **Redis 约定**：所有键必须加前缀 `{agent_id}:{user_id}:`，完整键格式 `{agent_id}:{user_id}:{module}:{type}:{id}`。禁止使用无 `agent_id` 或 `user_id` 前缀的裸键。会话级数据按 `{agent_id}:{user_id}:{session_id}` 三级分键。TTL 强制，禁用永久键（配置数据除外）。
 
-**RAG 流水线**：检索必须混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序必须经 `bge-reranker-v2-m3`；Top-K 召回后 rerank，禁止直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃。Embedding 调用统一走 `rag/embeddings.py`，禁止业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产必须告警并失败转移。
+**RAG 流水线**：检索必须混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，禁止直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，禁止业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产必须告警并失败转移。
 
 ## 8. 用户身份解析规则
 
@@ -222,7 +222,7 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 |------|----------|------|---------|
 | `agent` | 本仓 `Dockerfile`（Python 3.12-slim） | 8066 | `GET /health` |
 | `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8100 | `GET /health` |
-| `rerank` | BGE 服务镜像（bge-reranker-v2-m3） | 8101 | `GET /health` |
+| `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8101 | `GET /health` |
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
 | `postgres` | `postgres:≥16` | 5432 | `pg_isready -U <user>` |
 | `redis` | `redis:≥7` | 6379 | `redis-cli ping` |
@@ -237,7 +237,7 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 **容器编排硬约束**：
 - `restart: always`（生产）/ `unless-stopped`（开发）。
 - `depends_on` 必须用 `condition: service_healthy`，禁止裸依赖（无健康检查直连）。
-- 依赖顺序：`postgres` → `redis` → `qdrant` → `embeddings` → `rerank` → `agent`。
+- 依赖顺序：`postgres` → `redis` → `qdrant` → `embeddings` → `agent`；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
 - 健康检查 `interval ≤ 30s` / `timeout ≤ 10s` / `retries ≥ 3` / `start_period ≥ 10s`。
 - 数据卷必须用 `driver: local`，命名卷 `postgres_data` / `redis_data` / `qdrant_data` / `session_data`。
 - 端口绑定：生产仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
@@ -248,8 +248,21 @@ LangGraph ≥1.2 状态机为**唯一编排范式**；禁用 AgentExecutor / 手
 - `EXPOSE 8066`，`CMD ["python", "server.py"]`。
 - env_file 分层：`.env`（公共）+ `.env.agent`（Agent 专属）+ `.env.{env}`（环境覆盖）。
 
+**双套构建模式**：
+项目提供两套构建文件，按部署场景选择：
+
+| 模式 | 构建文件 | 编排文件 | 构建脚本 | 适用场景 |
+|------|---------|---------|---------|---------|
+| 离线模式 | `Dockerfile.offline` | `docker-compose.offline.yml` | `scripts/build-offline.ps1` | 本地测试、离线部署、内网环境 |
+| 联网模式 | `Dockerfile` | `docker-compose.yml` | `scripts/build-online.ps1` | 开源社区、CI、外网环境 |
+
+- **离线模式**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。适用于无外网环境或本地测试。
+- **联网模式**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像，无需预下载 `packages/`。适用于开源社区贡献者快速起栈。
+- 离线模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.offline`、`docker-compose.offline.yml`、`scripts/build-offline.ps1`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
+- "禁止部署时联网拉镜像/装依赖/下模型" 约束仅适用于**离线模式**；联网模式允许构建时联网。
+
 **禁止**：
-- 部署时联网拉镜像/装依赖/下模型。
+- 离线模式部署时联网拉镜像/装依赖/下模型。
 - 单容器混装多服务（如 agent + qdrant 同容器）。
 - 绕过 `depends_on: service_healthy` 直接连未就绪服务。
 - 使用 `latest` 标签（必须锁版本）。

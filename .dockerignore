@@ -1,0 +1,36 @@
+# 离线部署包目录说明 (AGENTS.md 第 12 章)
+#   packages/
+#   ├── wheels/          # 预下载 Python wheel 包 (构建时 COPY 进镜像)
+#   ├── debs/            # 预下载系统 .deb 包 (构建时 COPY 进镜像)
+#   ├── models/          # 预下载 BGE 模型权重 (部署时 docker cp 到 volume, 不进镜像)
+#   ├── sql/             # 数据库初始化脚本 (postgres 单独构建)
+#   └── images/          # 预下载 Docker 镜像 tarball (部署时 docker load, 不进镜像)
+
+# 构建上下文排除 (减小镜像构建上下文)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.vscode/
+.idea/
+*.md
+!REQUIREMENTS.md
+!AGENTS.md
+tests/
+evals/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# packages/ 中仅 wheels/ 和 debs/ 需要进 agent 镜像, 其他子目录排除
+packages/images/
+packages/models/
+packages/sql/
+
+# 离线模式构建文件 (联网模式构建时排除, AGENTS.md 第 12 章双套构建模式)
+docker-compose.offline.yml
+Dockerfile.offline
+scripts/build-offline.ps1

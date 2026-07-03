@@ -1,0 +1,41 @@
+# agentinsight-researcher Python 项目配置
+# 严格遵循 AGENTS.md 第 1 章: Python ≥3.11
+
+[project]
+name = "agentinsight-researcher"
+version = "0.1.0"
+description = "中文优先的研究分析智能体, 对标 GPT Researcher, 基于 LangGraph + LiteLLM + Qdrant"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "C4", "UP", "ASYNC"]
+ignore = ["E501"]  # 行长由 formatter 管
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --tb=short"
+markers = [
+    "unit: 单元测试 (构建期, 不依赖外部服务)",
+    "functional: 功能测试 (部署后容器栈)",
+    "regression: 回归测试 (合并 main 前门禁)",
+    "api: API 测试 (OpenAI 兼容端点)",
+    "e2e: 端到端测试 (完整链路)",
+]

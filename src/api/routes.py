@@ -1,0 +1,574 @@
+"""API 路由: OpenAI 兼容端点 + 文件上传.
+
+AGENTS.md 第 13/14 章硬约束:
+- 统一调用 OpenAI 兼容端点 POST /v1/chat/completions, 请求体带 stream: true
+- 测试页面只能走对外 OpenAI 兼容接口, 禁止调用后端私有端点
+- API 测试必须覆盖流式 SSE + 非流式 + 错误码
+- 包含携带 Bearer JWT Token 与不携带两种场景
+
+阶段 3/4 实现: 接入 LangGraph 研究流水线 + 文件上传 (用户需求 8).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+from fastapi import (
+    APIRouter,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+
+from src.api.middleware import (
+    get_request_agent_id,
+    get_request_session_id,
+    get_request_user_id,
+)
+from src.config.settings import get_settings
+from src.observability.tracing import trace_agent
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/v1", tags=["openai-compatible"])
+
+
+# ========== LangGraph 图单例 (延迟构建, 复用) ==========
+_compiled_graph: Any | None = None
+
+
+async def _get_graph() -> Any:
+    """获取/构建已编译的 LangGraph 单例.
+
+    AGENTS.md 第 5 章: 生产 StateGraph 必须挂 PostgresSaver.
+    首次调用时构建, 后续复用 (单例).
+    """
+    global _compiled_graph
+    if _compiled_graph is None:
+        from src.graph.builder import build_researcher_graph
+
+        _compiled_graph = await build_researcher_graph(use_checkpointer=True)
+    return _compiled_graph
+
+
+# ========== 请求/响应模型 (OpenAI 兼容) ==========
+
+
+class ChatMessage(BaseModel):
+    """OpenAI 兼容消息格式."""
+
+    role: str = "user"
+    content: str = ""
+
+
+class ChatCompletionRequest(BaseModel):
+    """OpenAI 兼容 /v1/chat/completions 请求."""
+
+    model: str = "agentinsight-researcher"
+    messages: list[ChatMessage]
+    stream: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
+    # 扩展字段 (非 OpenAI 标准, 用于研究配置)
+    report_type: str | None = Field(
+        None, description="报告类型: basic_report | detailed_report | deep_research"
+    )
+    report_format: str | None = Field(None, description="输出格式: markdown | html | pdf")
+    tone: str | None = Field(
+        None, description="语气: objective | analytical | opinionated | casual"
+    )
+    session_id: str | None = Field(None, description="会话 ID (thread_id), 不传则自动生成")
+    uploaded_files: list[str] | None = Field(
+        None, description="已上传文件 ID 列表 (来自 POST /v1/files), 作为研究数据源"
+    )
+
+
+class ChatCompletionResponse(BaseModel):
+    """OpenAI 兼容非流式响应."""
+
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[dict[str, Any]]
+    usage: dict[str, int]
+
+
+# ========== 端点实现 ==========
+
+
+@router.post("/chat/completions")
+async def chat_completions(
+    request: ChatCompletionRequest,
+    req: Request,
+    authorization: str | None = Header(None),
+) -> Any:
+    """OpenAI 兼容研究端点.
+
+    AGENTS.md 第 14 章: 测试页面统一调用此端点, 请求体带 stream: true.
+    阶段 3: 接入 LangGraph 研究流水线.
+    """
+    settings = get_settings()
+
+    # 提取最后一条 user 消息作为研究查询
+    user_messages = [m for m in request.messages if m.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="messages 必须包含至少一条 user 消息")
+
+    query = user_messages[-1].content
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="查询内容不能为空")
+
+    # 会话 ID (thread_id): 优先请求体, 其次中间件, 最后生成
+    session_id = request.session_id or get_request_session_id() or str(uuid.uuid4())
+
+    # user_id / agent_id 由中间件注入
+    user_id = get_request_user_id()
+    agent_id = get_request_agent_id()
+
+    # 报告配置
+    report_type = request.report_type or settings.default_report_type
+    report_format = request.report_format or settings.default_report_format
+    tone = request.tone or "objective"
+
+    # 加载已上传文件上下文 (用户需求 8)
+    uploaded_files_context: list[str] = []
+    if request.uploaded_files:
+        uploaded_files_context = _load_uploaded_files_context(
+            request.uploaded_files, user_id, agent_id
+        )
+
+    # 初始 State (AGENTS.md 第 5 章: TypedDict, 节点返回 delta)
+    initial_state: dict[str, Any] = {
+        "query": query,
+        "session_id": session_id,
+        "user_id": user_id,
+        "agent_id": agent_id,
+        "report_type": report_type,
+        "report_format": report_format,
+        "tone": tone,
+        "uploaded_files_context": uploaded_files_context,
+        "messages": [],
+        "industry_code": "",
+        "industry_name": "",
+        "industry_prompt_family": {},
+        "sub_queries": [],
+        "contexts": [],
+        "sources": [],
+        "visited_urls": [],
+        "curated_sources": [],
+        "report_md": "",
+        "report_html": "",
+        "report_pdf_path": "",
+        "status": "pending",
+    }
+
+    # LangGraph 配置: thread_id 做会话隔离 (AGENTS.md 第 6 章)
+    graph_config = {"configurable": {"thread_id": session_id}}
+
+    if request.stream:
+        return StreamingResponse(
+            _stream_research(initial_state, graph_config, request, session_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Session-Id": session_id,
+            },
+        )
+    else:
+        # 非流式: 完整执行后返回
+        return await _run_research(initial_state, graph_config, request, session_id)
+
+
+async def _stream_research(
+    initial_state: dict[str, Any],
+    graph_config: dict[str, Any],
+    request: ChatCompletionRequest,
+    session_id: str,
+) -> Any:
+    """流式 SSE 响应生成器.
+
+    阶段 3: 接入 LangGraph astream, 逐节点 yield 进度 + 最终报告.
+    AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    def _sse_chunk(delta: dict[str, Any], finish_reason: str | None = None) -> str:
+        """构造 SSE 数据帧."""
+        chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }
+            ],
+        }
+        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    # SSE 首块 (role)
+    yield _sse_chunk({"role": "assistant"})
+
+    # 根 span 包裹整次研究 (AGENTS.md 第 10 章)
+    async with trace_agent(
+        name="agentinsight-researcher",
+        input={"query": initial_state["query"][:200], "session_id": session_id},
+        metadata={
+            "session_id": session_id,
+            "intent": "research",
+            "user_id": initial_state.get("user_id"),
+        },
+        session_id=session_id,
+        user_id=initial_state.get("user_id"),
+    ):
+        try:
+            graph = await _get_graph()
+
+            # 节点名称中文映射 (用于流式进度提示)
+            node_label = {
+                "industry_classifier": "识别行业",
+                "research_conductor": "并行检索研究",
+                "source_curator": "来源策展",
+                "report_generator": "生成报告",
+                "publisher": "格式化输出",
+            }
+
+            final_state: dict[str, Any] = {}
+
+            # astream 流式输出节点进度
+            async for event in graph.astream(
+                initial_state, config=graph_config, stream_mode="updates"
+            ):
+                # event 格式: {node_name: delta_dict}
+                for node_name, delta in event.items():
+                    if not isinstance(delta, dict):
+                        continue
+                    final_state.update(delta)
+
+                    # 节点开始进度提示
+                    label = node_label.get(node_name, node_name)
+                    progress = f"\n\n> **[{label}]** "
+                    if node_name == "industry_classifier" and delta.get("industry_name"):
+                        progress += f"已识别行业: {delta['industry_name']}\n"
+                    elif node_name == "research_conductor":
+                        sq_count = len(delta.get("sub_queries", []))
+                        ctx_count = len(delta.get("contexts", []))
+                        src_count = len(delta.get("sources", []))
+                        progress += (
+                            f"已生成 {sq_count} 子查询, 采集 {ctx_count} 上下文, {src_count} 来源\n"
+                        )
+                    elif node_name == "source_curator":
+                        if delta.get("curated_sources"):
+                            progress += f"已策展 {len(delta['curated_sources'])} 来源\n"
+                    elif node_name == "report_generator" and delta.get("report_md"):
+                        # 报告生成完成, 流式输出报告正文
+                        report_md = delta["report_md"]
+                        # 分块输出报告 (按段落)
+                        paragraphs = report_md.split("\n\n")
+                        for para in paragraphs:
+                            yield _sse_chunk({"content": para + "\n\n"})
+                        continue  # 跳过下面的进度提示
+                    elif node_name == "publisher":
+                        fmt = delta.get("report_format", "markdown")
+                        progress += f"已发布 ({fmt})\n"
+
+                    yield _sse_chunk({"content": progress})
+
+            # 输出最终报告元信息
+            final_md = final_state.get("report_md", "")
+            if not final_md:
+                yield _sse_chunk({"content": "\n\n*未生成报告内容 (可能上下文为空)*"})
+
+        except Exception as e:
+            logger.exception("研究流水线执行失败")
+            yield _sse_chunk({"content": f"\n\n**研究执行失败**: {str(e)[:200]}"})
+
+    # SSE 末块 (finish_reason)
+    yield _sse_chunk({}, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
+async def _run_research(
+    initial_state: dict[str, Any],
+    graph_config: dict[str, Any],
+    request: ChatCompletionRequest,
+    session_id: str,
+) -> ChatCompletionResponse:
+    """非流式研究执行.
+
+    阶段 3: 接入 LangGraph ainvoke.
+    AGENTS.md 第 10 章: trace_agent 根 span.
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    async with trace_agent(
+        name="agentinsight-researcher",
+        input={"query": initial_state["query"][:200], "session_id": session_id},
+        metadata={
+            "session_id": session_id,
+            "intent": "research",
+            "user_id": initial_state.get("user_id"),
+        },
+        session_id=session_id,
+        user_id=initial_state.get("user_id"),
+    ):
+        try:
+            graph = await _get_graph()
+            final_state = await graph.ainvoke(initial_state, config=graph_config)
+            content = final_state.get("report_md", "")
+            if not content:
+                content = "未生成报告内容 (可能上下文为空)"
+
+            # 附加来源列表 (AGENTS.md 第 14 章: 检索来源展示)
+            sources = final_state.get("sources", []) or final_state.get("curated_sources", [])
+            if sources:
+                content += "\n\n---\n\n## 参考来源\n"
+                for i, src in enumerate(sources[:10], 1):
+                    url = src.get("url", "") if isinstance(src, dict) else str(src)
+                    title = src.get("title", url) if isinstance(src, dict) else url
+                    content += f"{i}. [{title}]({url})\n"
+
+        except Exception as e:
+            logger.exception("研究流水线执行失败")
+            content = f"研究执行失败: {str(e)[:500]}"
+
+    prompt_tokens = len(initial_state["query"]) // 4
+    completion_tokens = len(content) // 4
+
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=request.model,
+        choices=[
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    )
+
+
+# ========== 文件上传 (用户需求 8) ==========
+
+
+@router.post("/files")
+async def upload_file(
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI 标准模式
+    authorization: str | None = Header(None),
+) -> Any:
+    """文件上传端点 (用户需求 8).
+
+    上传文件作为研究数据源, 文件 ID 可在 /v1/chat/completions 的
+    uploaded_files 字段引用.
+
+    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离.
+    AGENTS.md 第 11 章: 安全约束 (大小/扩展名白名单).
+    """
+    settings = get_settings()
+    user_id = get_request_user_id()
+    agent_id = get_request_agent_id()
+
+    # 校验文件大小
+    contents = await file.read()
+    size_mb = len(contents) / (1024 * 1024)
+    if size_mb > settings.max_upload_size_mb:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件大小 {size_mb:.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
+        )
+
+    # 校验扩展名 (AGENTS.md 第 11 章: 白名单)
+    ext = Path(file.filename or "").suffix.lstrip(".").lower()
+    if ext not in settings.allowed_extensions_list:
+        raise HTTPException(
+            status_code=415,
+            detail=f"不支持的文件类型: .{ext}, 允许: {', '.join(settings.allowed_extensions_list)}",
+        )
+
+    # 生成文件 ID (agent_id:user_id:uuid 三级分键)
+    file_id = f"{agent_id}:{user_id}:{uuid.uuid4().hex[:16]}"
+
+    # 存储路径 (按 agent_id + user_id 隔离)
+    upload_dir = Path(settings.upload_dir) / agent_id / user_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    save_path = upload_dir / f"{file_id.split(':')[-2]}_{file_id.split(':')[-1]}.{ext}"
+
+    # 写入文件
+    save_path.write_bytes(contents)
+
+    logger.info(
+        "文件上传成功: file_id=%s, filename=%s, size=%.2fMB, user=%s",
+        file_id,
+        file.filename,
+        size_mb,
+        user_id,
+    )
+
+    return JSONResponse(
+        status_code=201,
+        content={
+            "file_id": file_id,
+            "filename": file.filename,
+            "size_bytes": len(contents),
+            "size_mb": round(size_mb, 4),
+            "extension": ext,
+            "uploaded_at": int(time.time()),
+        },
+    )
+
+
+def _load_uploaded_files_context(file_ids: list[str], user_id: str, agent_id: str) -> list[str]:
+    """加载已上传文件内容作为研究上下文.
+
+    AGENTS.md 第 7 章: 按 agent_id + user_id 隔离, 禁止跨用户访问.
+    """
+    settings = get_settings()
+    contexts: list[str] = []
+
+    for file_id in file_ids:
+        try:
+            # 校验 file_id 前缀归属当前 agent+user (安全: 禁止跨用户)
+            parts = file_id.split(":")
+            if len(parts) != 3:
+                continue
+            fid_agent, fid_user, fid_uuid = parts
+            if fid_agent != agent_id or fid_user != user_id:
+                logger.warning(
+                    "拒绝跨用户文件访问: file_id=%s, agent=%s, user=%s",
+                    file_id,
+                    agent_id,
+                    user_id,
+                )
+                continue
+
+            # 查找文件 (按 uuid 前缀匹配)
+            upload_dir = Path(settings.upload_dir) / agent_id / user_id
+            if not upload_dir.exists():
+                continue
+            matches = list(upload_dir.glob(f"{fid_uuid}_*"))
+            if not matches:
+                continue
+
+            file_path = matches[0]
+            content = _extract_file_content(file_path, file_path.suffix.lstrip(".").lower())
+            if content:
+                contexts.append(f"=== 用户上传文件: {file_path.name} ===\n{content[:8000]}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("加载文件 %s 失败: %s", file_id, e)
+
+    return contexts
+
+
+def _extract_file_content(file_path: Path, ext: str) -> str:
+    """提取文件文本内容 (按扩展名路由).
+
+    支持: pdf, docx, md, txt, html, csv (用户需求 8).
+    """
+    try:
+        if ext in ("txt", "md", "csv"):
+            return str(file_path.read_text(encoding="utf-8", errors="ignore"))
+
+        if ext == "pdf":
+            try:
+                import fitz  # PyMuPDF
+
+                doc = fitz.open(str(file_path))
+                text = "\n".join(page.get_text() for page in doc)
+                doc.close()
+                return str(text)
+            except ImportError:
+                logger.warning("PyMuPDF 未安装, 跳过 PDF 文本提取")
+                return ""
+
+        if ext == "docx":
+            try:
+                from docx import Document
+
+                doc = Document(str(file_path))
+                return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except ImportError:
+                logger.warning("python-docx 未安装, 跳过 DOCX 文本提取")
+                return ""
+
+        if ext == "html":
+            try:
+                from bs4 import BeautifulSoup
+
+                html = file_path.read_text(encoding="utf-8", errors="ignore")
+                soup = BeautifulSoup(html, "html.parser")
+                return str(soup.get_text(separator="\n", strip=True))
+            except ImportError:
+                return str(file_path.read_text(encoding="utf-8", errors="ignore"))
+
+        if ext == "xlsx":
+            try:
+                from openpyxl import load_workbook
+
+                wb = load_workbook(str(file_path), read_only=True)
+                text_parts: list[str] = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        text_parts.append(",".join(str(c) if c is not None else "" for c in row))
+                wb.close()
+                return "\n".join(text_parts)
+            except ImportError:
+                logger.warning("openpyxl 未安装, 跳过 XLSX 文本提取")
+                return ""
+
+        if ext == "pptx":
+            try:
+                from pptx import Presentation
+
+                prs = Presentation(str(file_path))
+                pptx_parts: list[str] = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text:
+                            pptx_parts.append(shape.text)
+                return "\n".join(pptx_parts)
+            except ImportError:
+                logger.warning("python-pptx 未安装, 跳过 PPTX 文本提取")
+                return ""
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("提取文件 %s 内容失败: %s", file_path.name, e)
+
+    return ""
+
+
+@router.get("/models")
+async def list_models() -> Any:
+    """OpenAI 兼容 /v1/models 端点."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "agentinsight-researcher",
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "agentinsight",
+            }
+        ],
+    }

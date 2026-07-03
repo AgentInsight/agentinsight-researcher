@@ -1,0 +1,95 @@
+"""单元测试: HybridRetriever RRF 融合算法.
+
+验证 RRF 倒数排名融合逻辑, 不实际连接 Qdrant/Embeddings.
+"""
+
+from __future__ import annotations
+
+from src.config.settings import Settings
+from src.rag.retriever import HybridRetriever
+
+
+def test_rrf_fuse_combines_vector_and_bm25():
+    """测试 RRF 融合向量与 BM25 结果."""
+    settings = Settings(vector_weight=0.7, bm25_weight=0.3, rrf_k=60, _env_file=None)
+    retriever = HybridRetriever(settings)
+
+    vector_results = [
+        {"content": "文档A", "score": 0.9},
+        {"content": "文档B", "score": 0.8},
+    ]
+    bm25_results = [
+        {"content": "文档B", "score": 5.0},
+        {"content": "文档C", "score": 4.0},
+    ]
+
+    fused = retriever._rrf_fuse(
+        vector_results,
+        bm25_results,
+        vector_weight=0.7,
+        bm25_weight=0.3,
+    )
+
+    # 应有 3 个不重复文档
+    contents = [f["content"] for f in fused]
+    assert set(contents) == {"文档A", "文档B", "文档C"}
+
+    # 文档B 在两个来源都出现, 应排名靠前
+    assert fused[0]["content"] == "文档B"
+
+
+def test_rrf_fuse_empty_inputs():
+    """测试 RRF 融合空输入."""
+    settings = Settings(_env_file=None)
+    retriever = HybridRetriever(settings)
+    assert retriever._rrf_fuse([], [], vector_weight=0.7, bm25_weight=0.3) == []
+
+
+def test_rrf_fuse_only_vector():
+    """测试 RRF 仅向量结果."""
+    settings = Settings(_env_file=None)
+    retriever = HybridRetriever(settings)
+    vector_results = [{"content": "文档A", "score": 0.9}]
+    fused = retriever._rrf_fuse(
+        vector_results,
+        [],
+        vector_weight=0.7,
+        bm25_weight=0.3,
+    )
+    assert len(fused) == 1
+    assert fused[0]["content"] == "文档A"
+
+
+def test_rrf_score_formula():
+    """测试 RRF 分数公式: weight / (k + rank + 1)."""
+    settings = Settings(vector_weight=0.7, bm25_weight=0.3, rrf_k=60, _env_file=None)
+    retriever = HybridRetriever(settings)
+
+    # 单个向量结果, rank=0
+    vector_results = [{"content": "唯一文档", "score": 0.9}]
+    fused = retriever._rrf_fuse(
+        vector_results,
+        [],
+        vector_weight=0.7,
+        bm25_weight=0.3,
+    )
+    # 期望分数: 0.7 / (60 + 0 + 1) = 0.7 / 61
+    expected = 0.7 / 61
+    assert abs(fused[0]["score"] - expected) < 1e-6
+
+
+def test_build_namespaces_shared_only():
+    """测试无 user_id 时只检索共享 namespace."""
+    settings = Settings(agent_name="agentinsight-researcher", _env_file=None)
+    retriever = HybridRetriever(settings)
+    namespaces = retriever.build_namespaces(user_id=None)
+    assert namespaces == ["agentinsight-researcher"]
+
+
+def test_build_namespaces_with_user():
+    """测试有 user_id 时检索共享 + 用户私有 namespace."""
+    settings = Settings(agent_name="agentinsight-researcher", _env_file=None)
+    retriever = HybridRetriever(settings)
+    namespaces = retriever.build_namespaces(user_id="user123")
+    assert "agentinsight-researcher" in namespaces
+    assert "agentinsight-researcher:user123" in namespaces
