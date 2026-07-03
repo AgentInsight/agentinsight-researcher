@@ -1,5 +1,69 @@
-﻿################################################################################
-# 此 .gitignore 文件已由 Microsoft(R) Visual Studio 自动创建。
-################################################################################
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-/.vs/AgentInsightAgents.slnx/v18
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+
+# 构建产物
+build/
+dist/
+*.egg
+
+# 环境变量 (含密钥, 禁止入仓, AGENTS.md 第 11 章)
+.env
+.env.agent
+.env.prod
+.env.dev
+!.env.template
+
+# 上传文件
+packages/uploads/
+uploads/
+
+# 离线包 (体积大, 按需下载, 不入仓)
+packages/wheels/
+packages/debs/
+packages/models/
+packages/images/
+!packages/sql/
+!packages/wheels/.gitkeep
+!packages/debs/.gitkeep
+!packages/models/.gitkeep
+!packages/images/.gitkeep
+
+# 离线模式构建文件 (AGENTS.md 第 12 章双套构建模式, 不入仓)
+docker-compose.offline.yml
+Dockerfile.offline
+scripts/build-offline.ps1
+
+# 临时文件
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# 数据
+data/
+sessions/
+/docs
+/.env.qa
