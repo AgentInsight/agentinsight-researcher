@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 启动时预热短查询种子向量到 Qdrant (P0-Future-05/06)
     # 后台异步执行, 不阻塞启动; 失败降级为仅规则层 (AGENTS.md 第 7 章)
+    # P1-Future-07: 同时预热离题/闲聊种子 (off_topic_patterns namespace)
     async def _preheat_short_query_seeds() -> None:
         try:
             from src.skills.researcher.query_classifier import (
@@ -55,9 +56,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
 
             classifier = get_query_intent_classifier()
-            await classifier._ensure_seed_patterns()
+            # 并行预热短查询 + 离题种子 (两者独立, 互不阻断)
+            await asyncio.gather(
+                classifier._ensure_seed_patterns(),
+                classifier._ensure_off_topic_seed_patterns(),
+            )
         except Exception as e:  # noqa: BLE001
-            logger.warning("短查询种子预热失败 (降级为仅规则层): %s", e)
+            logger.warning("种子预热失败 (降级为仅规则层): %s", e)
 
     asyncio.create_task(_preheat_short_query_seeds())
 

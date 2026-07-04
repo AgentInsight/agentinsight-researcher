@@ -311,6 +311,55 @@ class _CustomPromptFamily(PromptFamily):
     def get_tone_prompt(self, tone: str) -> str:
         return "custom-tone"
 
+    # V2-P1: detailed_report 专用 prompt 实现 (新增 4 个抽象方法)
+    def subtopics_prompt(
+        self,
+        query: str,
+        context: str,
+        role_persona: str,
+        max_subtopics: int = 5,
+    ) -> str:
+        return "custom-subtopics"
+
+    def introduction_prompt(
+        self,
+        query: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        current_date: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        return "custom-introduction"
+
+    def section_prompt(
+        self,
+        topic: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 800,
+        word_max: int = 1200,
+    ) -> str:
+        return "custom-section"
+
+    def conclusion_prompt(
+        self,
+        query: str,
+        sections_summary: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        return "custom-conclusion"
+
 
 def test_register_prompt_family_custom() -> None:
     """测试注册自定义 family 后可被 get_prompt_family 取出."""

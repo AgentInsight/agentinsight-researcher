@@ -163,14 +163,18 @@ class ChatCompletionRequest(BaseModel):
 
 
 class ChatCompletionResponse(BaseModel):
-    """OpenAI 兼容非流式响应."""
+    """OpenAI 兼容非流式响应 (P0-01: 增加 sources 结构化字段)."""
 
     id: str
     object: str = "chat.completion"
     created: int
     model: str
     choices: list[dict[str, Any]]
-    usage: dict[str, int]
+    # P1-04: usage 含 cost_usd (float), 放宽为 dict[str, Any] 兼容真实成本
+    usage: dict[str, Any]
+    # P0-01: 显式返回 sources 结构化列表 (对标 GPTR add_references)
+    # 含 title/url/snippet/score 字段, 测试页面与下游消费者可直接渲染
+    sources: list[dict[str, Any]] = []
 
 
 # ========== 端点实现 ==========
@@ -205,17 +209,35 @@ async def chat_completions(
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
 
-    # P0-Future-05/06: 查询意图分类 (短查询保护 + 对话/研究路由)
+    # P0-Future-05/06 + P1-Future-07: 查询意图分类 (短查询 + 离题闲聊 + 对话/研究路由)
     # 先检查会话是否已有报告 (用于分类器 has_report 参数)
     has_report = await _has_report(session_id)
     intent = await get_query_intent_classifier().classify(query, has_report)
 
-    # P0-Future-06: 短查询保护 — 直接返回回复语, 不走任何 graph
-    if intent == QueryIntent.SHORT_QUERY:
-        reply = settings.short_query_reply
+    # P1-Future-07: CHAT 首轮保护 — 无已有报告时降级 OFF_TOPIC
+    # 避免首轮闲聊走 chat graph 消耗 SMART LLM; 显式 report_type 时强制走 researcher graph
+    if (
+        intent == QueryIntent.CHAT
+        and request.report_type is None
+        and settings.chat_requires_report
+        and not has_report
+    ):
+        logger.debug(
+            "CHAT 首轮无报告, 降级 OFF_TOPIC (session_id=%s)",
+            session_id,
+        )
+        intent = QueryIntent.OFF_TOPIC
+
+    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 直接返回回复语, 不走任何 graph
+    if intent in (QueryIntent.SHORT_QUERY, QueryIntent.OFF_TOPIC):
+        reply = (
+            settings.short_query_reply
+            if intent == QueryIntent.SHORT_QUERY
+            else settings.off_topic_reply
+        )
         if request.stream:
             return StreamingResponse(
-                _stream_short_query(reply, request, session_id),
+                _stream_short_query(reply, request, session_id, intent=intent.value),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -223,9 +245,9 @@ async def chat_completions(
                     "X-Session-Id": session_id,
                 },
             )
-        return await _run_short_query(reply, request, session_id)
+        return await _run_short_query(reply, request, session_id, intent=intent.value)
 
-    # P1-Future-06: CHAT 意图走 chat graph (首轮或追问)
+    # P1-Future-06: CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
     # 显式指定 report_type 时强制走 researcher graph (用户明确要新研究)
     if intent == QueryIntent.CHAT and request.report_type is None:
         # 走 chat graph (复用会话历史 + report_md 上下文, 首轮时 report_md 为空)
@@ -432,6 +454,23 @@ async def _stream_research(
             if not final_md:
                 yield _sse_chunk({"content": "\n\n*未生成报告内容 (可能上下文为空)*"})
 
+            # P0-01: 流式推送 sources 元信息帧 (在 finish 之前)
+            # 客户端可通过 delta.sources 获取结构化来源列表
+            final_sources = final_state.get("curated_sources") or final_state.get("sources", [])
+            normalized_sources: list[dict[str, Any]] = []
+            for src in final_sources[:20]:
+                if isinstance(src, dict):
+                    normalized_sources.append(
+                        {
+                            "title": src.get("title", "") or "",
+                            "url": src.get("url", "") or src.get("href", "") or "",
+                            "snippet": src.get("snippet", "") or "",
+                            "score": src.get("score", 0.0) or 0.0,
+                        }
+                    )
+            if normalized_sources:
+                yield _sse_chunk({"sources": normalized_sources})
+
         except Exception as e:
             logger.exception("研究流水线执行失败")
             yield _sse_chunk({"content": f"\n\n**研究执行失败**: {str(e)[:200]}"})
@@ -473,21 +512,59 @@ async def _run_research(
             if not content:
                 content = "未生成报告内容 (可能上下文为空)"
 
-            # 附加来源列表 (AGENTS.md 第 14 章: 检索来源展示)
-            sources = final_state.get("sources", []) or final_state.get("curated_sources", [])
-            if sources:
-                content += "\n\n---\n\n## 参考来源\n"
-                for i, src in enumerate(sources[:10], 1):
-                    url = src.get("url", "") if isinstance(src, dict) else str(src)
-                    title = src.get("title", url) if isinstance(src, dict) else url
-                    content += f"{i}. [{title}]({url})\n"
+            # P0-01: sources 作为结构化字段返回 (优先 curated_sources, 回退 sources)
+            sources = final_state.get("curated_sources") or final_state.get("sources", [])
+            # 规范化: 仅保留 title/url/snippet/score 四字段, 便于客户端渲染
+            normalized_sources: list[dict[str, Any]] = []
+            for src in sources[:20]:
+                if isinstance(src, dict):
+                    normalized_sources.append(
+                        {
+                            "title": src.get("title", "") or "",
+                            "url": src.get("url", "") or src.get("href", "") or "",
+                            "snippet": src.get("snippet", "") or "",
+                            "score": src.get("score", 0.0) or 0.0,
+                        }
+                    )
+
+            # P1-04: 读取 LLMClient 真实成本 (优先于字符估算)
+            total_cost_usd = final_state.get("total_cost_usd", 0.0) or 0.0
+            total_tokens = final_state.get("total_tokens", 0) or 0
+            token_logs = final_state.get("token_logs", []) or []
+            if total_tokens > 0:
+                prompt_tokens = sum(
+                    int(log.get("prompt_tokens", 0)) for log in token_logs if isinstance(log, dict)
+                )
+                completion_tokens = sum(
+                    int(log.get("completion_tokens", 0))
+                    for log in token_logs
+                    if isinstance(log, dict)
+                )
+                usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_usd": round(total_cost_usd, 6),
+                }
+            else:
+                # 降级: 字符估算 (向后兼容)
+                prompt_tokens = len(initial_state["query"]) // 4
+                completion_tokens = len(content) // 4
+                usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                }
 
         except Exception as e:
             logger.exception("研究流水线执行失败")
             content = f"研究执行失败: {str(e)[:500]}"
-
-    prompt_tokens = len(initial_state["query"]) // 4
-    completion_tokens = len(content) // 4
+            normalized_sources = []
+            usage = {
+                "prompt_tokens": len(initial_state["query"]) // 4,
+                "completion_tokens": len(content) // 4,
+                "total_tokens": (len(initial_state["query"]) + len(content)) // 4,
+            }
 
     return ChatCompletionResponse(
         id=completion_id,
@@ -500,26 +577,31 @@ async def _run_research(
                 "finish_reason": "stop",
             }
         ],
-        usage={
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
+        usage=usage,
+        sources=normalized_sources,
     )
 
 
-# ========== 短查询保护 (P0-Future-06, 不走任何 graph) ==========
+# ========== 短查询保护 (P0-Future-06, 不走任何 graph) + 离题闲聊保护 (P1-Future-07) ==========
 
 
 async def _stream_short_query(
     reply: str,
     request: ChatCompletionRequest,
     session_id: str,
+    *,
+    intent: str = "short_query",
 ) -> Any:
-    """流式 SSE 短查询回复生成器 (P0-Future-06).
+    """流式 SSE 短查询/离题回复生成器 (P0-Future-06 + P1-Future-07).
 
-    直接返回 settings.short_query_reply, 不走任何 graph.
-    AGENTS.md 第 10 章: 用 trace_agent 包裹作为根 span (intent=short_query).
+    直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
+    AGENTS.md 第 10 章: 用 trace_agent 包裹作为根 span.
+
+    Args:
+        reply: 回复内容 (短查询回复语或离题回复语)
+        request: OpenAI 兼容请求
+        session_id: 会话 ID
+        intent: 意图类型 ("short_query" 或 "off_topic"), 用于 trace 区分
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -544,12 +626,13 @@ async def _stream_short_query(
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
 
+    span_name = f"agentinsight-researcher-{intent}"
     async with trace_agent(
-        name="agentinsight-researcher-short-query",
+        name=span_name,
         input={"session_id": session_id},
         metadata={
             "session_id": session_id,
-            "intent": "short_query",
+            "intent": intent,
         },
         session_id=session_id,
     ):
@@ -564,21 +647,30 @@ async def _run_short_query(
     reply: str,
     request: ChatCompletionRequest,
     session_id: str,
+    *,
+    intent: str = "short_query",
 ) -> ChatCompletionResponse:
-    """非流式短查询回复 (P0-Future-06).
+    """非流式短查询/离题回复 (P0-Future-06 + P1-Future-07).
 
-    直接返回 settings.short_query_reply, 不走任何 graph.
-    AGENTS.md 第 10 章: trace_agent 根 span (intent=short_query).
+    直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
+    AGENTS.md 第 10 章: trace_agent 根 span.
+
+    Args:
+        reply: 回复内容 (短查询回复语或离题回复语)
+        request: OpenAI 兼容请求
+        session_id: 会话 ID
+        intent: 意图类型 ("short_query" 或 "off_topic"), 用于 trace 区分
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
 
+    span_name = f"agentinsight-researcher-{intent}"
     async with trace_agent(
-        name="agentinsight-researcher-short-query",
+        name=span_name,
         input={"session_id": session_id},
         metadata={
             "session_id": session_id,
-            "intent": "short_query",
+            "intent": intent,
         },
         session_id=session_id,
     ):

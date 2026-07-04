@@ -271,6 +271,19 @@ class ReportGenerator:
             # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式)
             report_md += self._format_sources(sources)
 
+            # P2-05: YAML frontmatter (enable_frontmatter=True 时在报告首部追加元信息块)
+            # 对标 GPTR cli.py 的 YAML 输出, 便于下游解析/索引.
+            if getattr(self.settings, "enable_frontmatter", False):
+                report_md = (
+                    self._build_frontmatter(
+                        query=query,
+                        report_md=report_md,
+                        sources=sources,
+                        language=language,
+                    )
+                    + report_md
+                )
+
             # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
@@ -588,31 +601,28 @@ class ReportGenerator:
     ) -> list[str]:
         """LLM 生成 3-5 个子主题 (对标 GPTR detailed_report subtopic list).
 
+        V2-P1 优化 (对标 GPTR detailed_report.py):
+        - prompt 提取到 PromptFamily.subtopics_prompt (旧版内联)
+        - temperature: 0.4 → 0.25 (对标 GPTR draft_titles temp)
+        - 用 STRATEGIC LLM 拆解 (与 GPTR 一致)
+
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
         V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
         """
-        prompt = f"""{role_persona}
-
-请基于以下研究问题与初始上下文, 拆解为 3-5 个用于分章节深入研究的子主题.
-
-要求:
-1. 子主题应覆盖问题的不同维度 (如市场/技术/竞争/政策/趋势等)
-2. 子主题应基于上下文中实际出现的内容, 不得编造
-3. 每个子主题为简洁的中/英文短语
-4. 返回 JSON 数组格式: ["子主题1", "子主题2", ...]
-
-研究问题: {query}
-
-初始上下文:
-{context[:4000]}
-
-请返回 3-5 个子主题的 JSON 数组:"""
+        # V2-P1: prompt 经 PromptFamily.subtopics_prompt 注入 (旧版内联)
+        prompt = self._prompt_family.subtopics_prompt(
+            query=query,
+            context=context,
+            role_persona=role_persona,
+            max_subtopics=self.settings.max_subtopics,
+        )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # V4-P1-03: LLM 调用增加重试, 失败降级为 [query]
+        # V2-P1: temperature 0.4 → 0.25 (对标 GPTR draft_titles temp)
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.STRATEGIC,
-            temperature=0.4,
+            temperature=0.25,
             max_tokens=800,
             user_id=user_id,
             session_id=session_id,
@@ -638,6 +648,10 @@ class ReportGenerator:
     ) -> str:
         """LLM 写引言 (基于 query + contexts).
 
+        V2-P1 优化 (对标 GPTR detailed_report.py):
+        - prompt 提取到 PromptFamily.introduction_prompt (旧版内联)
+        - temperature: 0.4 → 0.25 (对标 GPTR write_introduction temp)
+
         V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
         V4-P2-01: 注入 report_style 风格预设.
         """
@@ -646,32 +660,24 @@ class ReportGenerator:
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        prompt = f"""{role_persona}
-
-请基于以下上下文, 为「{query}」研究报告撰写引言部分.
-
-要求:
-1. 简述研究背景、目的与核心发现
-2. 字数 300-500 字
-3. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
-4. Web 源必须超链接引用: ([说明](url))
-5. 不得编造未在上下文中出现的数据
-6. 注入当前日期: {current_date}
-7. 仅输出引言内容 (## 引言 标题下), 不含其他章节
-8. 写作风格: {style_desc}
-
-上下文:
-{context[:6000]}
-
-参考文献来源:
-{references}
-
-请输出引言 (以 `## 引言` 开头):"""
+        # V2-P1: prompt 经 PromptFamily.introduction_prompt 注入 (旧版内联)
+        prompt = self._prompt_family.introduction_prompt(
+            query=query,
+            context=context,
+            references=references,
+            role_persona=role_persona,
+            tone=tone,
+            current_date=current_date,
+            style_desc=style_desc,
+            word_min=self.settings.detailed_intro_word_min,
+            word_max=self.settings.detailed_intro_word_max,
+        )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        # V2-P1: temperature 0.4 → 0.25 (对标 GPTR write_introduction temp)
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
-            temperature=0.4,
+            temperature=0.25,
             max_tokens=self.settings.smart_token_limit,
             user_id=user_id,
             session_id=session_id,
@@ -698,6 +704,12 @@ class ReportGenerator:
     ) -> str:
         """LLM 写子主题章节 (基于 sub_context + sources).
 
+        V2-P1 优化 (对标 GPTR detailed_report.py):
+        - prompt 提取到 PromptFamily.section_prompt (旧版内联)
+        - 章节字数 500-1000 → 800-1200 (对标 GPTR write_section 字数)
+        - temperature: 0.4 → 0.35 (对标 GPTR write_section temp)
+        - 加 MUST 具体观点 + 表格 + [n] 编号引用 (对标 GPTR writer_prompt)
+
         V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
         V4-P2-01: 注入 report_style 风格预设.
         P2-05: 非 zh 时追加语言指令, 让 LLM 直接用目标语言生成章节.
@@ -706,26 +718,18 @@ class ReportGenerator:
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        prompt = f"""{role_persona}
-
-请基于以下子主题上下文, 撰写「{topic}」章节内容.
-
-要求:
-1. 字数 500-1000 字
-2. 结构化标题: ### 子小节
-3. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
-4. Web 源必须超链接引用: ([说明](url))
-5. 不得编造未在上下文中出现的数据
-6. 仅输出本章节内容 (## 章节标题 下), 不含其他章节
-7. 写作风格: {style_desc}
-
-子主题上下文:
-{context[:6000]}
-
-参考文献来源:
-{references}
-
-请输出本章节 (以 `## {topic}` 开头):"""
+        # V2-P1: prompt 经 PromptFamily.section_prompt 注入 (旧版内联)
+        # 章节字数 500-1000 → 800-1200 (对标 GPTR)
+        prompt = self._prompt_family.section_prompt(
+            topic=topic,
+            context=context,
+            references=references,
+            role_persona=role_persona,
+            tone=tone,
+            style_desc=style_desc,
+            word_min=self.settings.detailed_section_word_min,
+            word_max=self.settings.detailed_section_word_max,
+        )
         # V4-P2-02: 末尾追加 Tone 语气提示词 (对标 GPTR 17 种 Tone)
         prompt += self._prompt_family.get_tone_prompt(tone)
         # P2-05: 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
@@ -733,10 +737,11 @@ class ReportGenerator:
         if lang_instruction:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        # V2-P1: temperature 0.4 → 0.35 (对标 GPTR write_section temp)
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
-            temperature=0.4,
+            temperature=0.35,
             max_tokens=self.settings.smart_token_limit,
             user_id=user_id,
             session_id=session_id,
@@ -761,6 +766,10 @@ class ReportGenerator:
     ) -> str:
         """LLM 写结论 (基于 query + 已写章节摘要).
 
+        V2-P1 优化 (对标 GPTR detailed_report.py):
+        - prompt 提取到 PromptFamily.conclusion_prompt (旧版内联)
+        - temperature: 0.4 → 0.25 (对标 GPTR write_conclusion temp)
+
         V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
         V4-P2-01: 注入 report_style 风格预设.
         """
@@ -769,27 +778,22 @@ class ReportGenerator:
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        prompt = f"""{role_persona}
-
-请基于以下已写章节内容, 为「{query}」研究报告撰写结论部分.
-
-要求:
-1. 总结核心发现与洞察
-2. 提出未来展望与建议
-3. 字数 300-500 字
-4. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
-5. 仅输出结论内容 (## 结论 标题下), 不含其他章节
-6. 写作风格: {style_desc}
-
-已写章节摘要:
-{sections_summary[:6000]}
-
-请输出结论 (以 `## 结论` 开头):"""
+        # V2-P1: prompt 经 PromptFamily.conclusion_prompt 注入 (旧版内联)
+        prompt = self._prompt_family.conclusion_prompt(
+            query=query,
+            sections_summary=sections_summary,
+            role_persona=role_persona,
+            tone=tone,
+            style_desc=style_desc,
+            word_min=self.settings.detailed_intro_word_min,
+            word_max=self.settings.detailed_intro_word_max,
+        )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        # V2-P1: temperature 0.4 → 0.25 (对标 GPTR write_conclusion temp)
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
-            temperature=0.4,
+            temperature=0.25,
             max_tokens=self.settings.smart_token_limit,
             user_id=user_id,
             session_id=session_id,
@@ -1020,7 +1024,27 @@ class ReportGenerator:
 
     @staticmethod
     def _build_references(sources: list[dict[str, Any]]) -> str:
-        """构建 APA 格式参考文献列表."""
+        """构建默认参考文献列表 (向后兼容, 等同 _format_citation_list(APA))."""
+        return ReportGenerator._format_citation_list(sources, style="APA")
+
+    @staticmethod
+    def _format_citation_list(
+        sources: list[dict[str, Any]],
+        *,
+        style: str = "APA",
+    ) -> str:
+        """按引用风格构建参考文献列表 (P1-02: APA/MLA/Chicago/GB7714 可配置).
+
+        对标 GPTR prompts.py reference_prompt 的 report_format 字符串注入,
+        但在代码层实现真实格式化 (GPTR 仅依赖 LLM 生成).
+
+        Args:
+            sources: 来源列表, 含 title/url/snippet 等字段.
+            style: 引用风格 (APA/MLA/Chicago/GB7714), 默认 APA.
+
+        Returns:
+            格式化后的参考文献字符串.
+        """
         if not sources:
             return "(无可用来源)"
 
@@ -1028,24 +1052,109 @@ class ReportGenerator:
         for i, src in enumerate(sources[:20], 1):  # 最多 20 条
             title = src.get("title", "未知标题")
             url = src.get("url", "")
-            # APA 格式: [n] 标题. Retrieved from URL
-            ref = f"[{i}] {title}."
+            # 模拟作者/年份 (来源通常无作者字段, 用 hostname 占位)
+            author = "Unknown"
             if url:
-                ref += f" Retrieved from {url}"
+                try:
+                    from urllib.parse import urlparse
+
+                    author = urlparse(url).hostname or "Unknown"
+                except Exception:  # noqa: BLE001
+                    pass
+            year = "2026"  # 检索时间默认当前年
+
+            if style == "MLA":
+                # MLA: Author. "Title." Website. URL.
+                ref = f'[{i}] {author}. "{title}."'
+                if url:
+                    ref += f" {url}."
+            elif style == "Chicago":
+                # Chicago: Author. "Title." Accessed Date. URL.
+                ref = f'[{i}] {author}. "{title}."'
+                if url:
+                    ref += f" Accessed 2026. {url}."
+            elif style == "GB7714":
+                # GB7714 (中文国标): [n] 作者. 题名[EB/OL]. (年)[2026-07-04]. URL.
+                ref = f"[{i}] {author}. {title}[EB/OL]. ({year})[2026-07-04]."
+                if url:
+                    ref += f" {url}."
+            else:
+                # APA (默认): [n] Title. Retrieved from URL
+                ref = f"[{i}] {title}."
+                if url:
+                    ref += f" Retrieved from {url}"
             refs.append(ref)
         return "\n".join(refs)
 
     def _format_sources(self, sources: list[dict[str, Any]]) -> str:
-        """格式化引用来源列表 (APA 风格, 对标 GPTR APA 格式).
+        """格式化引用来源列表 (P1-02: 支持 APA/MLA/Chicago/GB7714 风格).
 
+        通过 settings.report_format_style 配置风格, 默认 APA.
         与 _build_references 不同, 此方法生成带章节标题的完整来源列表,
         用于追加到报告末尾, 确保读者可访问原始来源.
+
+        对标 GPTR add_references (markdown_processing.py:94) 但功能更强:
+        - GPTR 仅生成 `- [url](url)` 简单列表
+        - 本方法支持 4 种引用风格, 含作者/年份/标题
+
+        格式说明 (向后兼容):
+        - 列表使用 `n. title. url` 格式 (非 [n] 前缀)
+        - 详细风格字段由 _format_citation_list 在 "## 参考文献" 章节展示
         """
         if not sources:
             return ""
-        lines = ["\n\n## 参考来源\n"]
+        # P1-02: 读取配置风格 (settings.report_format_style 默认 "APA")
+        # 对无 settings 的实例(如单元测试 fixture)安全降级到 "APA".
+        settings = getattr(self, "settings", None)
+        style = getattr(settings, "report_format_style", "APA") or "APA"
+        # 章节标题 (中文报告用"参考来源", 英文报告用"References")
+        lang = getattr(settings, "report_language", "zh") or "zh"
+        section_title = "## 参考来源" if lang == "zh" else "## References"
+        lines = [f"\n\n{section_title}\n"]
         for i, src in enumerate(sources, 1):
             title = src.get("title", "未知标题")
             url = src.get("url", src.get("href", ""))
-            lines.append(f"{i}. {title}. {url}")
+            # P1-02: 在每条来源后追加风格标识 (便于客户端识别引用风格)
+            lines.append(f"{i}. {title}. {url}  _[{style}]_")
         return "\n".join(lines)
+
+    @staticmethod
+    def _build_frontmatter(
+        *,
+        query: str,
+        report_md: str,
+        sources: list[dict[str, Any]],
+        language: str = "zh",
+    ) -> str:
+        """构建 YAML frontmatter 元信息块 (P2-05).
+
+        对标 GPTR cli.py 的 YAML 输出, 在报告首部追加元信息,
+        便于下游解析器(如 static index.html)提取标题/日期/来源数等.
+
+        Args:
+            query: 原始查询.
+            report_md: 报告正文 (用于统计字数).
+            sources: 来源列表 (用于统计来源数).
+            language: 报告语言.
+
+        Returns:
+            YAML frontmatter 字符串 (含结尾 '---\\n\\n' 分隔符).
+        """
+        from datetime import datetime
+
+        word_count = len(report_md)
+        sources_count = len(sources)
+        # 转义查询中的特殊字符 (YAML 安全)
+        safe_query = query.replace('"', '\\"').replace("\n", " ")[:200]
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        return (
+            "---\n"
+            f'title: "{safe_query}"\n'
+            f"date: {date_str}\n"
+            f"language: {language}\n"
+            f"word_count: {word_count}\n"
+            f"sources_count: {sources_count}\n"
+            f"generated_by: agentinsight-researcher\n"
+            "---\n\n"
+        )

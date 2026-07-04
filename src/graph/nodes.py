@@ -222,6 +222,34 @@ async def report_generator_node(
             delta["report_image_url"] = result["image_url"]
         if result.get("image_b64"):
             delta["report_image_b64"] = result["image_b64"]
+
+        # P1-04: 回写 LLM 成本到 State (打通 LLMClient → State 最后一公里)
+        # 对标 GPTR add_costs() 让 final_state 含 costs 字段, 供 routes.py usage 读取.
+        try:
+            from src.llm.token_budget import get_token_budget_allocator
+
+            allocator = await get_token_budget_allocator()
+            total_cost = await allocator.get_total_cost()
+            step_costs = await allocator.get_step_costs()
+            delta["total_cost_usd"] = total_cost.get("total_cost_usd", 0.0)
+            delta["total_tokens"] = total_cost.get("total_tokens", 0)
+            # token_logs: 节点级调用日志 (按 step 展平)
+            token_logs = [
+                {
+                    "step": step,
+                    "prompt_tokens": sc.get("prompt_tokens", 0),
+                    "completion_tokens": sc.get("completion_tokens", 0),
+                    "total_tokens": sc.get("total_tokens", 0),
+                    "cost_usd": sc.get("cost_usd", 0.0),
+                    "call_count": sc.get("call_count", 0),
+                    "model_breakdown": sc.get("model_breakdown", {}),
+                }
+                for step, sc in step_costs.items()
+            ]
+            delta["token_logs"] = token_logs
+        except Exception as cost_err:  # noqa: BLE001
+            logger.debug("成本回写 State 失败 (非阻断): %s", cost_err)
+
         return delta
 
 

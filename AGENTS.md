@@ -301,6 +301,12 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 使用 `latest` 标签（应锁版本，避免镜像漂移）。
 - 生产环境映射非必要端口到 0.0.0.0（破坏最小暴露原则）。
 
+**容器命名约定（核心约定，优先选择）**：
+- 容器编排应使用 `-p agentinsight` 项目名（即 `docker compose -p agentinsight -f <compose-file> --env-file <env-file> up -d`），不推荐使用默认项目名 `agentinsight-researcher`（即直接 `docker compose up -d`）。
+- 三套构建脚本（`docker-build.qa.bat` / `docker-build.sh` / `docker-build.offline.sh`）均已内置 `-p agentinsight`，应优先使用脚本而非裸 `docker compose up -d`。
+- 理由：与 AgentInsightService 项目共享 `agentinsight` 命名空间，容器名统一为 `agentinsight-<service>-1`（如 `agentinsight-agent-1`），不携带 `-researcher` 后缀；两个项目不并行运行，通过停止一方容器释放端口后再启动另一方。
+- 端口冲突处理：AgentInsightService 与本项目共享 8066 端口，切换项目时应先 `docker compose -p agentinsight down` 停止一方，再启动另一方，不推荐同时运行。
+
 ## 13. 测试规则
 
 **测试分层（按执行环境）**：

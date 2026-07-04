@@ -1,18 +1,21 @@
-"""查询意图分类器 (P0-Future-05/06).
+"""查询意图分类器 (P0-Future-05/06, P1-Future-07).
 
 AGENTS.md 第 5 章: 节点纯函数, 无副作用.
 AGENTS.md 第 9 章: LLM 调用经 llm/ 的 LLMClient (LiteLLM), 禁厂商 SDK 直连.
 AGENTS.md 第 10 章: 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器).
 AGENTS.md 第 7 章: Embeddings 经 rag/embeddings.py, Qdrant 经 rag/qdrant_manager.py, 禁直连.
 
-三层分类逻辑:
-- 第一层(规则): 长度<min_length / 纯数字 / 纯标点 → SHORT_QUERY
-- 第二层(Embeddings 语义): Qdrant short_query_patterns namespace 语义匹配 → SHORT_QUERY
-- 第三层(LLM FAST 层): 仅当前两层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT
-- LLM 调用失败默认 RESEARCH (宁可走研究流程也不误判)
+三层分类逻辑 (P1-Future-07 升级为四分类, 对标 Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail):
+- 第一层(规则): 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
+- 第二层(Embeddings 语义): Qdrant short_query_patterns / off_topic_patterns namespace 语义匹配
+  - SHORT_QUERY 命中阈值 0.85 (短句精确匹配)
+  - OFF_TOPIC 命中阈值 0.75 (闲聊句子语义距离更大, 阈值放宽)
+- 第三层(LLM FAST 层): 仅当前两层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
+- LLM 调用失败默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程)
 - 语义层失败降级到 LLM 层 (不阻断主流程)
 
-短查询(如"你好"/"1"/"天气")直接返回 settings.short_query_reply, 不走任何 graph.
+短查询(如"你好"/"1"/"天气")与离题闲聊(如"今天怎么样"/"讲个笑话"/"你多大了")直接返回
+settings.short_query_reply / settings.off_topic_reply, 不走任何 graph, 零 LLM 成本.
 """
 
 from __future__ import annotations
@@ -302,13 +305,204 @@ _SHORT_QUERY_SEED: list[str] = [
 # 短查询种子版本号, 用于增量更新 Qdrant (版本变化时触发重新写入)
 _SHORT_QUERY_SEED_VERSION: str = "v6.0"
 
+# 离题/闲聊正则模式 (P1-Future-07)
+# 用于在规则层快速拦截高频闲聊句式, 避免落入 Embeddings 语义层误判
+# 命中即返回 OFF_TOPIC (零 LLM 成本, 直接返回 off_topic_reply)
+# 设计原则: 仅匹配明显与研究/分析无关的句式, 模糊语义留给 Embeddings/LLM 层
+_CHITCHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # 询问 bot 身份/属性
+    re.compile(r"^(?:你叫什么|你叫啥|你的名字|你叫什么名字|你叫啥名字)[？?]?"),
+    re.compile(r"^(?:你多大了|你几岁|你几岁了|你的年龄|你多大)[？?]?"),
+    re.compile(r"^(?:你是男是女|你是男的还是女的|你有性别吗)[？?]?"),
+    re.compile(r"^(?:你有女朋友吗|你有男朋友吗|你结婚了吗|你单身吗)[？?]?"),
+    re.compile(r"^(?:你在哪里|你在哪|你的位置|你住哪里)[？?]?"),
+    re.compile(r"^(?:你是谁啊|你是什么东西|你是什么人)[？?]?"),
+    # 询问 bot 心情/状态
+    re.compile(r"^(?:今天|今儿).{0,5}(?:怎么样|如何|心情|开心吗|过得)[？?]?"),
+    re.compile(r"^(?:你(?:最近|今天|现在)?).{0,3}(?:怎么样|如何|好吗|开心吗|累吗|忙吗)[？?]?"),
+    re.compile(r"^(?:你好(?:吗|么|不))", re.UNICODE),
+    re.compile(r"^(?:你在干嘛|你在做什么|你在干啥|你在忙什么)[？?]?"),
+    re.compile(r"^(?:你怎么了|你不开心吗|你心情不好吗)[？?]?"),
+    # 娱乐/创作请求
+    re.compile(r"^(?:讲个|说个|来个|给我讲个|给我说个).{0,4}(?:笑话|故事|段子|谜语|绕口令)[？?]?"),
+    re.compile(r"^(?:写首|作首|来首|给我写首).{0,4}(?:诗|词|歌|曲子)[？?]?"),
+    re.compile(r"^(?:唱首歌|唱个歌|来首歌|给我唱)[？?]?"),
+    re.compile(r"^(?:陪我玩|和我玩|来玩个|玩个游戏)[？?]?"),
+    # 常识/算术问题
+    re.compile(r"^(?:1\s*\+\s*1|2\s*\+\s*2|1加1|1\+1|一加一).{0,5}(?:等于|是|=?)[？?]?"),
+    re.compile(r"^(?:天空为什么是蓝的|天空为什么是蓝色|为什么天空是蓝)[？?]?"),
+    re.compile(r"^(?:太阳从哪边升起|太阳从哪升起|太阳东升西落)[？?]?"),
+    re.compile(r"^(?:水为什么会沸腾|水为什么烧开|水为什么结冰)[？?]?"),
+    re.compile(r"^(?:地球是圆的吗|地球是球形吗|地球有多大)[？?]?"),
+    # 时间/日期/天气 (句子形式, 单词形式已在 _COMMON_SHORT_PHRASES 拦截)
+    re.compile(r"^(?:几点了|现在几点|现在几点了|几点钟了)[？?]?"),
+    re.compile(r"^(?:今天星期几|今天周几|今天几号|今天多少号)[？?]?"),
+    re.compile(
+        r"^(?:今天|明天|后天|大后天).{0,3}(?:天气怎么样|天气如何|天气好吗|会下雨吗|冷吗|热吗)[？?]?"
+    ),
+    re.compile(r"^(?:现在|今天).{0,3}(?:什么时间|什么时辰)[？?]?"),
+    # 情绪/陪伴
+    re.compile(r"^(?:我好开心|我好难过|我好累|我好无聊|我好孤独)[啊呀]?[。.!！?？]*$"),
+    re.compile(r"^(?:我心情不好|我不开心|我很难过|我很郁闷|我烦死了)[。.!！?？]*$"),
+    re.compile(r"^(?:陪我聊天|和我聊天|聊聊天|陪我聊聊|说说话)[吧]?[。.!！?？]*$"),
+    re.compile(r"^(?:你真(?:聪明|棒|厉害|笨|傻|蠢))(?:啊|呀|哦)?[。.!！?？]*$"),
+    re.compile(r"^(?:我喜欢你|我爱你|我讨厌你|我恨你)(?:啊|呀|哦)?[。.!！?？]*$"),
+    # 转移话题/拒绝
+    re.compile(r"^(?:我不想研究|我不想用了|算了|不研究了|不用了|不需要了)[。.!！?？]*$"),
+    re.compile(r"^(?:换个别的话题|聊点别的|说点别的|不聊这个了)[。.!！?？]*$"),
+    # 测试 bot 智能
+    re.compile(r"^(?:你能(?:听懂|理解|明白).{0,5}吗)[？?]?"),
+    re.compile(r"^(?:你聪明吗|你有意识吗|你有感情吗|你会思考吗)[？?]?"),
+)
+
+# 离题/闲聊种子模式 (P1-Future-07, 懒初始化时预填充到 Qdrant off_topic_patterns namespace)
+# 涵盖问候/身份/娱乐/常识/情感/天气/时间等闲聊, 用 Embeddings 语义匹配
+# 按分类组织 (118 个不重复种子, 与 _SHORT_QUERY_SEED 互补:
+#   - SHORT_QUERY_SEED 覆盖短词/短语 (长度通常 ≤6)
+#   - _OFF_TOPIC_SEED 覆盖句子/完整问句 (语义匹配闲聊意图))
+_OFF_TOPIC_SEED: list[str] = [
+    # 询问 bot 身份/属性 (12)
+    "你叫什么名字",
+    "你叫啥",
+    "你多大了",
+    "你几岁了",
+    "你是男是女",
+    "你有女朋友吗",
+    "你有男朋友吗",
+    "你结婚了吗",
+    "你在哪里",
+    "你住哪里",
+    "你是真人吗",
+    "你有兄弟姐妹吗",
+    # 询问 bot 心情/状态 (10)
+    "今天怎么样",
+    "你今天过得好吗",
+    "你最近怎么样",
+    "你开心吗",
+    "你累吗",
+    "你忙吗",
+    "你心情怎么样",
+    "你怎么了",
+    "你在干嘛",
+    "你在做什么",
+    # 娱乐/创作请求 (12)
+    "讲个笑话",
+    "说个笑话",
+    "讲个故事",
+    "说个故事",
+    "写首诗",
+    "写首歌",
+    "唱首歌",
+    "出个谜语",
+    "说个绕口令",
+    "陪我玩个游戏",
+    "给我讲个段子",
+    "来个脑筋急转弯",
+    # 常识/算术问题 (10)
+    "1加1等于几",
+    "1+1等于几",
+    "2+2等于几",
+    "天空为什么是蓝的",
+    "太阳从哪边升起",
+    "水为什么会沸腾",
+    "地球是圆的吗",
+    "地球有多大",
+    "光速是多少",
+    "人为什么要睡觉",
+    # 时间/日期/天气 (10)
+    "现在几点",
+    "今天星期几",
+    "今天天气怎么样",
+    "明天天气如何",
+    "今天会下雨吗",
+    "今天冷吗",
+    "今天热吗",
+    "现在什么时间",
+    "你家有几口人",
+    "你会做饭吗",
+    # 情绪/陪伴 (15)
+    "我好开心",
+    "我好难过",
+    "我好累",
+    "我好无聊",
+    "我好孤独",
+    "我心情不好",
+    "我不开心",
+    "我很难过",
+    "我很郁闷",
+    "我烦死了",
+    "和我聊天",
+    "陪我聊聊",
+    "和我说说话",
+    "我讨厌我自己",
+    "我太开心了",
+    # 评价/情感表达 (10)
+    "你真聪明",
+    "你真棒",
+    "你真厉害",
+    "你真笨",
+    "你真傻",
+    "我喜欢你",
+    "我爱你",
+    "我讨厌你",
+    "我恨你",
+    "你真可爱",
+    # 转移话题/拒绝 (8)
+    "我不想研究",
+    "我不想用了",
+    "算了",
+    "不研究了",
+    "不用了",
+    "不需要了",
+    "换个别的话题",
+    "聊点别的",
+    # 测试 bot 智能 (8)
+    "你聪明吗",
+    "你有意识吗",
+    "你有感情吗",
+    "你会思考吗",
+    "你能听懂我说话吗",
+    "你能理解我吗",
+    "你明白我在说什么吗",
+    "你是人工智能吗",
+    # 英文闲聊补充 (13)
+    "how are you today",
+    "what's your name",
+    "how old are you",
+    "are you a robot",
+    "are you human",
+    "tell me a joke",
+    "sing me a song",
+    "what time is it",
+    "what's the weather",
+    "do you have feelings",
+    "are you conscious",
+    "i love you",
+    "i'm bored",
+    # 其他闲聊补充 (10, 替换与 _SHORT_QUERY_SEED 重复的项)
+    "你最喜欢什么颜色",
+    "你能记住我吗",
+    "你有什么爱好",
+    "你平时做什么",
+    "你会唱歌吗",
+    "你喜欢什么音乐",
+    "你看过什么电影",
+    "你有什么特长",
+    "你喜欢读书吗",
+    "你会做什么菜",
+]
+
+# 离题种子版本号, 用于增量更新 Qdrant (版本变化时触发重新写入)
+_OFF_TOPIC_SEED_VERSION: str = "v1.0"
+
 
 class QueryIntent(StrEnum):
     """查询意图类型."""
 
     RESEARCH = "research"  # 研究请求 → 走 researcher graph
-    CHAT = "chat"  # 对话 → 走 chat graph
-    SHORT_QUERY = "short_query"  # 短查询 → 直接返回回复语
+    CHAT = "chat"  # 对话 (针对已有报告的追问) → 走 chat graph
+    SHORT_QUERY = "short_query"  # 短查询 (问候/数字/标点/测试) → 直接返回回复语
+    OFF_TOPIC = "off_topic"  # 离题/闲聊 (问候/身份/娱乐/常识/私人问题) → 直接返回离题回复语
 
 
 @dataclass
@@ -351,6 +545,8 @@ class QueryIntentClassifier:
         self._qdrant = qdrant or get_qdrant_manager()
         self._seed_lock = asyncio.Lock()
         self._seed_initialized = False
+        # P1-Future-07: 离题种子独立初始化状态 (与短查询种子分离, 互不阻断)
+        self._off_topic_seed_initialized = False
 
     @property
     def _short_query_namespace(self) -> str:
@@ -361,17 +557,33 @@ class QueryIntentClassifier:
         """
         return f"{self.settings.agent_name}:short_query_patterns"
 
+    @property
+    def _off_topic_namespace(self) -> str:
+        """离题/闲聊种子模式的 Qdrant namespace (P1-Future-07).
+
+        AGENTS.md 第 7 章数据隔离: 按 agent_id 区分, 故 namespace = {agent_id}:off_topic_patterns.
+        种子模式为全局通用闲聊模式, 不含 user_id (非用户私有数据).
+        """
+        return f"{self.settings.agent_name}:off_topic_patterns"
+
     def _rule_classify(self, query: str) -> _RuleResult | None:
         """第一层规则分类 (快速).
 
         Returns:
-            命中规则时返回 _RuleResult(SHORT_QUERY, reason);
+            命中规则时返回 _RuleResult(SHORT_QUERY 或 OFF_TOPIC, reason);
             未命中返回 None (需进入第二层语义分类).
         """
+        q = query.strip()
+
+        # P1-Future-07: 离题/闲聊正则优先匹配 (在短查询规则之前)
+        # 仅当 off_topic_enabled 时启用, 避免与短查询保护冲突
+        if self.settings.off_topic_enabled:
+            for pattern in _CHITCHAT_PATTERNS:
+                if pattern.search(q):
+                    return _RuleResult(QueryIntent.OFF_TOPIC, "chitchat_pattern")
+
         if not self.settings.short_query_enabled:
             return None
-
-        q = query.strip()
 
         # 1. 长度过短
         if len(q) < self.settings.short_query_min_length:
@@ -518,32 +730,151 @@ class QueryIntentClassifier:
             logger.warning("语义匹配失败, 降级到 LLM 层: %s", e)
             return False
 
-    async def _llm_classify(self, query: str, has_report: bool) -> QueryIntent:
-        """第三层 LLM FAST 分类.
+    async def _ensure_off_topic_seed_patterns(self) -> None:
+        """懒初始化离题种子模式到 Qdrant (P1-Future-07, 带版本校验, 支持增量更新).
 
-        用 LLMTier.FAST (deepseek-chat, temperature=0.0) 分类 RESEARCH / CHAT.
-        失败时默认 RESEARCH (宁可走研究流程也不误判).
+        使用双重检查锁定避免并发重复写入.
+        通过 _OFF_TOPIC_SEED_VERSION 做 payload 版本校验:
+        - 版本匹配 → 跳过写入
+        - 版本不匹配或不存在 → 删除旧数据, 重新写入全部种子
+        预填充失败不阻断, 后续语义匹配会降级到 LLM 层.
+        """
+        if self._off_topic_seed_initialized:
+            return
+
+        async with self._seed_lock:
+            if self._off_topic_seed_initialized:
+                return
+            try:
+                await self._qdrant.ensure_collection()
+
+                # 用首条种子向量检索, 检查是否已存在当前版本
+                probe_vector = await self._embeddings.embed_query(_OFF_TOPIC_SEED[0])
+                existing = await self._qdrant.search(
+                    query_vector=probe_vector,
+                    namespaces=[self._off_topic_namespace],
+                    limit=1,
+                )
+                if existing:
+                    top_meta = existing[0].get("metadata", {}) or {}
+                    if top_meta.get("seed_version") == _OFF_TOPIC_SEED_VERSION:
+                        self._off_topic_seed_initialized = True
+                        logger.debug(
+                            "离题种子已存在 (version=%s), 跳过写入",
+                            _OFF_TOPIC_SEED_VERSION,
+                        )
+                        return
+
+                # 版本不匹配或不存在, 重新写入
+                await self._write_off_topic_seed_patterns()
+                self._off_topic_seed_initialized = True
+            except Exception as e:  # noqa: BLE001
+                # 预填充失败不阻断, 标记已尝试避免反复失败重试
+                logger.warning("离题种子初始化失败 (降级为仅规则+LLM 层): %s", e)
+                self._off_topic_seed_initialized = True
+
+    async def _write_off_topic_seed_patterns(self) -> None:
+        """写入/更新离题种子到 Qdrant (P1-Future-07, 版本变化时先删后写).
+
+        AGENTS.md 第 7 章: payload 必须含 content+metadata+namespace;
+        种子版本号写入 metadata.seed_version 做增量更新校验.
+        """
+        # 版本变化时先清理旧数据 (避免残留旧版本种子)
+        await self._qdrant.delete_by_namespace(self._off_topic_namespace)
+
+        points: list[dict[str, Any]] = [
+            {
+                "content": pattern,
+                "metadata": {
+                    "type": "off_topic_seed",
+                    "category": "chat",
+                    "seed_version": _OFF_TOPIC_SEED_VERSION,
+                },
+            }
+            for pattern in _OFF_TOPIC_SEED
+        ]
+        await self._qdrant.upsert_points(
+            namespace=self._off_topic_namespace,
+            points=points,
+        )
+        logger.info(
+            "离题种子已写入 Qdrant (namespace=%s, version=%s, count=%d)",
+            self._off_topic_namespace,
+            _OFF_TOPIC_SEED_VERSION,
+            len(points),
+        )
+
+    async def _semantic_match_off_topic(self, query: str) -> bool:
+        """第二层 Embeddings 语义匹配离题/闲聊 (P1-Future-07).
+
+        1. 将 query 用 EmbeddingsClient 向量化
+        2. 在 Qdrant off_topic_patterns namespace 搜索
+        3. top-1 score > off_topic_similarity_threshold → OFF_TOPIC
+
+        任何异常都降级为 False (不阻断主流程, 进入 LLM 层).
+        """
+        try:
+            await self._ensure_off_topic_seed_patterns()
+
+            query_vector = await self._embeddings.embed_query(query)
+            if not query_vector:
+                logger.warning("Embedding 返回空向量, 离题语义层降级")
+                return False
+
+            results = await self._qdrant.search(
+                query_vector=query_vector,
+                namespaces=[self._off_topic_namespace],
+                limit=1,
+            )
+
+            if not results:
+                return False
+
+            top_score = float(results[0].get("score") or 0.0)
+            matched = top_score > self.settings.off_topic_similarity_threshold
+            if matched:
+                logger.debug(
+                    "语义匹配命中离题: query=%r top_score=%.4f threshold=%.2f",
+                    query[:50],
+                    top_score,
+                    self.settings.off_topic_similarity_threshold,
+                )
+            return matched
+        except Exception as e:  # noqa: BLE001
+            logger.warning("离题语义匹配失败, 降级到 LLM 层: %s", e)
+            return False
+
+    async def _llm_classify(self, query: str, has_report: bool) -> QueryIntent:
+        """第三层 LLM FAST 分类 (P1-Future-07 升级为三分类).
+
+        用 LLMTier.FAST (deepseek-chat, temperature=0.0) 分类 RESEARCH / CHAT / OFF_TOPIC.
+        失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径).
 
         Args:
             query: 用户原始查询
             has_report: 当前会话是否已有报告 (True 时倾向 CHAT)
 
         Returns:
-            QueryIntent.RESEARCH 或 QueryIntent.CHAT
+            QueryIntent.RESEARCH / CHAT / OFF_TOPIC
         """
         hint = (
-            "注意: 用户当前会话已有研究报告, 倾向判定为 chat."
+            "注意: 用户当前会话已有研究报告, 针对报告的追问/澄清倾向判定为 chat."
             if has_report
-            else "注意: 用户当前会话无研究报告, 倾向判定为 research."
+            else "注意: 用户当前会话无研究报告, 闲聊/问候/常识问题倾向判定为 off_topic."
         )
 
         system_prompt = (
             "你是查询意图分类器. 根据用户查询判断意图类别, 仅返回 JSON.\n\n"
             "类别定义:\n"
-            '- "research": 需要深入研究并生成报告的主题 (如"分析新能源汽车市场"|"AI 在医疗的应用")\n'
-            '- "chat": 简短对话/问候/询问/闲聊 (如"今天怎么样"|"你能做什么"|"解释一下")\n\n'
+            '- "research": 需要深入研究并生成报告的主题 '
+            '(如"分析新能源汽车市场"|"AI 在医疗的应用"|"比较 React 和 Vue")\n'
+            '- "chat": 针对已有研究报告的追问/澄清/讨论 '
+            '(如"这个数据来源是什么"|"展开讲讲第二点"|"总结一下")\n'
+            '- "off_topic": 与研究/分析无关的闲聊/问候/身份询问/娱乐/常识/私人问题 '
+            '(如"你好"|"今天怎么样"|"讲个笑话"|"你多大了"|"1+1等于几"|"天气如何")\n\n'
             f"{hint}\n\n"
-            '返回 JSON: {"intent": "research" | "chat"}, 仅返回 JSON, 不要其他内容.'
+            '返回 JSON: {"intent": "research" | "chat" | "off_topic"}, '
+            "仅返回 JSON, 不要其他内容."
         )
 
         messages: list[dict[str, str]] = [
@@ -568,28 +899,53 @@ class QueryIntentClassifier:
                     content = content[4:]
                 content = content.strip()
             data: dict[str, Any] = json.loads(content)
-            intent_str = str(data.get("intent", "research")).lower().strip()
+            intent_str = str(data.get("intent", "")).lower().strip()
             if intent_str == "chat":
                 return QueryIntent.CHAT
-            return QueryIntent.RESEARCH
+            if intent_str == "off_topic":
+                return QueryIntent.OFF_TOPIC
+            if intent_str == "research":
+                return QueryIntent.RESEARCH
+            # 未知意图字符串 → 走配置兜底 (默认 OFF_TOPIC)
+            logger.warning(
+                "LLM 返回未知意图字符串 %r, 走 llm_classify_fallback=%s",
+                intent_str,
+                self.settings.llm_classify_fallback,
+            )
+            return self._fallback_intent()
         except Exception as e:  # noqa: BLE001
-            logger.warning("LLM 意图分类失败, 降级为 RESEARCH: %s", e)
+            # P1-Future-07: 业界标准 - LLM 失败走最轻路径 (默认 OFF_TOPIC, 避免误导向研究)
+            logger.warning(
+                "LLM 意图分类失败, 走 llm_classify_fallback=%s (业界默认最轻路径): %s",
+                self.settings.llm_classify_fallback,
+                e,
+            )
+            return self._fallback_intent()
+
+    def _fallback_intent(self) -> QueryIntent:
+        """返回配置的 LLM 失败兜底意图 (P1-Future-07).
+
+        默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程).
+        可通过 settings.llm_classify_fallback 配置为 "research" 覆盖.
+        """
+        if self.settings.llm_classify_fallback == "research":
             return QueryIntent.RESEARCH
+        return QueryIntent.OFF_TOPIC
 
     async def classify(self, query: str, has_report: bool) -> QueryIntent:
-        """分类查询意图.
+        """分类查询意图 (P1-Future-07 升级为四分类).
 
         三层分类:
-        1. 规则层优先 (短查询保护)
-        2. Embeddings 语义层 (规则层未命中时)
-        3. LLM FAST 层 (前两层未命中时)
+        1. 规则层优先 (短查询保护 + 闲聊正则)
+        2. Embeddings 语义层 (短查询 namespace + 离题 namespace, 规则层未命中时)
+        3. LLM FAST 层 (前两层未命中时, 三分类 RESEARCH/CHAT/OFF_TOPIC)
 
         Args:
             query: 用户原始查询
             has_report: 当前会话是否已有报告 (True 时 LLM 倾向 CHAT)
 
         Returns:
-            QueryIntent 枚举 (RESEARCH / CHAT / SHORT_QUERY)
+            QueryIntent 枚举 (RESEARCH / CHAT / SHORT_QUERY / OFF_TOPIC)
         """
         async with trace_chain(
             name="query-intent-classifier",
@@ -598,7 +954,7 @@ class QueryIntentClassifier:
                 "has_report": has_report,
             },
         ) as span:
-            # 第一层: 规则分类
+            # 第一层: 规则分类 (含闲聊正则)
             rule_result = self._rule_classify(query)
             if rule_result is not None:
                 span.update(
@@ -610,8 +966,14 @@ class QueryIntentClassifier:
                 )
                 return rule_result.intent
 
-            # 第二层: Embeddings 语义匹配
-            if await self._semantic_match(query):
+            # 第二层: Embeddings 语义匹配 (并行查询短查询 + 离题两个 namespace)
+            # 并行执行避免串行延迟; 两个语义层独立, 任一命中即返回
+            short_match, off_topic_match = await asyncio.gather(
+                self._semantic_match(query),
+                self._semantic_match_off_topic(query),
+            )
+
+            if short_match:
                 span.update(
                     output={
                         "intent": QueryIntent.SHORT_QUERY.value,
@@ -619,11 +981,25 @@ class QueryIntentClassifier:
                     },
                     metadata={
                         "threshold": self.settings.short_query_similarity_threshold,
+                        "namespace": "short_query_patterns",
                     },
                 )
                 return QueryIntent.SHORT_QUERY
 
-            # 第三层: LLM FAST 分类
+            if off_topic_match:
+                span.update(
+                    output={
+                        "intent": QueryIntent.OFF_TOPIC.value,
+                        "layer": "semantic",
+                    },
+                    metadata={
+                        "threshold": self.settings.off_topic_similarity_threshold,
+                        "namespace": "off_topic_patterns",
+                    },
+                )
+                return QueryIntent.OFF_TOPIC
+
+            # 第三层: LLM FAST 分类 (三分类, 失败兜底 OFF_TOPIC)
             intent = await self._llm_classify(query, has_report)
             span.update(
                 output={"intent": intent.value, "layer": "llm"},

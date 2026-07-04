@@ -186,45 +186,21 @@ def detect_region(query: str) -> SearchRegion:
     - 中文字符比例 > 30% -> CN
     - 无中文字符 -> GLOBAL
     - 其他 -> AUTO
+
+    P1-03: 学术关键词列表外提到 settings.academic_keywords, 避免硬编码.
+    P1-03: academic_route_enabled=False 时跳过学术路由, 走 AUTO.
     """
     if not query:
         return SearchRegion.AUTO
 
-    query_lower = query.lower()
-
-    # 学术关键词检测 (中英文)
-    academic_keywords = (
-        # 英文学术关键词
-        "paper",
-        "research",
-        "arxiv",
-        "pubmed",
-        "scholar",
-        "doi",
-        "abstract",
-        "citation",
-        "journal",
-        "conference",
-        "thesis",
-        "literature",
-        "semanticscholar",
-        "preprint",
-        "peer-review",
-        # 中文学术关键词
-        "论文",
-        "学术",
-        "文献",
-        "期刊",
-        "会议",
-        "学位论文",
-        "引用",
-        "摘要",
-        "综述",
-        "研究论文",
-        "科研",
-    )
-    if any(kw in query_lower for kw in academic_keywords):
-        return SearchRegion.ACADEMIC
+    settings = get_settings()
+    # P1-03: 学术路由开关 (默认 True)
+    if settings.academic_route_enabled:
+        query_lower = query.lower()
+        # P1-03: 关键词从 settings 读取 (支持运行时配置覆盖)
+        academic_keywords = tuple(settings.academic_keywords)
+        if any(kw in query_lower for kw in academic_keywords):
+            return SearchRegion.ACADEMIC
 
     # 统计中文字符比例
     chinese_chars = sum(1 for c in query if "\u4e00" <= c <= "\u9fff")

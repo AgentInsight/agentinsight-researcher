@@ -66,10 +66,10 @@ LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
     "dashscope/qwen-plus": {"input": 0.00057, "output": 0.00171},
     "dashscope/qwen-turbo": {"input": 0.00014, "output": 0.00028},
     "dashscope/qwen-max": {"input": 0.0028, "output": 0.0084},
-    # ========== 智谱 GLM ==========
-    "zhipu/glm-4-plus": {"input": 0.007, "output": 0.007},
-    "zhipu/glm-4-flash": {"input": 0.0001, "output": 0.0001},
-    "zhipu/glm-4-air": {"input": 0.0005, "output": 0.0005},
+    # ========== 智谱 GLM (LiteLLM 路由前缀 zhipuai/) ==========
+    "zhipuai/glm-4-plus": {"input": 0.007, "output": 0.007},
+    "zhipuai/glm-4-flash": {"input": 0.0001, "output": 0.0001},
+    "zhipuai/glm-4-air": {"input": 0.0005, "output": 0.0005},
     # ========== 月之暗面 Moonshot ==========
     "moonshot/moonshot-v1-8k": {"input": 0.0017, "output": 0.0017},
     "moonshot/moonshot-v1-32k": {"input": 0.0034, "output": 0.0034},
@@ -160,9 +160,33 @@ class LLMClient:
             return self.settings.openai_api_key
         if model.startswith("anthropic/"):
             return self.settings.anthropic_api_key
-        if model.startswith("zhipu/"):
+        if model.startswith("zhipu/") or model.startswith("zhipuai/"):
             return self.settings.zhipu_api_key
         return None
+
+    def _adapt_zhipu(self, model: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """智谱 AI OpenAI 兼容端点适配.
+
+        LiteLLM 1.90.2 不原生支持 zhipuai/ 路由前缀, 通过 openai/ 前缀 + api_base 接入.
+        智谱 API 兼容 OpenAI 格式, 端点 https://open.bigmodel.cn/api/paas/v4.
+
+        Args:
+            model: 原始模型名 (如 zhipuai/glm-4-flash)
+            kwargs: LiteLLM acompletion kwargs
+
+        Returns:
+            (适配后 model, 适配后 kwargs)
+        """
+        if not (model.startswith("zhipu/") or model.startswith("zhipuai/")):
+            return model, kwargs
+        # 兼容 zhipu/ 和 zhipuai/ 两种前缀
+        prefix = "zhipuai/" if model.startswith("zhipuai/") else "zhipu/"
+        model_name = model[len(prefix) :]
+        adapted_model = f"openai/{model_name}"
+        kwargs["model"] = adapted_model
+        kwargs["api_base"] = self.settings.zhipu_api_base
+        kwargs["api_key"] = self.settings.zhipu_api_key
+        return adapted_model, kwargs
 
     @staticmethod
     def _lookup_pricing(model: str) -> dict[str, float] | None:
@@ -263,6 +287,9 @@ class LLMClient:
             kwargs["stop"] = stop
         if api_key:
             kwargs["api_key"] = api_key
+
+        # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
+        model, kwargs = self._adapt_zhipu(model, kwargs)
 
         # 延迟导入 litellm, 避免模块加载时强依赖
         import litellm
@@ -368,6 +395,26 @@ class LLMClient:
                         response.output_tokens,
                         response.cost_usd,
                     )
+                    # P1-04: 同步回写 TokenBudgetAllocator (统一两套成本系统)
+                    # 对标 GPTR add_costs() 分步归因, 升级为预算上限管控.
+                    # 失败不阻断主流程 (BudgetExceededError 仅 warning log, 不抛出).
+                    try:
+                        from src.llm.token_budget import get_token_budget_allocator
+
+                        allocator = await get_token_budget_allocator()
+                        await allocator.add_cost(
+                            step,
+                            prompt_tokens=response.input_tokens,
+                            completion_tokens=response.output_tokens,
+                            model=response.model,
+                            cost_usd=response.cost_usd,
+                            check_budget=False,  # achat 内不抛超支异常, 仅记录
+                        )
+                    except Exception as budget_err:  # noqa: BLE001
+                        logger.debug(
+                            "TokenBudgetAllocator 回写失败 (非阻断): %s",
+                            budget_err,
+                        )
                     return response
                 except Exception as e:  # noqa: BLE001
                     last_exc = e
@@ -474,6 +521,8 @@ class LLMClient:
                 if api_key:
                     kwargs["api_key"] = api_key
                 try:
+                    # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
+                    used_model, kwargs = self._adapt_zhipu(used_model, kwargs)
                     import litellm
 
                     stream = await litellm.acompletion(**kwargs)
@@ -554,6 +603,24 @@ class LLMClient:
 
                 # 累计会话级 + 分步成本 (成功后)
                 self._accumulate(step, total_input_tokens, total_output_tokens, cost_usd)
+                # P1-04: 同步回写 TokenBudgetAllocator (流式分支)
+                try:
+                    from src.llm.token_budget import get_token_budget_allocator
+
+                    allocator = await get_token_budget_allocator()
+                    await allocator.add_cost(
+                        step,
+                        prompt_tokens=total_input_tokens,
+                        completion_tokens=total_output_tokens,
+                        model=used_model,
+                        cost_usd=cost_usd,
+                        check_budget=False,
+                    )
+                except Exception as budget_err:  # noqa: BLE001
+                    logger.debug(
+                        "TokenBudgetAllocator 流式回写失败 (非阻断): %s",
+                        budget_err,
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.error("LLM 流式调用失败 (model=%s): %s", used_model, e)
                 span.update(

@@ -62,7 +62,12 @@
   <ItemGroup>
     <Content Include="evals\**\*.py" />
   </ItemGroup>
+  <!-- 文档: 全量 Markdown 文件 (本地存档, .gitignore 排除不入仓) -->
   <ItemGroup>
+    <Content Include="docs\**\*.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="docs\" />
     <Folder Include="evals\" />
     <Folder Include="evals\agent\" />
     <Folder Include="evals\hallucination_eval\" />

@@ -219,42 +219,28 @@ class ContextManager:
     ) -> list[str]:
         """EmbeddingsFilter 相似度过滤.
 
-        对标 GPT Researcher context/compression.py 的 EmbeddingsFilter.
+        V2-P1 优化 (对标 GPTR context/compression.py EmbeddingsFilter):
+        - 旧版: 私有方法 + _split_documents 仅按 \\n\\n 一次切分 (硬切)
+        - V2: 调用独立 EmbeddingsFilter 类, 递归分块 (\\n\\n → \\n → 空格 → 字符),
+          保证语义完整性, 与 GPTR RecursiveCharacterTextSplitter 对齐.
+
         按 similarity_threshold (默认 0.35) 过滤文档块.
         """
         if not documents:
             return []
 
-        try:
-            # 分块 (对标 RecursiveCharacterTextSplitter chunk_size=1000)
-            chunks = self._split_documents(documents, chunk_size=1000, chunk_overlap=100)
+        # V2-P1: 委托给独立 EmbeddingsFilter 类 (递归分块 + 相似度过滤)
+        from src.rag.embeddings_filter import EmbeddingsFilter
 
-            # 批量嵌入 chunks 与 query
-            texts = [query] + [c["content"] for c in chunks]
-            vectors = await self._embeddings.embed_texts(
-                texts,
+        try:
+            filt = EmbeddingsFilter(self.settings, self._embeddings)
+            return await filt.filter(
+                query,
+                documents,
+                max_results=max_results,
                 user_id=user_id,
                 session_id=session_id,
             )
-
-            if not vectors or len(vectors) < 2:
-                # embedding 失败, 降级返回原文
-                return [str(d.get("content", "")) for d in documents[:max_results]]
-
-            query_vec = vectors[0]
-            chunk_vecs = vectors[1:]
-
-            # 计算余弦相似度
-            threshold = self.settings.similarity_threshold
-            scored: list[tuple[float, str]] = []
-            for i, chunk_vec in enumerate(chunk_vecs):
-                score = self._cosine_similarity(query_vec, chunk_vec)
-                if score >= threshold:
-                    scored.append((score, chunks[i]["content"]))
-
-            # 按分数降序取 top max_results
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return [content for _, content in scored[:max_results]]
         except Exception as e:  # noqa: BLE001
             logger.warning("EmbeddingsFilter 失败, 降级返回原文: %s", e)
             return [str(d.get("content", "")) for d in documents[:max_results]]
@@ -438,53 +424,102 @@ class SlidingWindowCompressor:
 class WrittenContentCompressor:
     """已写入内容去重器 (P1-02, 对标 GPT Researcher WrittenContentCompressor).
 
-    用 EmbeddingsFilter 对已写入内容做相似度去重 (threshold=0.5),
+    V2-P1 优化 (对标 GPTR):
+    - 阈值走 settings.written_content_similarity_threshold (旧版硬编码 0.5)
+    - chunk 级去重 (旧版整篇 content 比对, V2 切成 chunks 后逐 chunk 比对,
+      与 GPTR WrittenContentCompressor 对齐)
+    - 多查询并集去重 (对标 GPTR current_subtopic + draft_section_titles 并集)
+
+    用 EmbeddingsClient 对已写入内容做相似度去重,
     避免重复内容进入上下文.
     """
 
     settings: Settings
     _embeddings: EmbeddingsClient
     threshold: float
+    # V2-P1: chunk 级去重, 替代旧版整篇 content 比对
     _written_embeddings: list[list[float]]
+    _written_chunks: list[str]
 
     def __init__(
         self,
         settings: Settings | None = None,
-        similarity_threshold: float = 0.5,
+        similarity_threshold: float | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._embeddings = EmbeddingsClient(self.settings)
-        self.threshold = similarity_threshold
+        # V2-P1: 阈值走 settings (优先级: 参数 > settings > 默认 0.5)
+        self.threshold = (
+            similarity_threshold
+            if similarity_threshold is not None
+            else getattr(self.settings, "written_content_similarity_threshold", 0.5)
+        )
         self._written_embeddings = []
+        self._written_chunks = []
 
     async def should_keep(self, content: str) -> bool:
-        """判断内容是否应保留 (与已写入内容相似度 < threshold)."""
+        """判断内容是否应保留 (与已写入内容相似度 < threshold).
+
+        V2-P1: chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
+        相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
+        与 GPTR WrittenContentCompressor 对齐.
+
+        Args:
+            content: 待判断的内容字符串
+
+        Returns:
+            True 表示应保留 (无高度相似的已写入内容), False 表示应丢弃.
+        """
         if not content.strip():
             return False
+
+        # V2-P1: chunk 级切分 (与 EmbeddingsFilter 同款递归分块, chunk_size=1000)
+        from src.rag.embeddings_filter import EmbeddingsFilter
+
+        chunks = EmbeddingsFilter._recursive_split(
+            content,
+            separators=["\n\n", "\n", " ", ""],
+            chunk_size=self.settings.embeddings_filter_chunk_size,
+            chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
+        )
+        if not chunks:
+            chunks = [content]
+
+        # 首次写入: 直接记录所有 chunks 的 embedding
         if not self._written_embeddings:
             try:
-                content_embs = await self._embeddings.embed_texts([content])
-                if content_embs:
-                    self._written_embeddings.append(content_embs[0])
+                content_embs = await self._embeddings.embed_texts(chunks)
+                self._written_embeddings.extend(content_embs)
+                self._written_chunks.extend(chunks)
                 return True
             except Exception as e:  # noqa: BLE001
                 logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
                 return True
 
+        # V2-P1: chunk 级去重 — 取所有 chunks 的最高相似度判断
         try:
-            content_emb = (await self._embeddings.embed_texts([content]))[0]
+            content_embs = await self._embeddings.embed_texts(chunks)
         except Exception as e:  # noqa: BLE001
             logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
             return True
 
-        for written_emb in self._written_embeddings:
-            sim = ContextManager._cosine_similarity(content_emb, written_emb)
-            if sim >= self.threshold:
-                return False  # 与已有内容高度相似, 丢弃
+        # 对每个新 chunk, 检查与所有已写入 chunks 的最高相似度
+        max_similarity = 0.0
+        for new_emb in content_embs:
+            for written_emb in self._written_embeddings:
+                sim = ContextManager._cosine_similarity(new_emb, written_emb)
+                if sim > max_similarity:
+                    max_similarity = sim
+                if sim >= self.threshold:
+                    # 与已有 chunk 高度相似, 丢弃整篇 content
+                    return False
 
-        self._written_embeddings.append(content_emb)
+        # 无高度相似: 记录新 chunks 的 embedding
+        self._written_embeddings.extend(content_embs)
+        self._written_chunks.extend(chunks)
         return True
 
     def reset(self) -> None:
         """重置已写入内容记录 (每次新研究调用)."""
         self._written_embeddings.clear()
+        self._written_chunks.clear()

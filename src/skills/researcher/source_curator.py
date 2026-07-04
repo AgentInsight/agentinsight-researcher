@@ -73,9 +73,13 @@ class SourceCurator:
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     def _score_credibility(self, source: dict[str, Any]) -> float:
-        """计算来源可信度 (0-1, P2-02).
+        """计算来源可信度 (0-1, P2-02 + V2-P1).
 
-        综合域名权威性 + 内容长度 + 是否含统计数据.
+        V2-P1 优化 (对标 GPTR SourceCurator Quantitative Value):
+        - 旧版: 含统计数据仅 +0.03 微弱加分
+        - V2: 将 Quantitative Value 提升为独立维度, 含统计指标 (百分比/金额/CAGR) 显著加分 (+0.10)
+
+        综合域名权威性 + 内容长度 + 数据丰富度 (Quantitative Value).
         对标 GPTR curate_sources 域名可信度评估.
 
         Args:
@@ -96,10 +100,55 @@ class SourceCurator:
             score += 0.05
         elif len(content) < 200:
             score -= 0.10
-        # 含统计数据 (前 500 字符含数字)
-        if any(c.isdigit() for c in content[:500]):
-            score += 0.03
+
+        # V2-P1: Quantitative Value 评估 (对标 GPTR SourceCurator 第 5 维)
+        # GPTR 强调 "Quantitative Value" 5 次, 含统计数据的来源优先级显著高于纯文字描述.
+        quant_score = self._score_quantitative_value(content)
+        score += quant_score
+
         return max(0.0, min(1.0, score))
+
+    @staticmethod
+    def _score_quantitative_value(content: str) -> float:
+        """评估内容的数据丰富度 (V2-P1, 对标 GPTR Quantitative Value).
+
+        GPTR SourceCurator 的第 5 维评估标准, 含具体数字/百分比/金额/统计指标
+        的来源优先级显著高于纯文字描述. GPTR prompt 中 "Quantitative Value" 出现 5 次.
+
+        Args:
+            content: 来源内容文本
+
+        Returns:
+            数据丰富度加分 (0.0 - 0.15)
+        """
+        if not content:
+            return 0.0
+
+        # 检查前 1000 字符内的统计指标
+        text = content[:1000]
+        bonus = 0.0
+
+        # 1. 百分比 (如 "18.5%", "增长 20%")
+        if "%" in text:
+            bonus += 0.04
+
+        # 2. 金额 (如 "$1.2T", "1.2 万亿", "100亿美元")
+        money_patterns = ["$", "¥", "万", "亿", "trillion", "billion", "million"]
+        if any(p in text.lower() for p in money_patterns):
+            bonus += 0.04
+
+        # 3. CAGR / 增长率 / 同比 / 环比 (统计学指标)
+        growth_patterns = ["CAGR", "cagr", "增长率", "同比", "环比", "复合增长", "年增长"]
+        if any(p in text for p in growth_patterns):
+            bonus += 0.03
+
+        # 4. 数字密度 (每 100 字符含数字个数, 高密度 → 数据丰富)
+        digit_count = sum(1 for c in text if c.isdigit())
+        density = digit_count / max(1, len(text) / 100)
+        if density >= 5:  # 每 100 字符 ≥ 5 个数字
+            bonus += 0.04
+
+        return min(0.15, bonus)
 
     async def curate_sources(
         self,

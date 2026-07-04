@@ -201,6 +201,113 @@ class PromptFamily(ABC):
             Tone 提示词片段, 附加到主 prompt 末尾
         """
 
+    # ========== V2-P1: detailed_report 专用 prompt (对标 GPTR detailed_report.py) ==========
+    # 旧版 4 个 prompt 内联在 ReportGenerator, V2 提取到 PromptFamily 统一管理.
+
+    @abstractmethod
+    def subtopics_prompt(
+        self,
+        query: str,
+        context: str,
+        role_persona: str,
+        max_subtopics: int = 5,
+    ) -> str:
+        """detailed_report 子主题拆解 prompt (对标 GPTR generate_subtopics).
+
+        Args:
+            query: 主研究问题
+            context: 初始检索上下文
+            role_persona: 角色 persona
+            max_subtopics: 子主题数量上限
+
+        Returns:
+            完整 prompt 字符串
+        """
+
+    @abstractmethod
+    def introduction_prompt(
+        self,
+        query: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        current_date: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        """detailed_report 引言 prompt (对标 GPTR write_introduction).
+
+        Args:
+            query: 主研究问题
+            context: 初始检索上下文
+            references: 参考文献文本
+            role_persona: 角色 persona
+            tone: 语气
+            current_date: 当前日期
+            style_desc: 报告风格描述
+            word_min: 引言字数下限
+            word_max: 引言字数上限
+
+        Returns:
+            完整 prompt 字符串
+        """
+
+    @abstractmethod
+    def section_prompt(
+        self,
+        topic: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 800,
+        word_max: int = 1200,
+    ) -> str:
+        """detailed_report 子主题章节 prompt (对标 GPTR write_section).
+
+        Args:
+            topic: 子主题名称
+            context: 子主题检索上下文
+            references: 参考文献文本
+            role_persona: 角色 persona
+            tone: 语气
+            style_desc: 报告风格描述
+            word_min: 章节字数下限
+            word_max: 章节字数上限
+
+        Returns:
+            完整 prompt 字符串
+        """
+
+    @abstractmethod
+    def conclusion_prompt(
+        self,
+        query: str,
+        sections_summary: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        """detailed_report 结论 prompt (对标 GPTR write_conclusion).
+
+        Args:
+            query: 主研究问题
+            sections_summary: 已写章节摘要
+            role_persona: 角色 persona
+            tone: 语气
+            style_desc: 报告风格描述
+            word_min: 结论字数下限
+            word_max: 结论字数上限
+
+        Returns:
+            完整 prompt 字符串
+        """
+
 
 class DefaultPromptFamily(PromptFamily):
     """中文优先默认实现.
@@ -283,19 +390,30 @@ class DefaultPromptFamily(PromptFamily):
     ) -> str:
         # V4-P2-01: 注入报告风格预设描述, 未注册风格降级为 academic
         style_desc = self._STYLE_PROMPTS.get(report_style, self._STYLE_PROMPTS["academic"])
+        # V2-P1: 对标 GPTR writer_prompt 精细之处 (skills/writer.py:report_prompt)
+        # - MUST 含具体观点 (非泛泛描述)
+        # - MUST markdown 表格呈现对比数据
+        # - MUST 编号引用 [n] 对应 reference list (对标 GPTR in-text citation)
+        # - MUST 至少 {word_limit} 字 (硬下限)
+        # - 来源可信度优先级 (官方 > 学术 > 行业 > 自媒体)
         return f"""{agent_role}
 
 请基于以下检索到的上下文, 撰写一份关于「{query}」的研究报告.
 
-要求:
-1. 报告字数不少于 {word_limit} 字
-2. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
-3. 结构化标题: # ## ### 层级
-4. Web 源必须超链接引用: ([说明](url))
-5. 末尾附参考文献列表 (APA 格式)
-6. 注入当前日期: {current_date}
-7. 不得编造未在上下文中出现的数据
-8. 报告风格: {style_desc}
+【MUST 必须满足】:
+1. **字数下限**: 报告不少于 {word_limit} 字 (硬要求, 不达标视为失败)
+2. **具体观点**: 每个论点 MUST 含具体数据/案例/数字, 严禁泛泛描述 (如"市场很大"→"2025 年市场规模 1.2 万亿元, CAGR 18.5%")
+3. **Markdown 表格**: 至少 1 个 markdown 表格呈现对比数据 (多维度对比/趋势数据/竞争格局等)
+4. **编号引用**: 行内引用使用 `[n]` 编号格式 (对应末尾参考文献列表, 如 "市场规模 1.2 万亿[1]"), 同时 Web 源附超链接 `([说明](url))`
+5. **结构化标题**: `#`/`##`/`###` 三级层级
+6. **来源可信度优先**: 优先引用 官方机构 > 学术期刊 > 行业媒体 > 自媒体, 自媒体来源需标注"未经证实"
+
+【软要求】:
+- 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
+- 末尾附参考文献列表 (APA 格式, 含 [n] 编号)
+- 注入当前日期: {current_date}
+- 不得编造未在上下文中出现的数据 (幻觉零容忍)
+- 报告风格: {style_desc}
 
 报告结构:
 {structure_hint}
@@ -315,23 +433,30 @@ class DefaultPromptFamily(PromptFamily):
         agent_role: str,
         max_results: int,
     ) -> str:
+        # V2-P1: 对标 GPTR SourceCurator (skills/curator.py)
+        # - 强调 "Quantitative Value" (GPTR 出现 5 次)
+        # - 5 维评估 (Relevance/Credibility/Currency/Objectivity/Quantitative Value)
+        # - "Err on the side of inclusion" (宁多勿少)
         return f"""{agent_role}
 
 你的任务是: 评估以下搜索来源的相关性与可信度, 选出最值得引用的 {max_results} 条.
 
-评估标准:
-1. 相关性: 与研究问题的相关程度 (0-10 分)
-2. 可信度: 来源权威性 (官方机构 > 学术期刊 > 行业媒体 > 自媒体)
-3. 时效性: 信息新鲜度
-4. 深度: 内容详实程度
+【5 维评估标准】(对标 GPTR SourceCurator):
+1. **相关性 (Relevance)**: 与研究问题的相关程度 (0-10 分)
+2. **可信度 (Credibility)**: 来源权威性 (官方机构 > 学术期刊 > 行业媒体 > 自媒体)
+3. **时效性 (Currency)**: 信息新鲜度 (优先近 12 个月数据)
+4. **客观性 (Objectivity)**: 是否存在明显立场偏见或商业推广
+5. **数据丰富度 (Quantitative Value)**: 是否含具体数字/百分比/金额/统计指标 (Quantitative Value 是核心评估维度, 含统计数据的来源优先级显著高于纯文字描述)
+
+【原则】: Err on the side of inclusion (宁多勿少) — 数据丰富的来源即使相关性略低也优先保留.
 
 研究问题: {query}
 
 来源列表:
 {sources_text}
 
-请返回 JSON 数组, 每项含 index (1-based) 与 score (0-10):
-[{{"index": 1, "score": 9, "reason": "官方权威数据"}}, ...]
+请返回 JSON 数组, 每项含 index (1-based) 与 score (0-10) 与 reason (含数据丰富度说明):
+[{{"index": 1, "score": 9, "reason": "官方权威数据, 含市场规模 1.2 万亿元与 CAGR 18.5% 统计指标"}}, ...]
 
 仅返回最相关的 {max_results} 条的 JSON 数组:"""
 
@@ -468,6 +593,140 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 
 请回答用户追问:"""
 
+    # ========== V2-P1: detailed_report 专用 prompt 实现 (对标 GPTR detailed_report.py) ==========
+
+    def subtopics_prompt(
+        self,
+        query: str,
+        context: str,
+        role_persona: str,
+        max_subtopics: int = 5,
+    ) -> str:
+        # 对标 GPTR generate_subtopics (detailed_report.py)
+        # 用 STRATEGIC LLM 拆解子主题, temperature=0.25 (GPTR)
+        return f"""{role_persona}
+
+请基于以下研究问题与初始上下文, 拆解为 3-{max_subtopics} 个用于分章节深入研究的子主题.
+
+要求:
+1. 子主题应覆盖问题的不同维度 (如市场/技术/竞争/政策/趋势等)
+2. 子主题应基于上下文中实际出现的内容, 不得编造
+3. 每个子主题为简洁的中/英文短语
+4. 子主题之间应互斥互补, 避免内容重叠
+5. 返回 JSON 数组格式: ["子主题1", "子主题2", ...]
+
+研究问题: {query}
+
+初始上下文:
+{context[:4000]}
+
+请返回 3-{max_subtopics} 个子主题的 JSON 数组:"""
+
+    def introduction_prompt(
+        self,
+        query: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        current_date: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        # 对标 GPTR write_introduction (detailed_report.py)
+        # 用 SMART LLM 写引言, temperature=0.25 (GPTR)
+        return f"""{role_persona}
+
+请基于以下上下文, 为「{query}」研究报告撰写引言部分.
+
+要求:
+1. 简述研究背景、目的与核心发现
+2. 字数 {word_min}-{word_max} 字
+3. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
+4. Web 源必须超链接引用: ([说明](url))
+5. 不得编造未在上下文中出现的数据
+6. 注入当前日期: {current_date}
+7. 仅输出引言内容 (## 引言 标题下), 不含其他章节
+8. 写作风格: {style_desc}
+
+上下文:
+{context[:6000]}
+
+参考文献来源:
+{references}
+
+请输出引言 (以 `## 引言` 开头):"""
+
+    def section_prompt(
+        self,
+        topic: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 800,
+        word_max: int = 1200,
+    ) -> str:
+        # 对标 GPTR write_section (detailed_report.py)
+        # 用 SMART LLM 写章节, temperature=0.35 (GPTR)
+        # V2-P1: 章节字数 500-1000 → 800-1200 对齐 GPTR
+        return f"""{role_persona}
+
+请基于以下子主题上下文, 撰写「{topic}」章节内容.
+
+【MUST 必须满足】:
+1. **字数 {word_min}-{word_max} 字** (硬要求, 不达标视为失败)
+2. **具体观点**: 每个论点 MUST 含具体数据/案例/数字, 严禁泛泛描述
+3. **Markdown 表格**: 至少 1 个表格呈现对比数据 (多维度对比/趋势数据/竞争格局等)
+4. **编号引用**: 行内引用使用 `[n]` 编号格式, 同时 Web 源附超链接 `([说明](url))`
+5. **结构化标题**: `##` 章节标题 + `###` 子小节
+6. **来源可信度优先**: 优先引用 官方 > 学术 > 行业 > 自媒体
+
+【软要求】:
+- 语气: {tone}
+- 不得编造未在上下文中出现的数据 (幻觉零容忍)
+- 写作风格: {style_desc}
+- 仅输出本章节内容 (`## {topic}` 下), 不含其他章节
+
+子主题上下文:
+{context[:6000]}
+
+参考文献来源:
+{references}
+
+请输出本章节 (以 `## {topic}` 开头):"""
+
+    def conclusion_prompt(
+        self,
+        query: str,
+        sections_summary: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        # 对标 GPTR write_conclusion (detailed_report.py)
+        # 用 SMART LLM 写结论, temperature=0.25 (GPTR)
+        return f"""{role_persona}
+
+请基于以下已写章节内容, 为「{query}」研究报告撰写结论部分.
+
+要求:
+1. 总结核心发现与洞察 (含具体数据回引)
+2. 提出未来展望与建议 (可操作性)
+3. 字数 {word_min}-{word_max} 字
+4. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
+5. 仅输出结论内容 (## 结论 标题下), 不含其他章节
+6. 写作风格: {style_desc}
+
+已写章节摘要:
+{sections_summary[:6000]}
+
+请输出结论 (以 `## 结论` 开头):"""
+
 
 class EnglishPromptFamily(PromptFamily):
     """英文实现."""
@@ -533,19 +792,25 @@ Return a JSON array of {max_iterations} sub-queries:"""
             "news": "News style: inverted pyramid, 5W1H, objective reporting",
         }
         style_desc = style_map.get(report_style, style_map["academic"])
+        # V2-P1: align with GPTR writer_prompt (specific points + table + [n] citation)
         return f"""{agent_role}
 
 Please write a research report on "{query}" based on the retrieved context below.
 
-Requirements:
-1. Report should be at least {word_limit} words
-2. Tone: {tone} (objective/analytical/opinionated/casual)
-3. Structured headings: # ## ### hierarchy
-4. Web sources must be hyperlinked: ([description](url))
-5. Include a reference list at the end (APA format)
-6. Current date: {current_date}
-7. Do not fabricate data not present in the context
-8. Report style: {style_desc}
+【MUST requirements】:
+1. **Word count floor**: at least {word_limit} words (hard requirement, fail if not met)
+2. **Specific points**: each argument MUST contain specific data/cases/numbers, vague descriptions forbidden (e.g., "market is large" → "2025 market size $1.2T, CAGR 18.5%")
+3. **Markdown table**: at least 1 markdown table presenting comparison data
+4. **Numbered citations**: in-text citations use `[n]` format (matching the reference list, e.g., "market size $1.2T[1]"), plus hyperlinks `([description](url))`
+5. **Structured headings**: `#`/`##`/`###` three-level hierarchy
+6. **Source credibility priority**: Official > Academic > Industry > Self-media; self-media sources must be marked "unverified"
+
+【Soft requirements】:
+- Tone: {tone} (objective/analytical/opinionated/casual)
+- Reference list at the end (APA format, with [n] numbering)
+- Current date: {current_date}
+- Do not fabricate data not present in the context (zero hallucination)
+- Report style: {style_desc}
 
 Report structure:
 {structure_hint}
@@ -565,23 +830,27 @@ Generate the complete research report (Markdown format):"""
         agent_role: str,
         max_results: int,
     ) -> str:
+        # V2-P1: align with GPTR SourceCurator (5 dimensions + Quantitative Value)
         return f"""{agent_role}
 
 Your task is: evaluate the relevance and credibility of the following search sources, and select the top {max_results} most worthy of citation.
 
-Evaluation criteria:
-1. Relevance: how related to the research question (0-10)
-2. Credibility: source authority (official > academic journals > industry media > blogs)
-3. Timeliness: information freshness
-4. Depth: content detail level
+【5-dimension evaluation criteria】 (aligned with GPTR SourceCurator):
+1. **Relevance**: how related to the research question (0-10)
+2. **Credibility**: source authority (official > academic journals > industry media > blogs)
+3. **Currency**: information freshness (prioritize last 12 months)
+4. **Objectivity**: whether there is obvious bias or commercial promotion
+5. **Quantitative Value**: whether it contains specific numbers/percentages/amounts/statistics (Quantitative Value is a core evaluation dimension; sources with statistics are significantly prioritized over pure text descriptions)
+
+【Principle】: Err on the side of inclusion — data-rich sources are preferred even if relevance is slightly lower.
 
 Research question: {query}
 
 Source list:
 {sources_text}
 
-Return a JSON array, each item containing index (1-based) and score (0-10):
-[{{"index": 1, "score": 9, "reason": "authoritative official data"}}, ...]
+Return a JSON array, each item containing index (1-based), score (0-10), and reason (with quantitative value description):
+[{{"index": 1, "score": 9, "reason": "authoritative official data, contains $1.2T market size and 18.5% CAGR statistics"}}, ...]
 
 Return only the JSON array of the top {max_results} most relevant sources:"""
 
@@ -717,6 +986,131 @@ Existing research report:
 {report_md}
 
 Answer the user's follow-up question:"""
+
+    # ========== V2-P1: detailed_report prompts (English) ==========
+
+    def subtopics_prompt(
+        self,
+        query: str,
+        context: str,
+        role_persona: str,
+        max_subtopics: int = 5,
+    ) -> str:
+        return f"""{role_persona}
+
+Based on the following research question and initial context, decompose into 3-{max_subtopics} subtopics for in-depth chapter-by-chapter research.
+
+Requirements:
+1. Subtopics should cover different dimensions (e.g., market/technology/competition/policy/trends)
+2. Subtopics must be based on content actually present in the context, no fabrication
+3. Each subtopic should be a concise phrase
+4. Subtopics should be mutually exclusive and collectively exhaustive
+5. Return JSON array format: ["subtopic1", "subtopic2", ...]
+
+Research question: {query}
+
+Initial context:
+{context[:4000]}
+
+Return a JSON array of 3-{max_subtopics} subtopics:"""
+
+    def introduction_prompt(
+        self,
+        query: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        current_date: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        return f"""{role_persona}
+
+Based on the following context, write the introduction section for the research report on "{query}".
+
+Requirements:
+1. Briefly describe research background, purpose, and core findings
+2. Word count: {word_min}-{word_max} words
+3. Tone: {tone}
+4. Web sources must be hyperlinked: ([description](url))
+5. Do not fabricate data not present in the context
+6. Current date: {current_date}
+7. Output only the introduction (under ## Introduction), no other sections
+8. Writing style: {style_desc}
+
+Context:
+{context[:6000]}
+
+Reference sources:
+{references}
+
+Output the introduction (starting with `## Introduction`):"""
+
+    def section_prompt(
+        self,
+        topic: str,
+        context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 800,
+        word_max: int = 1200,
+    ) -> str:
+        return f"""{role_persona}
+
+Based on the following subtopic context, write the "{topic}" section content.
+
+【MUST requirements】:
+1. **Word count: {word_min}-{word_max} words** (hard requirement)
+2. **Specific points**: Each argument MUST contain specific data/cases/numbers, vague descriptions forbidden
+3. **Markdown table**: At least 1 table presenting comparison data
+4. **Numbered citations**: Use `[n]` format for in-text citations, plus hyperlinks `([description](url))`
+5. **Structured headings**: `##` section title + `###` subsections
+6. **Source credibility priority**: Official > Academic > Industry > Self-media
+
+【Soft requirements】:
+- Tone: {tone}
+- Do not fabricate data (zero hallucination)
+- Writing style: {style_desc}
+- Output only this section (under `## {topic}`), no other sections
+
+Subtopic context:
+{context[:6000]}
+
+Reference sources:
+{references}
+
+Output this section (starting with `## {topic}`):"""
+
+    def conclusion_prompt(
+        self,
+        query: str,
+        sections_summary: str,
+        role_persona: str,
+        tone: str,
+        style_desc: str,
+        word_min: int = 300,
+        word_max: int = 500,
+    ) -> str:
+        return f"""{role_persona}
+
+Based on the following written section content, write the conclusion section for the research report on "{query}".
+
+Requirements:
+1. Summarize core findings and insights (with specific data references)
+2. Propose future outlook and actionable recommendations
+3. Word count: {word_min}-{word_max} words
+4. Tone: {tone}
+5. Output only the conclusion (under ## Conclusion), no other sections
+6. Writing style: {style_desc}
+
+Written section summaries:
+{sections_summary[:6000]}
+
+Output the conclusion (starting with `## Conclusion`):"""
 
 
 # ========== 工厂路由 ==========

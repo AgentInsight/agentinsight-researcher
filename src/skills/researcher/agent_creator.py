@@ -146,7 +146,12 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """LLM 动态生成角色 persona (对标 GPTR actions/agent_creator.py:18-62)."""
+        """LLM 动态生成角色 persona (对标 GPTR actions/agent_creator.py:18-62).
+
+        V2-P1 优化 (对标 GPTR choose_agent):
+        - tier: FAST → SMART (GPTR 用 smart_llm_model, 角色生成需更精准)
+        - temperature: 0.0 → 0.15 (GPTR 用 0.15, 略带随机性生成多样化角色)
+        """
         try:
             messages = [
                 {"role": "system", "content": self._prompt_family.agent_creator_prompt(query)},
@@ -154,8 +159,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
             ]
             response = await self._llm.achat(
                 messages,
-                tier=LLMTier.FAST,
-                temperature=0.0,
+                tier=LLMTier.SMART,  # V2-P1: FAST → SMART (对标 GPTR smart_llm_model)
+                temperature=0.15,  # V2-P1: 0.0 → 0.15 (对标 GPTR choose_agent temp)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="agent-creator-llm",

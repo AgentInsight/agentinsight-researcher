@@ -33,9 +33,28 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ========== LLM 网关 (AGENTS.md 第 9 章, LiteLLM) ==========
-    fast_llm: str = "deepseek/deepseek-chat"
-    smart_llm: str = "deepseek/deepseek-chat"
-    strategic_llm: str = "deepseek/deepseek-reasoner"
+    # 三级 LLM 分层 (对标 GPTR FAST/SMART/STRATEGIC):
+    # - FAST: 快速任务 (摘要/分类/JSON 解析)
+    # - SMART: 复杂推理 (报告写作/章节生成/来源策展)
+    # - STRATEGIC: 规划 (子主题拆解/agent 角色)
+    #
+    # V2-P0 推荐方案 H (DeepSeek 全栈 + 智谱免费层, 已应用为默认值):
+    #   fast_llm = "zhipuai/glm-4-flash"         # 智谱免费层, 极致成本 (8 个调用点)
+    #   smart_llm = "deepseek/deepseek-v4-flash"  # DeepSeek 轻量 (14 个调用点, 核心生成层)
+    #   strategic_llm = "deepseek/deepseek-v4-pro"  # DeepSeek 思考模式 (4 个调用点)
+    #
+    # 单次研究报告成本 ~0.18 元, 真正 3 层分离.
+    # ⚠️ 旧模型名 deepseek-chat / deepseek-reasoner 将于 2026-07-24 停用, 已迁移到 v4 命名.
+    # ⚠️ 智谱 LiteLLM 路由前缀为 zhipuai/ (非 zhipu/).
+    #
+    # 备选方案 B (质量优先, 中文写作国产第一):
+    #   fast_llm = "zhipuai/glm-4-flash"
+    #   smart_llm = "dashscope/qwen-max"        # 中文写作最强 (单次研究 ~0.80 元)
+    #   strategic_llm = "deepseek/deepseek-v4-pro"
+    # 启用方案 B 需配置 DASHSCOPE_API_KEY.
+    fast_llm: str = "zhipuai/glm-4-flash"
+    smart_llm: str = "deepseek/deepseek-v4-flash"
+    strategic_llm: str = "deepseek/deepseek-v4-pro"
     fast_token_limit: int = 3000
     smart_token_limit: int = 6000
     strategic_token_limit: int = 4000
@@ -52,6 +71,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     zhipu_api_key: str | None = None
+    # V2-P0: 智谱 AI OpenAI 兼容端点 (LiteLLM 1.90.2 不原生支持 zhipuai/ 前缀,
+    # 通过 openai/ 前缀 + api_base 接入智谱 GLM 系列)
+    zhipu_api_base: str = "https://open.bigmodel.cn/api/paas/v4"
+    # V2-P0: DashScope (阿里通义 Qwen) API Key, 备选方案 B smart_llm=qwen-max 时启用
+    dashscope_api_key: str | None = None
 
     # ========== 图像生成 (P2-06 报告配图, deepseek-v4-flash) ==========
     # 用户明确要求: 用 deepseek-v4-flash (非 gemini). 通过 LiteLLM aimage_generation 调用.
@@ -190,6 +214,23 @@ class Settings(BaseSettings):
     deep_research_adaptive: bool = False  # 自适应深度开关 (V4-P2-02, 默认关闭)
     curate_sources: bool = False
 
+    # ========== V2 对齐 GPTR 优化 (V2-P0/P1) ==========
+    # WrittenContentCompressor 跨子主题去重阈值 (对标 GPTR WrittenContentCompressor threshold=0.5)
+    # 旧版硬编码 0.5, V2 走 settings 配置 (V2-P1).
+    written_content_similarity_threshold: float = 0.5
+    # EmbeddingsFilter 分块参数 (对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000)
+    embeddings_filter_chunk_size: int = 1000
+    embeddings_filter_chunk_overlap: int = 100
+    # EmbeddingsFilter 返回 Top-K (对标 GPTR EmbeddingsFilter k=20)
+    embeddings_filter_top_k: int = 20
+    # detailed_report 章节字数下限/上限 (对标 GPTR 800-1200, V2-P1)
+    # 旧版 500-1000, V2 提升到 800-1200 对齐 GPTR.
+    detailed_section_word_min: int = 800
+    detailed_section_word_max: int = 1200
+    # detailed_report 引言/结论字数 (对标 GPTR 300-500, 保持)
+    detailed_intro_word_min: int = 300
+    detailed_intro_word_max: int = 500
+
     # ========== 评审与事实核查 (P0-Future-01/02) ==========
     max_revisions: int = 3  # Reviewer→Reviser 修订循环上限 (P0-Future-01 守卫)
     fact_check_enabled: bool = True  # FactChecker 事实核查开关 (P0-Future-02)
@@ -200,6 +241,22 @@ class Settings(BaseSettings):
     short_query_reply: str = "您好！我是研究助手，请提供您想研究的主题，我将为您生成详细的研究报告。"  # 短查询回复语(用户可配置)
     # 语义匹配相似度阈值 (Embeddings + Qdrant 检测短查询, top-1 score > 阈值 → SHORT_QUERY)
     short_query_similarity_threshold: float = 0.85
+
+    # ========== 闲聊/离题保护 (P1-Future-07, 对标 Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail) ==========
+    # 非研究/分析类输入 (闲聊/问候/身份询问/娱乐/常识/私人问题) 统一导向固定回复, 零 LLM 成本.
+    # 三层分类器 (规则→Embeddings 语义→LLM) 命中 OFF_TOPIC 即返回 off_topic_reply, 不走任何 graph.
+    off_topic_enabled: bool = True  # 闲聊/离题保护开关
+    off_topic_reply: str = (
+        "您好！我是研究助手，专注于深度研究和分析。"
+        "请提供您想研究的主题（例如'分析新能源汽车市场'），"
+        "我将为您生成详细的研究报告。"
+    )  # 离题回复语 (用户可配置)
+    # 离题语义匹配阈值 (略低于短查询阈值, 因为闲聊句子更长, 语义距离更大)
+    off_topic_similarity_threshold: float = 0.75
+    # LLM 分类失败时的兜底意图 (业界标准: 走最轻路径, 避免误导向高成本研究流程)
+    llm_classify_fallback: Literal["research", "off_topic"] = "off_topic"
+    # CHAT 意图首轮保护: 无已有报告时降级 OFF_TOPIC (避免首轮闲聊消耗 SMART LLM)
+    chat_requires_report: bool = True
 
     # ========== 人在回路 (P0-Future-03 Human-in-the-loop) ==========
     # human_review_enabled=True 时, 多 Agent 图在 agent_creator 之后、supervisor 之前
@@ -237,9 +294,49 @@ class Settings(BaseSettings):
         "basic_report", "detailed_report", "deep_research", "summary", "subtopics"
     ] = "basic_report"
     total_words: int = 1200
-    report_format_style: str = "APA"
+    # P1-02: 引用格式风格 (APA/MLA/Chicago/GB7714), 默认 APA.
+    # 在 report_generator._format_sources 中读取, 代码层实现真实格式化 (优于 GPTR 仅 LLM 生成).
+    report_format_style: Literal["APA", "MLA", "Chicago", "GB7714"] = "APA"
     # V4-P2-01: 报告风格预设, 支持 academic/business/casual/news 4 种风格
     report_style: Literal["academic", "business", "casual", "news"] = "academic"
+    # P2-05: 报告 YAML frontmatter 开关 (默认 False, 启用后在报告首部追加元信息块).
+    # frontmatter 含 title/date/query/word_count/sources_count 字段, 便于下游解析.
+    enable_frontmatter: bool = False
+
+    # ========== 学术检索路由 (P1-03) ==========
+    # 学术关键词命中时路由到 arxiv/pubmed/semantic_scholar/openalex 优先检索.
+    # 关键词列表外提到配置, 避免硬编码在 detect_region 函数内.
+    academic_route_enabled: bool = True
+    academic_keywords: list[str] = [
+        # 英文学术关键词
+        "paper",
+        "research",
+        "arxiv",
+        "pubmed",
+        "scholar",
+        "doi",
+        "abstract",
+        "citation",
+        "journal",
+        "conference",
+        "thesis",
+        "literature",
+        "semanticscholar",
+        "preprint",
+        "peer-review",
+        # 中文学术关键词
+        "论文",
+        "学术",
+        "文献",
+        "期刊",
+        "会议",
+        "学位论文",
+        "引用",
+        "摘要",
+        "综述",
+        "研究论文",
+        "科研",
+    ]
 
     # ========== PromptFamily 策略模式 (P1-Future-04) ==========
     # 选择 prompt 策略: "default" 中文优先 | "english" 英文
