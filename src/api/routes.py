@@ -11,6 +11,7 @@ AGENTS.md 第 13/14 章硬约束:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -37,6 +38,10 @@ from src.api.middleware import (
 )
 from src.config.settings import get_settings
 from src.observability.tracing import trace_agent
+from src.skills.researcher.query_classifier import (
+    QueryIntent,
+    get_query_intent_classifier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,25 +90,18 @@ async def _get_chat_graph() -> Any:
     return _chat_graph
 
 
-async def _is_follow_up(session_id: str, request_report_type: str | None) -> bool:
-    """检测是否为追问模式 (P2-Future-03).
+async def _has_report(session_id: str) -> bool:
+    """检查会话是否已有报告 (P0-Future-05/06).
 
-    判定条件 (两者均满足):
-    1. 请求未显式指定 report_type (非新研究请求)
-    2. 会话历史中已有 report_md (从 checkpointer 读取, 表示已生成过报告)
-
+    从 checkpointer 读取会话状态, 判断是否已有 report_md.
     AGENTS.md 第 6 章: thread_id 做会话隔离, checkpointer 自动持久化.
 
     Args:
         session_id: 会话 ID (thread_id)
-        request_report_type: 请求体中的 report_type (None 表示未指定)
 
     Returns:
-        True 表示追问模式, 走 chat graph; False 表示新研究, 走 researcher graph.
+        True 表示会话已有报告 (用于意图分类 has_report 参数).
     """
-    if request_report_type is not None:
-        return False  # 显式指定 report_type, 视为新研究
-
     try:
         graph = await _get_graph()
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
@@ -112,7 +110,7 @@ async def _is_follow_up(session_id: str, request_report_type: str | None) -> boo
             report_md = state_snapshot.values.get("report_md", "")
             return bool(report_md)
     except Exception as e:  # noqa: BLE001
-        logger.warning("检测追问模式失败 (session=%s): %s", session_id, e)
+        logger.warning("检查会话报告失败 (session=%s): %s", session_id, e)
     return False
 
 
@@ -207,17 +205,37 @@ async def chat_completions(
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
 
-    # P2-Future-03: 检测追问 vs 新研究
-    # 追问模式: 会话历史已有 report_md 且请求未指定 report_type → 走 chat graph
-    # 新研究: 否则走 researcher graph (现有流程)
-    if await _is_follow_up(session_id, request.report_type):
-        # 追问模式: 走 chat graph (复用会话历史 + report_md 上下文)
+    # P0-Future-05/06: 查询意图分类 (短查询保护 + 对话/研究路由)
+    # 先检查会话是否已有报告 (用于分类器 has_report 参数)
+    has_report = await _has_report(session_id)
+    intent = await get_query_intent_classifier().classify(query, has_report)
+
+    # P0-Future-06: 短查询保护 — 直接返回回复语, 不走任何 graph
+    if intent == QueryIntent.SHORT_QUERY:
+        reply = settings.short_query_reply
+        if request.stream:
+            return StreamingResponse(
+                _stream_short_query(reply, request, session_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Session-Id": session_id,
+                },
+            )
+        return await _run_short_query(reply, request, session_id)
+
+    # P1-Future-06: CHAT 意图走 chat graph (首轮或追问)
+    # 显式指定 report_type 时强制走 researcher graph (用户明确要新研究)
+    if intent == QueryIntent.CHAT and request.report_type is None:
+        # 走 chat graph (复用会话历史 + report_md 上下文, 首轮时 report_md 为空)
         # 注意: initial_state 不含 report_md (由 checkpointer 自动加载, 避免覆盖)
         chat_state: dict[str, Any] = {
             "query": query,
             "session_id": session_id,
             "user_id": user_id,
             "agent_id": agent_id,
+            "query_intent": intent.value,
             "messages": [],
         }
         chat_config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
@@ -234,6 +252,7 @@ async def chat_completions(
         else:
             return await _run_chat(chat_state, chat_config, request, session_id)
 
+    # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
     # 报告配置 (新研究模式)
     report_type = request.report_type or settings.default_report_type
     report_format = request.report_format or settings.default_report_format
@@ -254,6 +273,7 @@ async def chat_completions(
         "session_id": session_id,
         "user_id": user_id,
         "agent_id": agent_id,
+        "query_intent": intent.value,
         "report_type": report_type,
         "report_format": report_format,
         "tone": tone,
@@ -396,12 +416,16 @@ async def _stream_research(
                         paragraphs = report_md.split("\n\n")
                         for para in paragraphs:
                             yield _sse_chunk({"content": para + "\n\n"})
+                            # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                            await asyncio.sleep(0)
                         continue  # 跳过下面的进度提示
                     elif node_name == "publisher":
                         fmt = delta.get("report_format", "markdown")
                         progress += f"已发布 ({fmt})\n"
 
                     yield _sse_chunk({"content": progress})
+                    # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                    await asyncio.sleep(0)
 
             # 输出最终报告元信息
             final_md = final_state.get("report_md", "")
@@ -463,6 +487,104 @@ async def _run_research(
             content = f"研究执行失败: {str(e)[:500]}"
 
     prompt_tokens = len(initial_state["query"]) // 4
+    completion_tokens = len(content) // 4
+
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=request.model,
+        choices=[
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    )
+
+
+# ========== 短查询保护 (P0-Future-06, 不走任何 graph) ==========
+
+
+async def _stream_short_query(
+    reply: str,
+    request: ChatCompletionRequest,
+    session_id: str,
+) -> Any:
+    """流式 SSE 短查询回复生成器 (P0-Future-06).
+
+    直接返回 settings.short_query_reply, 不走任何 graph.
+    AGENTS.md 第 10 章: 用 trace_agent 包裹作为根 span (intent=short_query).
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    def _sse_chunk(delta: dict[str, Any], finish_reason: str | None = None) -> str:
+        """构造 SSE 数据帧."""
+        chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }
+            ],
+        }
+        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    # SSE 首块 (role)
+    yield _sse_chunk({"role": "assistant"})
+
+    async with trace_agent(
+        name="agentinsight-researcher-short-query",
+        input={"session_id": session_id},
+        metadata={
+            "session_id": session_id,
+            "intent": "short_query",
+        },
+        session_id=session_id,
+    ):
+        yield _sse_chunk({"content": reply})
+
+    # SSE 末块 (finish_reason)
+    yield _sse_chunk({}, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
+async def _run_short_query(
+    reply: str,
+    request: ChatCompletionRequest,
+    session_id: str,
+) -> ChatCompletionResponse:
+    """非流式短查询回复 (P0-Future-06).
+
+    直接返回 settings.short_query_reply, 不走任何 graph.
+    AGENTS.md 第 10 章: trace_agent 根 span (intent=short_query).
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    async with trace_agent(
+        name="agentinsight-researcher-short-query",
+        input={"session_id": session_id},
+        metadata={
+            "session_id": session_id,
+            "intent": "short_query",
+        },
+        session_id=session_id,
+    ):
+        content = reply
+
+    prompt_tokens = 0
     completion_tokens = len(content) // 4
 
     return ChatCompletionResponse(
@@ -556,6 +678,8 @@ async def _stream_chat(
                                 paragraphs = msg_text.split("\n\n")
                                 for para in paragraphs:
                                     yield _sse_chunk({"content": para + "\n\n"})
+                                    # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                                    await asyncio.sleep(0)
 
         except Exception as e:
             logger.exception("对话追问流式执行失败")

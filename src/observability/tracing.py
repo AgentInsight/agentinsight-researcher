@@ -10,6 +10,9 @@ AGENTS.md 第 10 章硬约束:
 - SDK 初始化失败或运行时异常时, 所有 trace_xxx yield _NoopSpan (Null Object 模式)
 - 业务代码禁止判断 SDK 是否可用, span.update() 调用永远安全
 
+V5: 恢复单一 AgentInsight 后端 (AGENTS.md 第 4 章禁用清单第 5 条: Langfuse 已由 AgentInsight SDK 替代).
+get_tracer() 工厂仅二路分发: AgentInsight SDK 可用 → AgentInsightTracer / 不可用 → _NoopTracer.
+
 对标 AgentInsightService common/tracing.py, 提供 6 类 trace span.
 """
 
@@ -103,7 +106,390 @@ def _build_propagate_metadata(
     return result
 
 
-# ========== 6 类 trace_xxx 异步上下文管理器 ==========
+# ========== 追踪后端抽象 ==========
+
+
+class _NoopTracer:
+    """追踪后端空实现 (Null Object).
+
+    AgentInsight SDK 不可用时使用, 所有方法 yield _NoopSpan.
+    对标 _NoopSpan 降级机制, 业务代码无感.
+    """
+
+    @asynccontextmanager
+    async def trace_agent(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+    @asynccontextmanager
+    async def trace_generation(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        model: str | None = None,
+        model_parameters: dict[str, Any] | None = None,
+        usage_details: dict[str, Any] | None = None,
+        cost_details: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+    @asynccontextmanager
+    async def trace_tool(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+    @asynccontextmanager
+    async def trace_retriever(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+    @asynccontextmanager
+    async def trace_chain(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+    @asynccontextmanager
+    async def trace_embedding(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        model: str | None = None,
+        usage_details: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        yield _NoopSpan()
+
+
+class AgentInsightTracer:
+    """AgentInsight SDK 后端追踪器 (默认).
+
+    封装 agentinsight-sdk 的 6 类 trace span, 逻辑与原模块级函数一致.
+    SDK 不可用时各方法降级 yield _NoopSpan.
+    """
+
+    @asynccontextmanager
+    async def trace_agent(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """Agent 级根 span, 包裹 graph.ainvoke().
+
+        as_type=agent, 必带: name/input/metadata(含 session_id/user_id)/session_id/user_id.
+        AGENTS.md 第 10 章: 编排器入口建立根 span, LangGraph 节点内子 span 自动关联.
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="agent",
+            input=input,
+            metadata=merged_metadata or None,
+            version=version,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_agent 异常: %s", e)
+            raise
+
+    @asynccontextmanager
+    async def trace_generation(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        model: str | None = None,
+        model_parameters: dict[str, Any] | None = None,
+        usage_details: dict[str, Any] | None = None,
+        cost_details: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """LLM 调用 span, 仅在 llm/ 网关层使用, 业务节点层不重复包裹.
+
+        as_type=generation, 必带: name/model/model_parameters/usage_details/cost_details.
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="generation",
+            input=input,
+            model=model,
+            model_parameters=model_parameters,
+            usage_details=usage_details,
+            cost_details=cost_details,
+            metadata=merged_metadata or None,
+            version=version,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_generation 异常: %s", e)
+            raise
+
+    @asynccontextmanager
+    async def trace_tool(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """MCP 工具调用 span.
+
+        as_type=tool, 必带: name/input/output(span.update)/metadata(含 tool_name/success).
+        output 不在创建时传入, 业务在 with 块内通过 span.update(output=...) 增量写入.
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="tool",
+            input=input,
+            metadata=merged_metadata or None,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_tool 异常: %s", e)
+            raise
+
+    @asynccontextmanager
+    async def trace_retriever(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """RAG 检索 span (BM25/Vector/Qdrant search).
+
+        as_type=retriever, 必带: name/input/output/metadata(含 matched/candidate_count/retriever_type/top_score).
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="retriever",
+            input=input,
+            metadata=merged_metadata or None,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_retriever 异常: %s", e)
+            raise
+
+    @asynccontextmanager
+    async def trace_chain(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        version: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """多步骤链式调用 span (RAG 管道、子图编排).
+
+        as_type=chain, 必带: name/input/output.
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="chain",
+            input=input,
+            metadata=merged_metadata or None,
+            version=version,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_chain 异常: %s", e)
+            raise
+
+    @asynccontextmanager
+    async def trace_embedding(
+        self,
+        name: str,
+        *,
+        input: Any | None = None,
+        model: str | None = None,
+        usage_details: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """Embedding 调用 span (高频, head-based 采样).
+
+        as_type=embedding, 必带: name/model/usage_details(含 token_count).
+        AGENTS.md 第 10 章: head-based 采样, 默认 tracing_embedding_sample_rate=0.5.
+        """
+        client = _get_client()
+        if client is None:
+            yield _NoopSpan()
+            return
+
+        # head-based 采样: 高频 embed 调用按配置降采样, 减少存储压力
+        try:
+            sample_rate = float(get_settings().tracing_embedding_sample_rate)
+        except Exception:  # noqa: BLE001
+            sample_rate = 0.5
+        if sample_rate < 1.0 and random.random() > sample_rate:
+            yield _NoopSpan()
+            return
+
+        merged_metadata = _build_propagate_metadata(
+            user_id=user_id,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+        ctx = client.start_as_current_observation(
+            name=name,
+            as_type="embedding",
+            input=input,
+            model=model,
+            usage_details=usage_details,
+            metadata=merged_metadata or None,
+        )
+        try:
+            with ctx as span:
+                yield span
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace_embedding 异常: %s", e)
+            raise
+
+
+# ========== get_tracer() 工厂 ==========
+_tracer: Any = None
+
+
+def get_tracer() -> Any:
+    """追踪后端工厂.
+
+    V5: 恢复单一 AgentInsight 后端 (AGENTS.md 第 4 章禁用清单第 5 条).
+    分发逻辑:
+    - AgentInsight SDK 可用 → AgentInsightTracer
+    - 不可用 → _NoopTracer (降级)
+    """
+    global _tracer
+    if _tracer is not None:
+        return _tracer
+    if _sdk_available:
+        _tracer = AgentInsightTracer()
+        logger.info("追踪后端: AgentInsightTracer")
+    else:
+        _tracer = _NoopTracer()
+        logger.warning("追踪后端: _NoopTracer (SDK 不可用)")
+    return _tracer
+
+
+# ========== 模块级 trace_xxx 薄包装 (向后兼容, 委托 get_tracer()) ==========
+# 保持原有模块级函数签名不变, 30+ 调用点 (agents/skills/rag/llm/api) 无需修改.
 
 
 @asynccontextmanager
@@ -116,35 +502,16 @@ async def trace_agent(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """Agent 级根 span, 包裹 graph.ainvoke().
-
-    as_type=agent, 必带: name/input/metadata(含 session_id/user_id)/session_id/user_id.
-    AGENTS.md 第 10 章: 编排器入口建立根 span, LangGraph 节点内子 span 自动关联.
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
+    """Agent 级根 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_agent(
+        name=name,
+        input=input,
+        metadata=metadata,
+        version=version,
         user_id=user_id,
         session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
-        name=name,
-        as_type="agent",
-        input=input,
-        metadata=merged_metadata or None,
-        version=version,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_agent 异常: %s", e)
-        raise
+    ) as span:
+        yield span
 
 
 @asynccontextmanager
@@ -161,38 +528,20 @@ async def trace_generation(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """LLM 调用 span, 仅在 llm/ 网关层使用, 业务节点层不重复包裹.
-
-    as_type=generation, 必带: name/model/model_parameters/usage_details/cost_details.
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
-        user_id=user_id,
-        session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
+    """LLM 调用 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_generation(
         name=name,
-        as_type="generation",
         input=input,
         model=model,
         model_parameters=model_parameters,
         usage_details=usage_details,
         cost_details=cost_details,
-        metadata=merged_metadata or None,
+        metadata=metadata,
         version=version,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_generation 异常: %s", e)
-        raise
+        user_id=user_id,
+        session_id=session_id,
+    ) as span:
+        yield span
 
 
 @asynccontextmanager
@@ -204,34 +553,15 @@ async def trace_tool(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """MCP 工具调用 span.
-
-    as_type=tool, 必带: name/input/output(span.update)/metadata(含 tool_name/success).
-    output 不在创建时传入, 业务在 with 块内通过 span.update(output=...) 增量写入.
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
+    """MCP 工具调用 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_tool(
+        name=name,
+        input=input,
+        metadata=metadata,
         user_id=user_id,
         session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
-        name=name,
-        as_type="tool",
-        input=input,
-        metadata=merged_metadata or None,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_tool 异常: %s", e)
-        raise
+    ) as span:
+        yield span
 
 
 @asynccontextmanager
@@ -243,33 +573,15 @@ async def trace_retriever(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """RAG 检索 span (BM25/Vector/Qdrant search).
-
-    as_type=retriever, 必带: name/input/output/metadata(含 matched/candidate_count/retriever_type/top_score).
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
+    """RAG 检索 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_retriever(
+        name=name,
+        input=input,
+        metadata=metadata,
         user_id=user_id,
         session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
-        name=name,
-        as_type="retriever",
-        input=input,
-        metadata=merged_metadata or None,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_retriever 异常: %s", e)
-        raise
+    ) as span:
+        yield span
 
 
 @asynccontextmanager
@@ -282,34 +594,16 @@ async def trace_chain(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """多步骤链式调用 span (RAG 管道、子图编排).
-
-    as_type=chain, 必带: name/input/output.
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
+    """多步骤链式调用 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_chain(
+        name=name,
+        input=input,
+        metadata=metadata,
+        version=version,
         user_id=user_id,
         session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
-        name=name,
-        as_type="chain",
-        input=input,
-        metadata=merged_metadata or None,
-        version=version,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_chain 异常: %s", e)
-        raise
+    ) as span:
+        yield span
 
 
 @asynccontextmanager
@@ -323,45 +617,17 @@ async def trace_embedding(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    """Embedding 调用 span (高频, head-based 采样).
-
-    as_type=embedding, 必带: name/model/usage_details(含 token_count).
-    AGENTS.md 第 10 章: head-based 采样, 默认 tracing_embedding_sample_rate=0.5.
-    """
-    client = _get_client()
-    if client is None:
-        yield _NoopSpan()
-        return
-
-    # head-based 采样: 高频 embed 调用按配置降采样, 减少存储压力
-    try:
-        sample_rate = float(get_settings().tracing_embedding_sample_rate)
-    except Exception:  # noqa: BLE001
-        sample_rate = 0.5
-    if sample_rate < 1.0 and random.random() > sample_rate:
-        yield _NoopSpan()
-        return
-
-    merged_metadata = _build_propagate_metadata(
-        user_id=user_id,
-        session_id=session_id,
-        metadata=metadata,
-    )
-
-    ctx = client.start_as_current_observation(
+    """Embedding 调用 span (模块级薄包装, 委托 get_tracer())."""
+    async with get_tracer().trace_embedding(
         name=name,
-        as_type="embedding",
         input=input,
         model=model,
         usage_details=usage_details,
-        metadata=merged_metadata or None,
-    )
-    try:
-        with ctx as span:
-            yield span
-    except Exception as e:  # noqa: BLE001
-        logger.debug("trace_embedding 异常: %s", e)
-        raise
+        metadata=metadata,
+        user_id=user_id,
+        session_id=session_id,
+    ) as span:
+        yield span
 
 
 __all__ = [
@@ -371,4 +637,6 @@ __all__ = [
     "trace_retriever",
     "trace_chain",
     "trace_embedding",
+    "get_tracer",
+    "AgentInsightTracer",
 ]

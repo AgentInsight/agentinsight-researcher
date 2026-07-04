@@ -19,7 +19,8 @@ class Publisher:
     """报告发布器.
 
     对标 GPT Researcher Publisher.
-    支持 Markdown (默认) / HTML / PDF / DOCX / JSON 输出 (P1-05 扩展 docx + json).
+    支持 Markdown (默认) / HTML / PDF / DOCX / JSON / LaTeX / EPUB 输出
+    (P1-05 扩展 docx + json; P2-01 扩展 latex + epub + 多格式同时导出).
     """
 
     settings: Settings
@@ -47,6 +48,8 @@ class Publisher:
         - pdf: 返回 PDF 文件路径
         - docx: 返回 DOCX 二进制 (P1-05)
         - json: 返回结构化 JSON 字符串 (P1-05)
+        - latex: 返回 LaTeX 源码 (P2-01, 学术场景)
+        - epub: 返回 EPUB 二进制 (P2-01, 电子书场景)
         """
         async with trace_chain(
             name="publisher",
@@ -83,6 +86,16 @@ class Publisher:
                 )
                 span.update(output={"format": "json", "len": len(json_str)})
                 return {"format": "json", "content": json_str, "path": None}
+
+            if output_format == "latex":
+                latex = self._to_latex(report_md)
+                span.update(output={"format": "latex", "len": len(latex)})
+                return {"format": "latex", "content": latex, "path": None}
+
+            if output_format == "epub":
+                epub_bytes = self._to_epub(report_md, title=title)
+                span.update(output={"format": "epub", "size": len(epub_bytes)})
+                return {"format": "epub", "content": epub_bytes, "path": None}
 
             # 默认 markdown
             span.update(output={"format": "markdown"})
@@ -235,3 +248,209 @@ th {{ background: #f8f9fa; font-weight: 600; }}
 
         await asyncio.to_thread(_write)
         return html_path
+
+    def _to_latex(self, report_md: str) -> str:
+        """Markdown → LaTeX (学术场景, P2-01).
+
+        基础转换: 标题/列表/粗体, 纯 Python 实现不引入新依赖.
+        """
+        import re
+
+        lines = report_md.split("\n")
+        latex_lines: list[str] = [
+            "\\documentclass[12pt]{article}",
+            "\\usepackage[utf8]{inputenc}",
+            "\\usepackage{hyperref}",
+            "\\title{Research Report}",
+            "\\date{}",
+            "\\begin{document}",
+            "\\maketitle",
+        ]
+
+        body_lines: list[str] = []
+        in_list = False
+        for line in lines:
+            if line.startswith("# "):
+                if in_list:
+                    body_lines.append("\\end{itemize}")
+                    in_list = False
+                body_lines.append(f"\\section{{{line[2:]}}}")
+            elif line.startswith("## "):
+                if in_list:
+                    body_lines.append("\\end{itemize}")
+                    in_list = False
+                body_lines.append(f"\\subsection{{{line[3:]}}}")
+            elif line.startswith("### "):
+                if in_list:
+                    body_lines.append("\\end{itemize}")
+                    in_list = False
+                body_lines.append(f"\\subsubsection{{{line[4:]}}}")
+            elif line.startswith("- ") or line.startswith("* "):
+                if not in_list:
+                    body_lines.append("\\begin{itemize}")
+                    in_list = True
+                body_lines.append(f"\\item {line[2:]}")
+            elif line.strip():
+                if in_list:
+                    body_lines.append("\\end{itemize}")
+                    in_list = False
+                # 粗体转换 **bold** → \textbf{bold}
+                converted = re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", line)
+                body_lines.append(converted)
+            else:
+                if in_list:
+                    body_lines.append("\\end{itemize}")
+                    in_list = False
+                body_lines.append("")
+
+        if in_list:
+            body_lines.append("\\end{itemize}")
+
+        latex_lines.extend(body_lines)
+        latex_lines.append("\\end{document}")
+        return "\n".join(latex_lines)
+
+    def _to_epub(self, report_md: str, *, title: str = "") -> bytes:
+        """Markdown → EPUB (电子书场景, P2-01, 纯 stdlib zipfile 实现)."""
+        import io
+        import re
+        import uuid
+        import zipfile
+        from datetime import datetime
+        from xml.sax.saxutils import escape
+
+        try:
+            html_body = self._md_to_html(report_md)
+            # _md_to_html 返回完整 HTML 文档, 提取 <body>...</body>
+            body_match = re.search(r"<body>(.*)</body>", html_body, re.DOTALL)
+            body_content = body_match.group(1) if body_match else html_body
+
+            book_title = title or "研究报告"
+            author = "AgentInsight Researcher"
+            language = "zh-CN"
+            identifier = f"urn:uuid:{uuid.uuid4()}"
+            created = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            container_xml = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<container version="1.0" '
+                'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+                "  <rootfiles>\n"
+                '    <rootfile full-path="OEBPS/content.opf" '
+                'media-type="application/oebps-package+xml"/>\n'
+                "  </rootfiles>\n"
+                "</container>"
+            )
+
+            content_opf = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+                'unique-identifier="BookId">\n'
+                '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+                'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+                f"    <dc:title>{escape(book_title)}</dc:title>\n"
+                f"    <dc:creator>{escape(author)}</dc:creator>\n"
+                f"    <dc:language>{language}</dc:language>\n"
+                f'    <dc:identifier id="BookId">{identifier}</dc:identifier>\n'
+                f"    <dc:date>{created}</dc:date>\n"
+                "  </metadata>\n"
+                "  <manifest>\n"
+                '    <item id="content" href="content.xhtml" '
+                'media-type="application/xhtml+xml"/>\n'
+                '    <item id="ncx" href="toc.ncx" '
+                'media-type="application/x-dtbncx+xml"/>\n'
+                "  </manifest>\n"
+                '  <spine toc="ncx">\n'
+                '    <itemref idref="content"/>\n'
+                "  </spine>\n"
+                "</package>"
+            )
+
+            toc_ncx = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n'
+                "  <head>\n"
+                f'    <meta name="dtb:uid" content="{identifier}"/>\n'
+                "  </head>\n"
+                f"  <docTitle><text>{escape(book_title)}</text></docTitle>\n"
+                "  <navMap>\n"
+                '    <navPoint id="navpoint-1" playOrder="1">\n'
+                f"      <navLabel><text>{escape(book_title)}</text></navLabel>\n"
+                '      <content src="content.xhtml"/>\n'
+                "    </navPoint>\n"
+                "  </navMap>\n"
+                "</ncx>"
+            )
+
+            xhtml = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
+                '"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
+                '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+                "<head>\n"
+                f"<title>{escape(book_title)}</title>\n"
+                "</head>\n"
+                "<body>\n"
+                f"{body_content}\n"
+                "</body>\n"
+                "</html>"
+            )
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                # mimetype 必须第一个且不压缩 (EPUB 规范)
+                zf.writestr(
+                    "mimetype",
+                    "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED,
+                )
+                zf.writestr("META-INF/container.xml", container_xml)
+                zf.writestr("OEBPS/content.opf", content_opf)
+                zf.writestr("OEBPS/toc.ncx", toc_ncx)
+                zf.writestr("OEBPS/content.xhtml", xhtml)
+            return buf.getvalue()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("EPUB 生成失败: %s", e)
+            return b""
+
+    async def export_multiple_formats(
+        self,
+        report_md: str,
+        formats: list[str],
+        *,
+        title: str = "",
+        sources: list[dict[str, Any]] | None = None,
+        agent_role_server: str = "",
+        research_mode: str = "",
+    ) -> dict[str, Any]:
+        """一次报告生成多种格式 (P2-01).
+
+        返回 dict, key 为格式名 (markdown/html/pdf_path/docx/json/latex/epub),
+        value 为对应内容 (字符串/字节/文件路径).
+        """
+        results: dict[str, Any] = {}
+        for fmt in formats:
+            fmt_lower = fmt.lower()
+            if fmt_lower == "markdown":
+                results["markdown"] = report_md
+            elif fmt_lower == "html":
+                results["html"] = self._md_to_html(report_md)
+            elif fmt_lower == "pdf":
+                results["pdf_path"] = await self._md_to_pdf(report_md)
+            elif fmt_lower == "docx":
+                results["docx"] = self._to_docx(report_md, title=title)
+            elif fmt_lower == "json":
+                results["json"] = self._to_json(
+                    report_md,
+                    title=title,
+                    sources=sources or [],
+                    agent_role_server=agent_role_server,
+                    research_mode=research_mode,
+                )
+            elif fmt_lower == "latex":
+                results["latex"] = self._to_latex(report_md)
+            elif fmt_lower == "epub":
+                results["epub"] = self._to_epub(report_md, title=title)
+            else:
+                logger.warning("未知导出格式: %s (跳过)", fmt)
+        return results

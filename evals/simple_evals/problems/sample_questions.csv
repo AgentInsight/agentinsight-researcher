@@ -1,0 +1,11 @@
+id,question,expected_answer,category
+q1,Who wrote the play Romeo and Juliet?,William Shakespeare,literature
+q2,中国的首都是哪座城市?,北京,geography
+q3,What is the capital city of France?,Paris,geography
+q4,水的化学式是什么?,H2O,science
+q5,Who painted the Mona Lisa?,Leonardo da Vinci,art
+q6,地球绕太阳公转一周大约需要多少天?,365,science
+q7,What is the largest planet in our solar system?,Jupiter,science
+q8,《红楼梦》的作者是谁?,曹雪芹,literature
+q9,光在真空中的速度大约是多少千米每秒?,300000|30万|299792,science
+q10,中国最长的河流是哪一条?,长江,geography

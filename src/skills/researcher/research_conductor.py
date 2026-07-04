@@ -33,6 +33,7 @@ from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
     BaseSearcher,
+    deduplicate_results,
     detect_region,
     get_searchers,
 )
@@ -480,18 +481,17 @@ class ResearchConductor:
         ]
         search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        # 3. 合并搜索结果 + 去重
+        # 3. 合并搜索结果
         all_results: list[dict[str, Any]] = []
-        urls: set[str] = set()
         for r in search_results:
             if isinstance(r, Exception):
                 continue
             r = cast(list[dict[str, Any]], r)
-            for item in r:
-                url = item.get("url", "")
-                if url and url not in urls:
-                    urls.add(url)
-                    all_results.append(item)
+            all_results.extend(r)
+
+        # P1-01: 跨搜索引擎 URL 去重
+        all_results = deduplicate_results(all_results, key="url")
+        urls = {r.get("url", "") for r in all_results if r.get("url")}
 
         # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
         if query_domains:

@@ -279,6 +279,65 @@
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
 
+    /* ===== 人在回路审核面板 (P2-03) ===== */
+    #review-panel {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 9999;
+      animation: rvFadeIn .15s ease;
+    }
+    #review-panel.open { display: flex; }
+    @keyframes rvFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .review-modal {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow-md); width: 92%; max-width: 720px; max-height: 86vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      animation: rvScaleIn .15s ease;
+    }
+    @keyframes rvScaleIn { from { transform: scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+    .review-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .review-title { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .review-close {
+      width: 28px; height: 28px; border-radius: 6px; font-size: 14px;
+      color: var(--text-muted); transition: background .15s, color .15s;
+    }
+    .review-close:hover { background: var(--surface-2); color: var(--text); }
+    .review-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+    .review-label { font-size: 12px; color: var(--text-muted); font-weight: 500; margin: 0 0 6px; }
+    .review-label + .review-label { margin-top: 14px; }
+    .review-plan {
+      font-family: var(--font-mono); font-size: 12.5px; background: var(--code-bg);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 12px; white-space: pre-wrap; word-break: break-word;
+      max-height: 320px; overflow-y: auto; margin: 0;
+    }
+    .review-revise {
+      width: 100%; resize: vertical; min-height: 80px; max-height: 200px;
+      padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface); transition: border-color .15s, box-shadow .15s;
+      font-family: inherit; font-size: 13px; line-height: 1.5;
+    }
+    .review-revise:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft);
+    }
+    .review-footer {
+      display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+      padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2);
+    }
+    .review-btn {
+      padding: 9px 18px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface); font-size: 13px; font-weight: 600;
+      transition: background .15s, border-color .15s;
+    }
+    .review-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+    .review-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .review-btn.primary:hover { background: var(--primary-hover); }
+    .review-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; flex-basis: 100%; text-align: left; }
+
     /* ===== 响应式 ===== */
     @media (max-width: 640px) {
       .config-grid { grid-template-columns: 1fr; }
@@ -390,6 +449,27 @@
     </div>
   </footer>
 
+  <!-- ========== 人在回路审核面板 (P2-03) ========== -->
+  <div id="review-panel">
+    <div class="review-modal" role="dialog" aria-modal="true" aria-labelledby="reviewTitleText">
+      <div class="review-header">
+        <span class="review-title"><span id="reviewTitleText">📋 研究计划审核</span></span>
+        <button class="review-close" id="reviewCancelBtn" title="关闭 (不提交)">✕</button>
+      </div>
+      <div class="review-body">
+        <div class="review-label">研究计划 / 大纲</div>
+        <pre class="review-plan" id="reviewPlanText">(等待计划内容…)</pre>
+        <div class="review-label">修订意见 (留空并点"通过"则直接批准)</div>
+        <textarea class="review-revise" id="reviewReviseInput" rows="4" placeholder="如需修改, 请填写修订意见后点"提交修订"…"></textarea>
+      </div>
+      <div class="review-footer">
+        <span class="review-hint">提交后 Agent 将基于反馈继续研究; 关闭仅隐藏面板, 不通知后端</span>
+        <button class="review-btn primary" id="reviewApproveBtn" title="批准研究计划">✓ 通过</button>
+        <button class="review-btn" id="reviewSubmitBtn" title="提交修订意见">提交修订</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -497,6 +577,7 @@
     $('newSession').addEventListener('click', () => {
       state.sessionId = uuidv4();
       refreshSessionDisplay();
+      connectWS(); // P2-03: 切换会话后重连 WebSocket
       toast('已新建会话: ' + state.sessionId);
     });
 
@@ -525,6 +606,7 @@
       if (v) {
         state.sessionId = v;
         refreshSessionDisplay();
+        connectWS(); // P2-03: 切换会话后重连 WebSocket
         toast('已切换到会话: ' + v);
       }
     });
@@ -1012,6 +1094,182 @@
         $('stopBtn').style.display = 'none';
       }
     }
+
+    // ========== 人在回路审核 UI (P2-03) ==========
+    // WebSocket 双向通道: 连接 /v1/ws/{session_id}, 接收 human_feedback_request 等结构化消息
+    // SSE (/v1/chat/completions stream=true) 仍为主通道, WS 仅用于人在回路审核请求推送与反馈接收 (AGENTS.md 第 14 章)
+    let ws = null;
+    let wsReconnectTimer = null;
+    let wsReconnectAttempts = 0;
+    const WS_MAX_RECONNECT = 5;
+    const WS_RECONNECT_INTERVAL = 5000;
+
+    /** 由 apiBase + 当前 session_id 构造 WebSocket URL (http→ws / https→wss) */
+    function buildWsUrl() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const wsBase = base.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+      return wsBase + '/v1/ws/' + encodeURIComponent(state.sessionId);
+    }
+
+    /** 连接 WebSocket (会话切换 / 页面加载时调用) */
+    function connectWS() {
+      disconnectWS();
+      if (!state.sessionId) return;
+      let url;
+      try { url = buildWsUrl(); } catch (e) { return; }
+      let socket;
+      try {
+        socket = new WebSocket(url);
+      } catch (e) {
+        console.warn('[WS] 连接失败:', e);
+        return;
+      }
+      ws = socket;
+      socket.onopen = () => {
+        wsReconnectAttempts = 0;
+        console.log('[WS] 已连接:', url);
+      };
+      socket.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); }
+        catch (e) { console.warn('[WS] 消息解析失败:', ev.data); return; }
+        handleWsMessage(msg);
+      };
+      socket.onerror = () => { /* onclose 随后触发, 在此处理重连 */ };
+      socket.onclose = () => {
+        if (ws === socket) ws = null;
+        // 节流重连, 最多尝试 WS_MAX_RECONNECT 次, 避免后端未启用 WS 时无限重连
+        if (wsReconnectAttempts < WS_MAX_RECONNECT) {
+          wsReconnectAttempts++;
+          wsReconnectTimer = setTimeout(() => connectWS(), WS_RECONNECT_INTERVAL);
+        }
+      };
+    }
+
+    /** 主动断开 WebSocket, 取消重连定时器 */
+    function disconnectWS() {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+      if (ws) {
+        const s = ws;
+        ws = null;
+        try { s.close(); } catch { /* 忽略 */ }
+      }
+    }
+
+    /** 向 WebSocket 发送 JSON 消息 (连接未就绪时静默跳过) */
+    function wsSend(obj) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify(obj)); }
+        catch (e) { console.warn('[WS] 发送失败:', e); }
+      }
+    }
+
+    /** 处理 WS 推送的 8 类结构化消息 (AGENTS.md 第 14 章) */
+    function handleWsMessage(msg) {
+      if (!msg || typeof msg !== 'object') return;
+      const type = msg.type;
+      switch (type) {
+        case 'ping':
+          // 心跳: 回复 pong
+          wsSend({ type: 'pong' });
+          break;
+        case 'pong':
+          // 服务端对客户端 ping 的回复, 忽略
+          break;
+        case 'human_feedback_request': {
+          // 人在回路审核请求: 显示审核面板
+          // 计划内容字段兼容 plan / outline / content / message / data
+          const plan = msg.plan || msg.outline || msg.content || msg.message || msg.data;
+          showReviewPanel(plan != null ? String(plan) : '(未提供计划内容)', msg);
+          break;
+        }
+        case 'logs':
+        case 'content':
+        case 'node_progress':
+        case 'sources':
+        case 'tool_call':
+        case 'report':
+        case 'error':
+          // SSE 主通道已处理, WS 端不重复渲染 (避免重复)
+          break;
+        default:
+          console.log('[WS] 未识别消息类型:', type, msg);
+      }
+    }
+
+    /** 显示审核面板, 填充计划文本 */
+    function showReviewPanel(planText, meta) {
+      $('reviewPlanText').textContent = planText || '(空)';
+      $('reviewReviseInput').value = '';
+      $('review-panel').classList.add('open');
+      // 校验 session_id 一致性 (告警, 不阻断)
+      if (meta && meta.session_id && meta.session_id !== state.sessionId) {
+        console.warn('[审核] 消息 session_id 与当前不一致:', meta.session_id, '→', state.sessionId);
+      }
+    }
+
+    /** 隐藏审核面板 */
+    function hideReviewPanel() {
+      $('review-panel').classList.remove('open');
+    }
+
+    /** 提交反馈到 POST /v1/feedback (body: {session_id, feedback}) */
+    async function submitFeedback(feedback) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      try {
+        const resp = await fetch(base + '/v1/feedback', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ session_id: state.sessionId, feedback: feedback }),
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || err.error?.message || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        // 双通道: 同时通过 WS 推送反馈 (后端可任选 HTTP / WS 接收)
+        wsSend({ type: 'human_feedback', feedback: feedback });
+        hideReviewPanel();
+        toast('反馈已提交: ' + (feedback === 'approve' ? '通过' : '修订意见'));
+      } catch (err) {
+        toast('反馈提交失败: ' + err.message);
+      }
+    }
+
+    // 审核面板事件绑定
+    $('reviewApproveBtn').addEventListener('click', () => submitFeedback('approve'));
+    $('reviewSubmitBtn').addEventListener('click', () => {
+      const v = $('reviewReviseInput').value.trim();
+      if (!v) { toast('请填写修订意见'); return; }
+      submitFeedback(v);
+    });
+    $('reviewCancelBtn').addEventListener('click', () => {
+      // 仅隐藏面板, 不通知后端 (用户可重新触发)
+      hideReviewPanel();
+    });
+    // 修订输入框 Enter 提交, Shift+Enter 换行 (与主输入框一致)
+    $('reviewReviseInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        $('reviewSubmitBtn').click();
+      }
+    });
+    // ESC 关闭面板
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && $('review-panel').classList.contains('open')) {
+        hideReviewPanel();
+      }
+    });
+
+    // 页面卸载时关闭 WS
+    window.addEventListener('beforeunload', () => disconnectWS());
+
+    // 页面加载后连接 WebSocket
+    connectWS();
 
     // 初始 focus
     msgInput.focus();

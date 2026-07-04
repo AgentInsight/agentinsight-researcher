@@ -40,10 +40,6 @@
   <ItemGroup>
     <Content Include="src\**\*.py" />
   </ItemGroup>
-  <!-- 行业提示词配置: 68 套 GICS 行业 YAML (AGENTS.md 第 6/7 章) -->
-  <ItemGroup>
-    <Content Include="config\researcher\industry_prompts\*.yaml" />
-  </ItemGroup>
   <!-- 脚本: 在线构建/数据库初始化 (QA/离线脚本由 .gitignore 排除) -->
   <ItemGroup>
     <Content Include="scripts\build-online.ps1" />
@@ -67,16 +63,16 @@
     <Content Include="evals\**\*.py" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="config\" />
-    <Folder Include="config\researcher\" />
-    <Folder Include="config\researcher\industry_prompts\" />
     <Folder Include="evals\" />
     <Folder Include="evals\agent\" />
+    <Folder Include="evals\hallucination_eval\" />
     <Folder Include="evals\rag\" />
+    <Folder Include="evals\simple_evals\" />
     <Folder Include="packages\" />
     <Folder Include="scripts\" />
     <Folder Include="src\" />
     <Folder Include="src\agents\" />
+    <Folder Include="src\agents\ag2\" />
     <Folder Include="src\agents\researcher\" />
     <Folder Include="src\api\" />
     <Folder Include="src\common\" />

@@ -54,6 +54,7 @@ class PromptFamily(ABC):
         current_date: str,
         references: str,
         structure_hint: str,
+        report_style: str = "academic",
     ) -> str:
         """Writer 报告生成 prompt.
 
@@ -67,6 +68,7 @@ class PromptFamily(ABC):
             current_date: 当前日期字符串
             references: 参考文献列表文本
             structure_hint: 报告结构模板文本
+            report_style: 报告风格预设 (V4-P2-01, academic/business/casual/news)
 
         Returns:
             完整 prompt 字符串
@@ -187,12 +189,64 @@ class PromptFamily(ABC):
             系统提示字符串
         """
 
+    @abstractmethod
+    def get_tone_prompt(self, tone: str) -> str:
+        """获取 Tone 语气提示词片段 (对标 GPTR 17 种 Tone).
+
+        Args:
+            tone: 语气标识 (objective/analytical/formal/informative/
+                  explanatory/critical/comparative/casual)
+
+        Returns:
+            Tone 提示词片段, 附加到主 prompt 末尾
+        """
+
 
 class DefaultPromptFamily(PromptFamily):
     """中文优先默认实现.
 
     从现有各 Skill 文件提取 prompt 文本, 保持现有行为不变.
     """
+
+    # V4-P2-01: 报告风格预设描述 (4 种风格)
+    _STYLE_PROMPTS: dict[str, str] = {
+        "academic": (
+            "学术风格: 严谨客观, 引用来源, 使用正式学术语言, "
+            "段落间逻辑清晰, 论点需有数据或文献支撑, 避免口语化表达"
+        ),
+        "business": (
+            "商业风格: 简洁明了, 结论先行, 使用商业术语, "
+            "聚焦价值与决策建议, 突出关键指标与 ROI, 段落短小精悍"
+        ),
+        "casual": (
+            "通俗风格: 易于理解, 避免专业术语, 适合大众阅读, "
+            "多用类比与案例, 语言亲切自然, 降低认知门槛"
+        ),
+        "news": (
+            "新闻风格: 倒金字塔结构, 5W1H, 客观报道, "
+            "导语概括核心事实, 正文按重要性递减展开, 强调时效与现场感"
+        ),
+    }
+
+    # Tone 描述 (对标 GPTR 17 种 Tone, 精选 8 种适合中文研究场景)
+    _TONE_DESCRIPTIONS: dict[str, str] = {
+        "objective": "客观中立，基于事实陈述，不带个人观点",
+        "analytical": "分析性强，深入剖析因果关系和数据背后的含义",
+        "formal": "正式严谨，学术风格，使用专业术语",
+        "informative": "信息丰富，重点传递实用知识，便于读者快速理解",
+        "explanatory": "解释性，阐明复杂概念，适合科普读者",
+        "critical": "批判性，审视多角度观点，指出局限与不足",
+        "comparative": "比较性，横向纵向对比，突出差异与优劣",
+        "casual": "通俗轻松，口语化表达，适合大众阅读",
+    }
+
+    def get_tone_prompt(self, tone: str) -> str:
+        """获取 Tone 提示词片段 (对标 GPTR 17 种 Tone, 精选 8 种).
+
+        未注册 tone 降级为 objective, 保证健壮性.
+        """
+        desc = self._TONE_DESCRIPTIONS.get(tone, self._TONE_DESCRIPTIONS["objective"])
+        return f"\n\n## 写作语气要求\n{desc}"
 
     def planner_prompt(
         self,
@@ -225,7 +279,10 @@ class DefaultPromptFamily(PromptFamily):
         current_date: str,
         references: str,
         structure_hint: str,
+        report_style: str = "academic",
     ) -> str:
+        # V4-P2-01: 注入报告风格预设描述, 未注册风格降级为 academic
+        style_desc = self._STYLE_PROMPTS.get(report_style, self._STYLE_PROMPTS["academic"])
         return f"""{agent_role}
 
 请基于以下检索到的上下文, 撰写一份关于「{query}」的研究报告.
@@ -238,6 +295,7 @@ class DefaultPromptFamily(PromptFamily):
 5. 末尾附参考文献列表 (APA 格式)
 6. 注入当前日期: {current_date}
 7. 不得编造未在上下文中出现的数据
+8. 报告风格: {style_desc}
 
 报告结构:
 {structure_hint}
@@ -280,16 +338,25 @@ class DefaultPromptFamily(PromptFamily):
     def agent_creator_prompt(self, query: str) -> str:
         return """你是一个研究助手角色选择专家。根据用户的研究查询,选择最合适的研究角色 persona。
 
-以下是几个示例:
-- 查询涉及金融/投资/股票/财务 -> "Financial Analyst Agent": 资深金融分析师,擅长财务建模、估值、投资研究
-- 查询涉及商业/市场/战略/管理 -> "Business Analyst Agent": 资深商业分析师,擅长市场分析、竞争战略、商业模式
-- 查询涉及旅行/旅游/酒店 -> "Travel Agent": 资深旅游顾问,擅长目的地推荐、行程规划
-- 查询涉及医学/医疗/健康/药物 -> "Medical Research Agent": 医学研究专家,擅长临床试验分析、医学文献综述
-- 查询涉及法律/合规/法规 -> "Legal Research Agent": 法律研究专家,擅长法规解读、合规分析、判例研究
-- 查询涉及技术/工程/IT -> "Technical Research Agent": 技术研究专家,擅长技术趋势、架构分析、工程实践
+生成角色 persona 时必须满足以下三项要求:
+1. 研究方法论: 明确采用的研究方法 (如系统综述、meta 分析、案例研究、对比分析、定量建模等)
+2. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰
+3. 语言风格: 客观、专业、避免主观臆断
+
+以下是一些示例 (格式: task → response):
+task: "查询涉及金融/投资/股票/财务分析" → response: {"server": "financial_analyst", "agent_role_prompt": "你是一位资深的金融分析师, 擅长财务建模、估值、投资研究. 研究方法论: 采用定量分析与财务建模交叉验证多源数据. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及商业/市场/战略/管理" → response: {"server": "business_analyst", "agent_role_prompt": "你是一位资深的商业分析师, 擅长市场分析、竞争战略、商业模式. 研究方法论: 采用案例研究与对比分析结合波特五力等框架. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及旅行/旅游/酒店/行程" → response: {"server": "travel_agent", "agent_role_prompt": "你是一位资深的旅游顾问, 擅长目的地推荐、行程规划. 研究方法论: 采用多源信息聚合与用户偏好匹配. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及医学/医疗/健康/药物" → response: {"server": "medical_researcher", "agent_role_prompt": "你是一位医学研究专家, 擅长临床试验分析、医学文献综述. 研究方法论: 采用系统综述与 meta 分析优先循证医学. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及法律/合规/法规/判例" → response: {"server": "legal_researcher", "agent_role_prompt": "你是一位法律研究专家, 擅长法规解读、合规分析、判例研究. 研究方法论: 采用判例比对与条文文义解释结合. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及技术/工程/IT/架构" → response: {"server": "technology_researcher", "agent_role_prompt": "你是一位技术研究专家, 擅长技术趋势、架构分析、工程实践. 研究方法论: 采用技术调研与对比实验评估. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及教育/教学/课程/学习" → response: {"server": "education_researcher", "agent_role_prompt": "你是一位教育研究专家, 擅长课程设计、教学法、教育政策分析. 研究方法论: 采用文献综述与教育实验对照. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及科学/物理/化学/生物/天文" → response: {"server": "science_researcher", "agent_role_prompt": "你是一位科学研究专家, 擅长跨学科文献综述、实验设计、科学推理. 研究方法论: 采用系统综述与可重复性验证. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及营销/品牌/广告/用户增长" → response: {"server": "marketing_researcher", "agent_role_prompt": "你是一位市场营销研究专家, 擅长消费者行为、品牌策略、增长黑客. 研究方法论: 采用定量调研与 A/B 测试结合用户访谈. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
+task: "查询涉及环境/气候/可持续发展/生态" → response: {"server": "environment_researcher", "agent_role_prompt": "你是一位环境与可持续发展研究专家, 擅长气候变化、生态评估、ESG 分析. 研究方法论: 采用生命周期评估与情景建模. 输出规范: 报告需含数据支撑、明确引用来源、逻辑结构清晰. 语言风格: 客观、专业、避免主观臆断."}
 
 请根据用户查询,返回 JSON:
-{"server": "角色简称(英文, snake_case, 如 financial_analyst)", "agent_role_prompt": "完整的角色 persona 描述(中文), 格式: 你是一位资深的XXX, 擅长YYY, 研究重点是ZZZ"}
+{"server": "角色简称(英文, snake_case, 如 financial_analyst)", "agent_role_prompt": "完整的角色 persona 描述(中文), 必须含研究方法论、输出规范、语言风格三要素"}
 
 仅返回 JSON, 不要其他内容:"""
 
@@ -405,6 +472,26 @@ class DefaultPromptFamily(PromptFamily):
 class EnglishPromptFamily(PromptFamily):
     """英文实现."""
 
+    # Tone descriptions (adapted from GPTR 17 Tones, 8 selected for research scenarios)
+    _TONE_DESCRIPTIONS: dict[str, str] = {
+        "objective": "objective and neutral, fact-based, free of personal opinion",
+        "analytical": "analytical, in-depth examination of causality and meaning behind data",
+        "formal": "formal and rigorous, academic style, using technical terminology",
+        "informative": "informative, focused on delivering practical knowledge for quick understanding",
+        "explanatory": "explanatory, clarifying complex concepts, suitable for general audiences",
+        "critical": "critical, examining multiple viewpoints, identifying limitations and gaps",
+        "comparative": "comparative, horizontal and vertical comparisons, highlighting differences",
+        "casual": "casual and relaxed, conversational tone, suitable for general readers",
+    }
+
+    def get_tone_prompt(self, tone: str) -> str:
+        """Get Tone prompt fragment (adapted from GPTR 17 Tones, 8 selected).
+
+        Unregistered tones fall back to objective for robustness.
+        """
+        desc = self._TONE_DESCRIPTIONS.get(tone, self._TONE_DESCRIPTIONS["objective"])
+        return f"\n\n## Tone Requirement\n{desc}"
+
     def planner_prompt(
         self,
         query: str,
@@ -436,7 +523,16 @@ Return a JSON array of {max_iterations} sub-queries:"""
         current_date: str,
         references: str,
         structure_hint: str,
+        report_style: str = "academic",
     ) -> str:
+        # V4-P2-01: 英文版风格描述 (与 DefaultPromptFamily 对齐)
+        style_map: dict[str, str] = {
+            "academic": "Academic style: rigorous and objective, cite sources, formal language",
+            "business": "Business style: concise, conclusion-first, business terminology",
+            "casual": "Casual style: easy to understand, avoid jargon, suitable for general readers",
+            "news": "News style: inverted pyramid, 5W1H, objective reporting",
+        }
+        style_desc = style_map.get(report_style, style_map["academic"])
         return f"""{agent_role}
 
 Please write a research report on "{query}" based on the retrieved context below.
@@ -449,6 +545,7 @@ Requirements:
 5. Include a reference list at the end (APA format)
 6. Current date: {current_date}
 7. Do not fabricate data not present in the context
+8. Report style: {style_desc}
 
 Report structure:
 {structure_hint}
@@ -491,16 +588,25 @@ Return only the JSON array of the top {max_results} most relevant sources:"""
     def agent_creator_prompt(self, query: str) -> str:
         return """You are a research assistant role selection expert. Choose the most appropriate research role persona based on the user's research query.
 
-Here are some examples:
-- Query involves finance/investment/stocks/accounting -> "Financial Analyst Agent": Senior financial analyst, expert in financial modeling, valuation, investment research
-- Query involves business/market/strategy/management -> "Business Analyst Agent": Senior business analyst, expert in market analysis, competitive strategy, business models
-- Query involves travel/tourism/hotels -> "Travel Agent": Senior travel consultant, expert in destination recommendations, itinerary planning
-- Query involves medicine/healthcare/pharma -> "Medical Research Agent": Medical research expert, expert in clinical trial analysis, medical literature review
-- Query involves law/compliance/regulations -> "Legal Research Agent": Legal research expert, expert in regulatory interpretation, compliance analysis, case law research
-- Query involves technology/engineering/IT -> "Technical Research Agent": Technical research expert, expert in technology trends, architecture analysis, engineering practices
+When generating a role persona, you must satisfy these three requirements:
+1. Research methodology: clearly state the research method (e.g., systematic review, meta-analysis, case study, comparative analysis, quantitative modeling)
+2. Output standards: reports must include data support, clear source citations, and logical structure
+3. Language style: objective, professional, avoid subjective speculation
+
+Here are some examples (format: task → response):
+task: "query involves finance/investment/stocks/accounting" → response: {"server": "financial_analyst", "agent_role_prompt": "You are a senior financial analyst, expert in financial modeling, valuation, investment research. Research methodology: cross-validate multi-source data via quantitative analysis and financial modeling. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves business/market/strategy/management" → response: {"server": "business_analyst", "agent_role_prompt": "You are a senior business analyst, expert in market analysis, competitive strategy, business models. Research methodology: combine case studies and comparative analysis with frameworks like Porter's Five Forces. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves travel/tourism/hotels/itinerary" → response: {"server": "travel_agent", "agent_role_prompt": "You are a senior travel consultant, expert in destination recommendations, itinerary planning. Research methodology: aggregate multi-source information and match user preferences. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves medicine/healthcare/pharma/clinical" → response: {"server": "medical_researcher", "agent_role_prompt": "You are a medical research expert, expert in clinical trial analysis, medical literature review. Research methodology: prioritize evidence-based medicine via systematic review and meta-analysis. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves law/compliance/regulations/case law" → response: {"server": "legal_researcher", "agent_role_prompt": "You are a legal research expert, expert in regulatory interpretation, compliance analysis, case law research. Research methodology: combine case comparison with statutory textual interpretation. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves technology/engineering/IT/architecture" → response: {"server": "technology_researcher", "agent_role_prompt": "You are a technology research expert, expert in technology trends, architecture analysis, engineering practices. Research methodology: evaluate via technical research and comparative experiments. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves education/teaching/curriculum/learning" → response: {"server": "education_researcher", "agent_role_prompt": "You are an education research expert, expert in curriculum design, pedagogy, education policy analysis. Research methodology: combine literature review with controlled educational experiments. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves science/physics/chemistry/biology/astronomy" → response: {"server": "science_researcher", "agent_role_prompt": "You are a science research expert, expert in cross-disciplinary literature review, experimental design, scientific reasoning. Research methodology: systematic review with reproducibility verification. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves marketing/brand/advertising/user growth" → response: {"server": "marketing_researcher", "agent_role_prompt": "You are a marketing research expert, expert in consumer behavior, brand strategy, growth hacking. Research methodology: combine quantitative surveys and A/B testing with user interviews. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
+task: "query involves environment/climate/sustainability/ecology" → response: {"server": "environment_researcher", "agent_role_prompt": "You are an environment and sustainability research expert, expert in climate change, ecological assessment, ESG analysis. Research methodology: life-cycle assessment combined with scenario modeling. Output standards: reports must include data support, clear source citations, and logical structure. Language style: objective, professional, avoid subjective speculation."}
 
 Based on the user query, return JSON:
-{"server": "role_short_name (English, snake_case, e.g. financial_analyst)", "agent_role_prompt": "Complete role persona description, format: You are a senior XXX, expert in YYY, research focus on ZZZ"}
+{"server": "role_short_name (English, snake_case, e.g. financial_analyst)", "agent_role_prompt": "Complete role persona description, must include research methodology, output standards, and language style"}
 
 Return JSON only, nothing else:"""
 

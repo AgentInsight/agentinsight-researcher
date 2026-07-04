@@ -9,6 +9,7 @@ AGENTS.md 第 3/8/14 章: API 入口, JWT 中间件, OpenAI 兼容端点, 前端
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -44,6 +45,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
     # 阶段 3: 可预热图
+
+    # 启动时预热短查询种子向量到 Qdrant (P0-Future-05/06)
+    # 后台异步执行, 不阻塞启动; 失败降级为仅规则层 (AGENTS.md 第 7 章)
+    async def _preheat_short_query_seeds() -> None:
+        try:
+            from src.skills.researcher.query_classifier import (
+                get_query_intent_classifier,
+            )
+
+            classifier = get_query_intent_classifier()
+            await classifier._ensure_seed_patterns()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("短查询种子预热失败 (降级为仅规则层): %s", e)
+
+    asyncio.create_task(_preheat_short_query_seeds())
+
+    # P0-03: Embeddings 批量预热 (后台执行, 不阻塞启动)
+    # 触发 TEI 模型加载, 避免首次真实调用冷启动; 失败不阻断启动
+    async def _warmup_embeddings() -> None:
+        try:
+            from src.rag.embeddings import warmup_embeddings
+
+            await warmup_embeddings()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Embeddings 预热失败 (不阻断): %s", e)
+
+    asyncio.create_task(_warmup_embeddings())
 
     yield
 

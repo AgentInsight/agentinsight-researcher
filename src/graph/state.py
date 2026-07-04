@@ -34,6 +34,10 @@ class ResearcherState(TypedDict, total=False):
     report_format: str  # markdown | html | pdf | docx | json
     tone: str  # objective | analytical | opinionated | casual
     total_words: int  # 报告字数下限
+    report_language: str  # P2-05: 报告语言 (zh|en|ja|ko|fr), 默认 zh 中文
+
+    # ========== 查询意图 (P0-Future-05/06) ==========
+    query_intent: str  # 查询意图: "research" | "chat" | "short_query"
 
     # ========== 动态角色 (对标 GPTR researcher.role, AGENTS.md 第 5 章) ==========
     # 行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
@@ -86,9 +90,10 @@ class ResearcherState(TypedDict, total=False):
     fact_check_accepted: bool  # 事实核查是否通过
     fact_check_issues: list[str]  # 不一致的事实声明列表
 
-    # ========== 评审与修订循环 (P0-Future-01) ==========
+    # ========== 评审与修订循环 (P0-Future-01, V4-P1-02 多维度评分) ==========
     review_decision: str  # "accept" | "revise" (Reviewer 决策)
     review_feedback: str  # Reviewer 评审反馈 (revise 时含具体修订建议)
+    review_scores: dict[str, Any]  # V4-P1-02: 多维度评分 {维度: {score, issues}}
     revision_count: Annotated[
         int, operator.add
     ]  # 修订计数器 (reviser 节点累加, max_revisions 守卫)

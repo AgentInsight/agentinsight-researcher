@@ -1,0 +1,10 @@
+{"query": "量子计算的最新进展有哪些?", "expected_source_count": 3}
+{"query": "What are the recent breakthroughs in mRNA vaccine technology?", "expected_source_count": 3}
+{"query": "大语言模型如何影响软件开发流程?", "expected_source_count": 3}
+{"query": "What is the current state of nuclear fusion energy research?", "expected_source_count": 3}
+{"query": "2024年诺贝尔物理学奖授予了哪些研究?", "expected_source_count": 2}
+{"query": "How does CRISPR gene editing work and what are its applications?", "expected_source_count": 3}
+{"query": "中国新能源汽车出口现状如何?", "expected_source_count": 3}
+{"query": "What are the environmental impacts of lithium mining?", "expected_source_count": 3}
+{"query": "室温超导研究目前的争议是什么?", "expected_source_count": 3}
+{"query": "How is artificial intelligence being used in drug discovery?", "expected_source_count": 3}

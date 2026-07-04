@@ -5,9 +5,14 @@
 - PlaywrightScraper: JS 渲染页面 (可选, 镜像内安装 chromium)
 - PyMuPDFScraper: PDF 抓取
 - ArxivScraper: Arxiv 论文 (含全文)
+- FirecrawlScraper: Firecrawl 商业服务 (P1-Future-08, LLM 友好 Markdown 输出)
+- NodriverScraper: nodriver 无头浏览器 (P1-Future-08, 反反爬绕过 Cloudflare)
+- TavilyExtractScraper: Tavily Extract API (对标 GPTR scraper/tavily_extract,
+  LLM 友好纯文本输出, 复用 TAVILY_API_KEY)
 
 WorkerPool 并发限流: asyncio.Semaphore + GlobalRateLimiter 单例.
 所有 scraper 共享 scrape(url) -> dict 规约.
+- register_scraper 装饰器 (P0-01, 对称 register_searcher, 第三方扩展自注册)
 """
 
 from __future__ import annotations
@@ -115,6 +120,35 @@ class BaseScraper:
         raise NotImplementedError
 
 
+# ========== 插件注册表 (对称 register_searcher, P0-01) ==========
+# 用装饰器注册 scraper, 不破坏现有 get_scraper() 函数式工厂.
+# 第三方扩展可通过 @register_scraper("xxx") 自注册, 再由
+# get_registered_scrapers() 查询, 未来可逐步迁移工厂到注册表驱动.
+_SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {}
+
+
+def register_scraper(name: str):
+    """抓取器注册装饰器 (对称 register_searcher, P0-01).
+
+    Args:
+        name: 注册键名 (如 "tavily_extract").
+
+    Returns:
+        类装饰器, 将 cls 注册到 _SCRAPER_REGISTRY 后原样返回.
+    """
+
+    def decorator(cls: type[BaseScraper]) -> type[BaseScraper]:
+        _SCRAPER_REGISTRY[name] = cls
+        return cls
+
+    return decorator
+
+
+def get_registered_scrapers() -> dict[str, type[BaseScraper]]:
+    """返回已注册的抓取器字典 (浅拷贝, 防外部篡改)."""
+    return dict(_SCRAPER_REGISTRY)
+
+
 def get_scraper(
     url: str,
     scraper_type: str = "bs",
@@ -126,9 +160,13 @@ def get_scraper(
     - URL 以 .pdf 结尾 → PyMuPDFScraper
     - URL 含 arxiv.org → ArxivScraper
     - URL 以 Office 文档后缀结尾 → MarkItDownScraper (P2-03)
-    - 否则 → 按配置 (bs/playwright)
+    - 否则 → 按配置 (bs/playwright/firecrawl/nodriver)
     """
     url_lower = url.lower()
+
+    # 优先查询注册表 (P0-01: 支持 @register_scraper 自注册的第三方扩展)
+    if scraper_type and scraper_type in _SCRAPER_REGISTRY:
+        return _SCRAPER_REGISTRY[scraper_type](url, session)
 
     if url_lower.endswith(".pdf"):
         from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
@@ -149,6 +187,24 @@ def get_scraper(
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
 
         return PlaywrightScraper(url, session)
+
+    if scraper_type == "firecrawl":
+        from src.skills.researcher.scrapers.firecrawl_scraper import FirecrawlScraper
+
+        return FirecrawlScraper(url, session)
+
+    if scraper_type == "nodriver":
+        from src.skills.researcher.scrapers.nodriver_scraper import NodriverScraper
+
+        return NodriverScraper(url, session)
+
+    if scraper_type == "tavily_extract":
+        # Tavily Extract API 抓取器 (对标 GPTR scraper/tavily_extract)
+        from src.skills.researcher.scrapers.tavily_extract_scraper import (
+            TavilyExtractScraper,
+        )
+
+        return TavilyExtractScraper(url, session)
 
     # 默认 BeautifulSoup
     from src.skills.researcher.scrapers.beautiful_soup_scraper import BeautifulSoupScraper

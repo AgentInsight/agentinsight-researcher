@@ -16,6 +16,7 @@ detailed_report 的子主题/引言/章节/结论 prompt 暂保留内联 (流程
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -34,6 +35,32 @@ logger = logging.getLogger(__name__)
 # 兜底角色 persona (对标 GPTR 默认 researcher role)
 _DEFAULT_AGENT_ROLE = "你是一位资深研究分析专家, 擅长多领域综合研究."
 
+# V4-P1-03: 章节/段落 LLM 调用失败后的占位文本
+_SECTION_FAILURE_PLACEHOLDER = "[此章节生成失败, 请重试]"
+
+# V4-P1-03: LLM 调用单章节重试次数 (失败后再试 1 次)
+_LLM_RETRY_TIMES = 1
+
+# V4-P2-01: 报告风格预设描述 (用于 detailed_report 内联 prompt 注入,
+# 与 prompts.py DefaultPromptFamily._STYLE_PROMPTS 保持一致)
+_REPORT_STYLE_DESCRIPTIONS: dict[str, str] = {
+    "academic": (
+        "学术风格: 严谨客观, 引用来源, 使用正式学术语言, "
+        "段落间逻辑清晰, 论点需有数据或文献支撑, 避免口语化表达"
+    ),
+    "business": (
+        "商业风格: 简洁明了, 结论先行, 使用商业术语, "
+        "聚焦价值与决策建议, 突出关键指标与 ROI, 段落短小精悍"
+    ),
+    "casual": (
+        "通俗风格: 易于理解, 避免专业术语, 适合大众阅读, 多用类比与案例, 语言亲切自然, 降低认知门槛"
+    ),
+    "news": (
+        "新闻风格: 倒金字塔结构, 5W1H, 客观报道, "
+        "导语概括核心事实, 正文按重要性递减展开, 强调时效与现场感"
+    ),
+}
+
 
 class ReportGenerator:
     """报告生成器 (Writer 职责).
@@ -49,6 +76,15 @@ class ReportGenerator:
     _image_generator: ImageGenerator | None
     _prompt_family: PromptFamily
 
+    # P2-05: 多语言报告生成指令 (5 种语言, 中文默认无需额外指令)
+    _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
+        "zh": "请用中文撰写报告，使用中文标点和格式。",
+        "en": "Please write the report in English with proper English punctuation and formatting.",
+        "ja": "日本語でレポートを執筆してください。日本語の句読点と書式を使用してください。",
+        "ko": "한국어로 보고서를 작성해 주세요. 한국어 문장 부호와 형식을 사용하세요.",
+        "fr": "Veuillez rédiger le rapport en français avec une ponctuation et un formatage français appropriés.",
+    }
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -62,6 +98,22 @@ class ReportGenerator:
         self._image_generator = image_generator
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
+    def _get_language_instruction(self, language: str | None) -> str:
+        """获取语言指令 (P2-05 多语言).
+
+        中文 (zh) 为默认语言, 无需额外指令; 其他语言返回对应撰写指令,
+        由调用方追加到 prompt 末尾, 让 LLM 直接用目标语言生成 (非翻译).
+
+        Args:
+            language: 语言代码 (zh|en|ja|ko|fr), None 或未知值视为 zh.
+
+        Returns:
+            语言指令字符串, 中文/未知返回空串.
+        """
+        if not language or language == "zh":
+            return ""  # 中文是默认, 不需额外指令
+        return self._LANGUAGE_INSTRUCTIONS.get(language, "")
+
     async def generate_report(
         self,
         query: str,
@@ -74,6 +126,7 @@ class ReportGenerator:
         agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> dict[str, Any]:
         """生成研究报告 (Markdown), 按 report_type 路由.
 
@@ -82,6 +135,9 @@ class ReportGenerator:
 
         agent_role (对标 GPTR AGENT_ROLE): 角色 persona 字符串,
         由 AgentCreator LLM 动态生成或调用方注入, 优先级高于默认角色.
+
+        language (P2-05): 报告语言代码 (zh|en|ja|ko|fr), 默认 zh 中文;
+        非 zh 时在 prompt 末尾追加语言指令, 让 LLM 直接用目标语言生成.
 
         返回 dict 含:
         - report_md: Markdown 报告 (含配图, 若生成成功)
@@ -98,6 +154,7 @@ class ReportGenerator:
                 agent_role=agent_role,
                 user_id=user_id,
                 session_id=session_id,
+                language=language,
             )
         return await self._generate_basic_report(
             query,
@@ -108,6 +165,7 @@ class ReportGenerator:
             agent_role=agent_role,
             user_id=user_id,
             session_id=session_id,
+            language=language,
         )
 
     async def _generate_basic_report(
@@ -121,6 +179,7 @@ class ReportGenerator:
         agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> dict[str, Any]:
         """基础报告: 单次 LLM 合成 (原 generate_report 逻辑).
 
@@ -139,11 +198,16 @@ class ReportGenerator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 上下文为空时拒绝生成 (对标 GPT Researcher 防幻觉)
-            if not contexts:
+            # 空上下文拒绝生成守卫 (对标 GPTR writer.py:82-88, 防幻觉)
+            # 不仅检查列表为空, 还检查所有上下文是否均为空白字符串
+            if not contexts or all(not str(c).strip() for c in contexts):
                 span.update(output={"error": "no_contexts"})
                 return {
-                    "report_md": "# 研究报告\n\n无法生成报告: 未检索到相关上下文.\n",
+                    "report_md": (
+                        f'抱歉，针对 "{query}" 未检索到任何有效资料来源。'
+                        "搜索引擎可能未返回结果或被限制，无法生成可靠的、有来源支撑的研究报告。"
+                        "请尝试更换查询词或稍后重试。"
+                    ),
                     "image_url": None,
                     "image_b64": None,
                 }
@@ -166,6 +230,8 @@ class ReportGenerator:
             structure_hint = self._basic_report_structure()
 
             # P1-Future-04: prompt 经 PromptFamily 策略注入
+            # V4-P2-01: 注入 report_style 风格预设
+            # V4-P2-02: 末尾追加 Tone 语气提示词 (对标 GPTR 17 种 Tone)
             prompt = self._prompt_family.writer_prompt(
                 query=query,
                 contexts=combined_context,
@@ -176,10 +242,17 @@ class ReportGenerator:
                 current_date=current_date,
                 references=references,
                 structure_hint=structure_hint,
-            )
+                report_style=self.settings.report_style,
+            ) + self._prompt_family.get_tone_prompt(tone)
+
+            # P2-05: 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
+            lang_instruction = self._get_language_instruction(language)
+            if lang_instruction:
+                prompt += f"\n\n{lang_instruction}"
 
             messages = [{"role": "user", "content": prompt}]
-            response = await self._llm.achat(
+            # V4-P1-03: LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
+            report_md = await self._achat_with_retry(
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.4,
@@ -188,13 +261,15 @@ class ReportGenerator:
                 session_id=session_id,
                 span_name="writer-llm",
                 step="writer",
+                fallback=_SECTION_FAILURE_PLACEHOLDER,
             )
-
-            report_md = response.content
 
             # 确保末尾有参考文献
             if "## 参考文献" not in report_md and "## References" not in report_md:
                 report_md += f"\n\n## 参考文献\n\n{references}\n"
+
+            # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式)
+            report_md += self._format_sources(sources)
 
             # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
@@ -227,6 +302,7 @@ class ReportGenerator:
         agent_role: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> dict[str, Any]:
         """详细报告: 子主题嵌套研究 + TOC 拼接 (对标 GPTR detailed_report).
 
@@ -239,6 +315,11 @@ class ReportGenerator:
            - WrittenContentCompressor 去重已写章节 (相似度 >= 0.5 跳过)
            - LLM 写子主题章节
         5. TOC + 引言 + 正文 + 结论 + 引用拼接
+
+        V4-P0-02: 子主题并行化, 用 asyncio.gather 并行处理所有子主题
+                  (每个子主题独立 research + write, 互不依赖).
+        V4-P1-03: 单个子主题 LLM 调用失败时重试 1 次, 仍失败用占位文本, 不阻断整体.
+        V4-P2-01: 注入 report_style 风格预设.
 
         AGENTS.md 第 10 章: 整个流程包裹在 trace_chain 内.
         AGENTS.md 第 9 章: 所有 LLM 调用经 LLMClient (achat 内部包裹 trace_generation).
@@ -259,11 +340,16 @@ class ReportGenerator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 上下文为空时拒绝生成 (对标 GPT Researcher 防幻觉)
-            if not contexts:
+            # 空上下文拒绝生成守卫 (对标 GPTR writer.py:82-88, 防幻觉)
+            # 不仅检查列表为空, 还检查所有上下文是否均为空白字符串
+            if not contexts or all(not str(c).strip() for c in contexts):
                 span.update(output={"error": "no_contexts"})
                 return {
-                    "report_md": "# 研究报告\n\n无法生成报告: 未检索到相关上下文.\n",
+                    "report_md": (
+                        f'抱歉，针对 "{query}" 未检索到任何有效资料来源。'
+                        "搜索引擎可能未返回结果或被限制，无法生成可靠的、有来源支撑的研究报告。"
+                        "请尝试更换查询词或稍后重试。"
+                    ),
                     "image_url": None,
                     "image_b64": None,
                 }
@@ -297,62 +383,50 @@ class ReportGenerator:
                 session_id=session_id,
             )
 
-            # 步骤 4: 逐子主题嵌套研究 + 去重 + 写章节
+            # 步骤 4: V4-P0-02 子主题并行嵌套研究 + 去重 + 写章节
             research_conductor = ResearchConductor(
                 settings=self.settings,
                 llm=self._llm,
             )
             written_compressor = WrittenContentCompressor(self.settings)
+            # 并行场景下保护 WrittenContentCompressor 内部状态 (should_keep 会修改 _written_embeddings)
+            dedup_lock = asyncio.Lock()
 
+            # 并行处理所有子主题, 每个独立 research + write, 互不依赖
+            section_results = await asyncio.gather(
+                *[
+                    self._research_and_write_subtopic(
+                        topic=topic,
+                        query=query,
+                        combined_context=combined_context,
+                        references=references,
+                        role_persona=role_persona,
+                        tone=tone,
+                        agent_role=agent_role,
+                        max_context_chars=max_context_chars,
+                        research_conductor=research_conductor,
+                        written_compressor=written_compressor,
+                        dedup_lock=dedup_lock,
+                        user_id=user_id,
+                        session_id=session_id,
+                        language=language,
+                    )
+                    for topic in subtopics
+                ],
+                return_exceptions=False,
+            )
+
+            # 汇总并行结果 (按子主题顺序)
             sections: list[str] = []
             all_sources: list[dict[str, Any]] = list(sources)
             skipped_count = 0
-
-            for topic in subtopics:
-                sub_query = f"{query} - {topic}"
-                try:
-                    research_result = await research_conductor.conduct_research(
-                        sub_query,
-                        mode="basic",
-                        agent_role=agent_role,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("子主题 '%s' 嵌套研究失败: %s", topic, e)
-                    continue
-
-                sub_contexts = research_result.get("contexts", [])
-                sub_sources = research_result.get("sources", [])
+            for section_md, sub_sources, skipped in section_results:
+                if skipped:
+                    skipped_count += 1
                 if sub_sources:
                     all_sources.extend(sub_sources)
-
-                sub_context = "\n\n---\n\n".join(sub_contexts) if sub_contexts else combined_context
-                if len(sub_context) > max_context_chars:
-                    sub_context = sub_context[:max_context_chars]
-
-                # WrittenContentCompressor 去重 (与已写入内容相似度 >= threshold 跳过)
-                keep = await written_compressor.should_keep(sub_context)
-                if not keep:
-                    skipped_count += 1
-                    logger.info("子主题 '%s' 内容与已写章节高度相似, 跳过", topic)
-                    continue
-
-                # 写子主题章节
-                try:
-                    section_md = await self._write_section(
-                        topic,
-                        sub_context,
-                        references,
-                        role_persona=role_persona,
-                        tone=tone,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("子主题 '%s' 章节写入失败: %s", topic, e)
-                    continue
-                sections.append(section_md)
+                if section_md:
+                    sections.append(section_md)
 
             # 步骤 5: TOC + 引言 + 正文 + 结论 + 引用拼接
             toc = self._generate_toc(subtopics)
@@ -380,6 +454,9 @@ class ReportGenerator:
                 f"## 参考文献\n\n{all_references}\n"
             )
 
+            # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式, 含子主题研究新增源)
+            full_report += self._format_sources(all_sources)
+
             # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
@@ -403,6 +480,103 @@ class ReportGenerator:
                 "image_b64": image_b64,
             }
 
+    async def _research_and_write_subtopic(
+        self,
+        *,
+        topic: str,
+        query: str,
+        combined_context: str,
+        references: str,
+        role_persona: str,
+        tone: str,
+        agent_role: str | None,
+        max_context_chars: int,
+        research_conductor: ResearchConductor,
+        written_compressor: WrittenContentCompressor,
+        dedup_lock: asyncio.Lock,
+        user_id: str | None,
+        session_id: str | None,
+        language: str = "zh",
+    ) -> tuple[str | None, list[dict[str, Any]], bool]:
+        """V4-P0-02: 单个子主题的 research + write 独立函数 (并行单元).
+
+        每个子主题独立调用 research + write, 互不依赖:
+        1. ResearchConductor.conduct_research(sub_query, mode="basic")
+        2. WrittenContentCompressor 去重 (锁保护, 避免并行竞态)
+        3. _write_section 写章节 (V4-P1-03: 内部已含 try/except + 重试)
+
+        异常处理: 单个子主题失败不阻断整体, 返回占位文本 (V4-P1-03).
+
+        Args:
+            topic: 子主题名称
+            query: 主研究问题
+            combined_context: 初始合并上下文 (子主题研究失败时降级使用)
+            references: 参考文献文本
+            role_persona: 角色 persona
+            tone: 语气
+            agent_role: 调用方注入的角色 persona (传给 ResearchConductor)
+            max_context_chars: 单子主题上下文字符上限
+            research_conductor: 研究执行器 (共享实例, 线程安全)
+            written_compressor: 已写入内容去重器 (共享实例, 用 dedup_lock 保护)
+            dedup_lock: 保护 written_compressor 状态的异步锁
+            user_id: 用户 ID
+            session_id: 会话 ID
+            language: P2-05 报告语言代码 (zh|en|ja|ko|fr), 默认 zh
+
+        Returns:
+            (section_md, sub_sources, skipped):
+            - section_md: 章节 Markdown, 失败时为占位文本; 跳过时为 None
+            - sub_sources: 子主题研究新增的来源列表
+            - skipped: 是否因去重被跳过
+        """
+        sub_query = f"{query} - {topic}"
+        sub_sources: list[dict[str, Any]] = []
+
+        # 1. 嵌套研究 (失败时降级用 combined_context, 不直接 continue)
+        try:
+            research_result = await research_conductor.conduct_research(
+                sub_query,
+                mode="basic",
+                agent_role=agent_role,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            sub_contexts = research_result.get("contexts", [])
+            sub_sources = research_result.get("sources", []) or []
+        except Exception as e:  # noqa: BLE001
+            logger.warning("子主题 '%s' 嵌套研究失败, 降级用初始上下文: %s", topic, e)
+            sub_contexts = []
+            sub_sources = []
+
+        sub_context = "\n\n---\n\n".join(sub_contexts) if sub_contexts else combined_context
+        if len(sub_context) > max_context_chars:
+            sub_context = sub_context[:max_context_chars]
+
+        # 2. WrittenContentCompressor 去重 (并行场景下用锁保护内部状态)
+        try:
+            async with dedup_lock:
+                keep = await written_compressor.should_keep(sub_context)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("子主题 '%s' 去重检查失败, 保留内容: %s", topic, e)
+            keep = True
+
+        if not keep:
+            logger.info("子主题 '%s' 内容与已写章节高度相似, 跳过", topic)
+            return None, sub_sources, True
+
+        # 3. 写子主题章节 (V4-P1-03: _write_section 内部已含 try/except + 重试)
+        section_md = await self._write_section(
+            topic,
+            sub_context,
+            references,
+            role_persona=role_persona,
+            tone=tone,
+            user_id=user_id,
+            session_id=session_id,
+            language=language,
+        )
+        return section_md, sub_sources, False
+
     async def _generate_subtopics(
         self,
         query: str,
@@ -415,6 +589,7 @@ class ReportGenerator:
         """LLM 生成 3-5 个子主题 (对标 GPTR detailed_report subtopic list).
 
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
+        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
         """
         prompt = f"""{role_persona}
 
@@ -433,7 +608,8 @@ class ReportGenerator:
 
 请返回 3-5 个子主题的 JSON 数组:"""
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        response = await self._llm.achat(
+        # V4-P1-03: LLM 调用增加重试, 失败降级为 [query]
+        content = await self._achat_with_retry(
             messages,
             tier=LLMTier.STRATEGIC,
             temperature=0.4,
@@ -442,8 +618,9 @@ class ReportGenerator:
             session_id=session_id,
             span_name="detailed-subtopics",
             step="planner",
+            fallback=f'["{query}"]',
         )
-        topics = safe_json_parse(response.content, fallback=[query])
+        topics = safe_json_parse(content, fallback=[query])
         if isinstance(topics, list) and topics:
             return [str(t) for t in topics if t][:5]
         return [query]
@@ -459,8 +636,16 @@ class ReportGenerator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> str:
-        """LLM 写引言 (基于 query + contexts)."""
+        """LLM 写引言 (基于 query + contexts).
+
+        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        V4-P2-01: 注入 report_style 风格预设.
+        """
         current_date = datetime.now().strftime("%Y年%m月%d日")
+        # V4-P2-01: 注入风格描述
+        style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
+            self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
+        )
         prompt = f"""{role_persona}
 
 请基于以下上下文, 为「{query}」研究报告撰写引言部分.
@@ -473,6 +658,7 @@ class ReportGenerator:
 5. 不得编造未在上下文中出现的数据
 6. 注入当前日期: {current_date}
 7. 仅输出引言内容 (## 引言 标题下), 不含其他章节
+8. 写作风格: {style_desc}
 
 上下文:
 {context[:6000]}
@@ -482,7 +668,7 @@ class ReportGenerator:
 
 请输出引言 (以 `## 引言` 开头):"""
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        response = await self._llm.achat(
+        content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
             temperature=0.4,
@@ -491,8 +677,9 @@ class ReportGenerator:
             session_id=session_id,
             span_name="detailed-intro",
             step="writer",
+            fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
-        content = response.content.strip()
+        content = content.strip()
         if not content.startswith("## 引言"):
             content = "## 引言\n\n" + content
         return content
@@ -507,8 +694,18 @@ class ReportGenerator:
         tone: str = "objective",
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> str:
-        """LLM 写子主题章节 (基于 sub_context + sources)."""
+        """LLM 写子主题章节 (基于 sub_context + sources).
+
+        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        V4-P2-01: 注入 report_style 风格预设.
+        P2-05: 非 zh 时追加语言指令, 让 LLM 直接用目标语言生成章节.
+        """
+        # V4-P2-01: 注入风格描述
+        style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
+            self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
+        )
         prompt = f"""{role_persona}
 
 请基于以下子主题上下文, 撰写「{topic}」章节内容.
@@ -520,6 +717,7 @@ class ReportGenerator:
 4. Web 源必须超链接引用: ([说明](url))
 5. 不得编造未在上下文中出现的数据
 6. 仅输出本章节内容 (## 章节标题 下), 不含其他章节
+7. 写作风格: {style_desc}
 
 子主题上下文:
 {context[:6000]}
@@ -528,8 +726,14 @@ class ReportGenerator:
 {references}
 
 请输出本章节 (以 `## {topic}` 开头):"""
+        # V4-P2-02: 末尾追加 Tone 语气提示词 (对标 GPTR 17 种 Tone)
+        prompt += self._prompt_family.get_tone_prompt(tone)
+        # P2-05: 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
+        lang_instruction = self._get_language_instruction(language)
+        if lang_instruction:
+            prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        response = await self._llm.achat(
+        content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
             temperature=0.4,
@@ -538,8 +742,9 @@ class ReportGenerator:
             session_id=session_id,
             span_name="detailed-section",
             step="writer",
+            fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
-        content = response.content.strip()
+        content = content.strip()
         if not content.startswith("## "):
             content = f"## {topic}\n\n" + content
         return content
@@ -554,8 +759,16 @@ class ReportGenerator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> str:
-        """LLM 写结论 (基于 query + 已写章节摘要)."""
+        """LLM 写结论 (基于 query + 已写章节摘要).
+
+        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        V4-P2-01: 注入 report_style 风格预设.
+        """
         sections_summary = "\n\n".join(s[:500] for s in sections)
+        # V4-P2-01: 注入风格描述
+        style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
+            self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
+        )
         prompt = f"""{role_persona}
 
 请基于以下已写章节内容, 为「{query}」研究报告撰写结论部分.
@@ -566,13 +779,14 @@ class ReportGenerator:
 3. 字数 300-500 字
 4. 语气: {tone} (objective=客观, analytical=分析性, opinionated=观点鲜明, casual=通俗)
 5. 仅输出结论内容 (## 结论 标题下), 不含其他章节
+6. 写作风格: {style_desc}
 
 已写章节摘要:
 {sections_summary[:6000]}
 
 请输出结论 (以 `## 结论` 开头):"""
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        response = await self._llm.achat(
+        content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
             temperature=0.4,
@@ -581,20 +795,110 @@ class ReportGenerator:
             session_id=session_id,
             span_name="detailed-conclusion",
             step="writer",
+            fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
-        content = response.content.strip()
+        content = content.strip()
         if not content.startswith("## 结论"):
             content = "## 结论\n\n" + content
         return content
 
+    async def _achat_with_retry(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tier: LLMTier,
+        temperature: float,
+        max_tokens: int,
+        user_id: str | None,
+        session_id: str | None,
+        span_name: str,
+        step: str,
+        fallback: str,
+    ) -> str:
+        """V4-P1-03: LLM 调用通用重试封装.
+
+        失败时重试 _LLM_RETRY_TIMES 次, 仍失败则返回 fallback 占位文本.
+        用于章节/段落级 LLM 调用, 避免整篇报告因单点失败而重试.
+
+        Args:
+            messages: LLM 消息列表
+            tier: LLM 层级 (FAST/SMART/STRATEGIC)
+            temperature: 采样温度
+            max_tokens: 最大 token 数
+            user_id: 用户 ID
+            session_id: 会话 ID
+            span_name: trace span 名称
+            step: 流程步骤标识
+            fallback: 失败时的占位文本
+
+        Returns:
+            LLM 响应内容, 或失败时的 fallback 占位文本
+        """
+        total_attempts = _LLM_RETRY_TIMES + 1
+        for attempt in range(total_attempts):
+            try:
+                response = await self._llm.achat(
+                    messages,
+                    tier=tier,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    user_id=user_id,
+                    session_id=session_id,
+                    span_name=span_name,
+                    step=step,
+                )
+                return response.content
+            except Exception as e:  # noqa: BLE001
+                is_last = attempt == total_attempts - 1
+                if is_last:
+                    logger.warning(
+                        "LLM 调用最终失败 (span=%s, attempt=%d/%d), 使用占位文本: %s",
+                        span_name,
+                        attempt + 1,
+                        total_attempts,
+                        e,
+                    )
+                else:
+                    logger.warning(
+                        "LLM 调用失败 (span=%s, attempt=%d/%d), 重试中: %s",
+                        span_name,
+                        attempt + 1,
+                        total_attempts,
+                        e,
+                    )
+        return fallback
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """将标题文本转为 markdown 锚点 slug (对标 GPTR detailed_report TOC).
+
+        GitHub-flavored markdown 规则: 小写 ASCII, 空格转连字符,
+        保留中文/字母/数字/连字符, 移除其余标点.
+        """
+        slug = text.strip().lower()
+        # 空格转连字符
+        slug = slug.replace(" ", "-")
+        # 移除 markdown 锚点不支持的标点 (保留中文/字母/数字/连字符)
+        slug = "".join(ch for ch in slug if ch.isalnum() or ch == "-" or "\u4e00" <= ch <= "\u9fff")
+        # 合并连续连字符
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        return slug.strip("-")
+
     @staticmethod
     def _generate_toc(subtopics: list[str]) -> str:
-        """生成目录 (对标 GPTR TOC)."""
+        """生成目录 (对标 GPTR TOC, 含锚点链接).
+
+        每个目录项为可点击的锚点链接, 跳转到对应章节标题.
+        """
         if not subtopics:
             return ""
         lines = ["## 目录", ""]
         for i, topic in enumerate(subtopics, 1):
-            lines.append(f"{i}. {topic}")
+            anchor = ReportGenerator._slugify(topic)
+            lines.append(f"{i}. [{topic}](#{anchor})")
+        lines.append("")
+        lines.append("---")
         lines.append("")
         return "\n".join(lines)
 
@@ -730,3 +1034,18 @@ class ReportGenerator:
                 ref += f" Retrieved from {url}"
             refs.append(ref)
         return "\n".join(refs)
+
+    def _format_sources(self, sources: list[dict[str, Any]]) -> str:
+        """格式化引用来源列表 (APA 风格, 对标 GPTR APA 格式).
+
+        与 _build_references 不同, 此方法生成带章节标题的完整来源列表,
+        用于追加到报告末尾, 确保读者可访问原始来源.
+        """
+        if not sources:
+            return ""
+        lines = ["\n\n## 参考来源\n"]
+        for i, src in enumerate(sources, 1):
+            title = src.get("title", "未知标题")
+            url = src.get("url", src.get("href", ""))
+            lines.append(f"{i}. {title}. {url}")
+        return "\n".join(lines)

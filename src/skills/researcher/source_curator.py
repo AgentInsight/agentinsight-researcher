@@ -31,11 +31,36 @@ class SourceCurator:
 
     对标 GPT Researcher SourceCurator.
     用 smart_llm 评估来源可信度与相关性.
+
+    P2-02: 新增域名可信度字典 + _score_credibility 方法,
+    与 LLM 相关性分数综合排序 (相关性 * 0.6 + 可信度 * 0.4).
     """
 
     settings: Settings
     _llm: LLMClient
     _prompt_family: PromptFamily
+
+    # P2-02: 权威域名可信度字典 (对标 GPTR curate_sources)
+    _DOMAIN_CREDIBILITY: dict[str, float] = {
+        # 学术
+        "arxiv.org": 0.95,
+        "pubmed.ncbi.nlm.nih.gov": 0.95,
+        "scholar.google.com": 0.90,
+        "nature.com": 0.95,
+        "science.org": 0.95,
+        "ieee.org": 0.90,
+        # 政府
+        "gov": 0.90,
+        "gov.cn": 0.90,
+        "stats.gov.cn": 0.95,
+        # 主流媒体
+        "reuters.com": 0.85,
+        "bbc.com": 0.85,
+        "nytimes.com": 0.85,
+        # 百科
+        "wikipedia.org": 0.70,
+        "baike.baidu.com": 0.65,
+    }
 
     def __init__(
         self,
@@ -46,6 +71,35 @@ class SourceCurator:
         self.settings = settings or get_settings()
         self._llm = llm or LLMClient(self.settings)
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
+
+    def _score_credibility(self, source: dict[str, Any]) -> float:
+        """计算来源可信度 (0-1, P2-02).
+
+        综合域名权威性 + 内容长度 + 是否含统计数据.
+        对标 GPTR curate_sources 域名可信度评估.
+
+        Args:
+            source: 来源 dict, 含 url/content/body/snippet 等字段
+
+        Returns:
+            可信度分数 0.0-1.0
+        """
+        url = source.get("url", source.get("href", ""))
+        score = 0.5  # 基础分
+        # 域名权威性 (取所有匹配域名的最高分, 避免顺序依赖)
+        for domain, cred in self._DOMAIN_CREDIBILITY.items():
+            if domain in url:
+                score = max(score, cred)
+        # 内容长度 (长内容通常更可信)
+        content = source.get("content", source.get("body", source.get("snippet", "")))
+        if len(content) > 2000:
+            score += 0.05
+        elif len(content) < 200:
+            score -= 0.10
+        # 含统计数据 (前 500 字符含数字)
+        if any(c.isdigit() for c in content[:500]):
+            score += 0.03
+        return max(0.0, min(1.0, score))
 
     async def curate_sources(
         self,
@@ -106,24 +160,46 @@ class SourceCurator:
             try:
                 scored = safe_json_parse(response.content, fallback=[])
                 if isinstance(scored, list) and scored:
-                    # 按 score 降序排序
-                    scored.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-                    # 映射回原 sources
+                    # 映射回原 sources 并计算可信度
                     curated: list[dict[str, Any]] = []
-                    for item in scored[:max_results]:
+                    for item in scored:
                         idx = item.get("index", 0) - 1
                         if 0 <= idx < len(sources):
                             source = sources[idx].copy()
-                            source["curator_score"] = item.get("score", 0)
+                            curator_score = item.get("score", 0)
+                            source["curator_score"] = curator_score
                             source["curator_reason"] = item.get("reason", "")
+                            # P2-02: 可信度评分 + 综合排序
+                            credibility = self._score_credibility(source)
+                            source["credibility_score"] = round(credibility, 4)
+                            # 相关性归一化 (LLM score 0-10 → 0-1)
+                            relevance = max(0.0, min(1.0, curator_score / 10.0))
+                            combined = relevance * 0.6 + credibility * 0.4
+                            source["combined_score"] = round(combined, 4)
                             curated.append(source)
+
+                    # P2-02: 按 (相关性 * 0.6 + 可信度 * 0.4) 综合排序
+                    curated.sort(key=lambda x: x.get("combined_score", 0.0), reverse=True)
+                    curated = curated[:max_results]
 
                     span.update(output={"curated_count": len(curated)})
                     return curated
             except Exception as e:  # noqa: BLE001
                 logger.warning("来源策展解析失败, 返回原列表: %s", e)
 
-            # 解析失败, 返回原列表前 max_results 条
-            span.update(output={"curated_count": min(max_results, len(sources)), "fallback": True})
-            return sources[:max_results]
+            # 解析失败, 按可信度排序返回前 max_results 条
+            fallback_scored: list[dict[str, Any]] = []
+            for s in sources:
+                s_copy = s.copy()
+                credibility = self._score_credibility(s_copy)
+                s_copy["credibility_score"] = round(credibility, 4)
+                s_copy["combined_score"] = round(credibility, 4)
+                fallback_scored.append(s_copy)
+            fallback_scored.sort(key=lambda x: x.get("combined_score", 0.0), reverse=True)
+            span.update(
+                output={
+                    "curated_count": min(max_results, len(fallback_scored)),
+                    "fallback": True,
+                }
+            )
+            return fallback_scored[:max_results]

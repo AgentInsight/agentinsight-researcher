@@ -31,12 +31,14 @@ class ContextManager:
 
     settings: Settings
     _embeddings: EmbeddingsClient
+    _llm: LLMClient
     _compressor: SlidingWindowCompressor
     _written_compressor: WrittenContentCompressor
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._embeddings = EmbeddingsClient(self.settings)
+        self._llm = LLMClient(self.settings)
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
 
@@ -48,8 +50,101 @@ class ContextManager:
 
         AGENTS.md 第 6 章: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
         供后续节点 (writer/proofreader 等) 在写入会话前调用.
+
+        V4-P1-04: 当上下文总字符数超过 compression_threshold 时, 切换为
+        滑动窗口+摘要混合压缩 (保留最近 N 条原文, 远期 LLM 摘要), 避免
+        纯 LLM 摘要丢失近期细节, 同时降低成本.
         """
+        # V4-P1-04: 超阈值触发混合压缩策略
+        total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+        if total_chars > self.settings.compression_threshold:
+            return await self._hybrid_compress(
+                messages,
+                self.settings.context_compressed_target,
+            )
         return await self._compressor.compress(messages)
+
+    async def _hybrid_compress(
+        self,
+        messages: list[dict[str, Any]],
+        target_tokens: int,
+    ) -> list[dict[str, Any]]:
+        """滑动窗口+摘要混合压缩 (V4-P1-04).
+
+        策略:
+        - 近期内容 (最后 N 条): 保留原文 (滑动窗口), N = settings.context_sliding_window
+        - 远期内容: LLM 摘要为一段文本, 不超过 target_tokens 字符
+        - 阈值: 由调用方在内容超过 compression_threshold 时触发本方法
+
+        Args:
+            messages: 原始消息列表 [{"role": "...", "content": "..."}, ...]
+            target_tokens: 摘要目标字符数上限
+
+        Returns:
+            [{"role": "system", "content": "[历史摘要] ..."}, *recent_messages]
+        """
+        n = self.settings.context_sliding_window
+        # 消息数不足滑动窗口大小, 直接返回原文
+        if len(messages) <= n:
+            return messages
+
+        # 1. 分割: 近期 messages[-N:] 保留原文, 远期 messages[:-N] 需要摘要
+        recent_messages = messages[-n:]
+        old_messages = messages[:-n]
+
+        # 2. 远期内容: 调用 LLM 摘要为一段文本
+        old_text = "\n".join(
+            f"[{m.get('role', 'user')}] {m.get('content', '')[:1000]}" for m in old_messages
+        )
+        summary = await self._summarize_old_messages(old_text, target_tokens)
+
+        # 3. 返回: [摘要文本] + 近期原文 messages
+        if not summary:
+            # 摘要失败时降级: 仅返回近期原文, 避免远期噪声
+            return recent_messages
+        summary_msg: dict[str, Any] = {
+            "role": "system",
+            "content": f"[历史摘要] {summary}",
+        }
+        return [summary_msg] + recent_messages
+
+    async def _summarize_old_messages(
+        self,
+        text: str,
+        target_tokens: int,
+    ) -> str:
+        """LLM 摘要远期消息文本 (V4-P1-04).
+
+        Args:
+            text: 远期消息拼接文本
+            target_tokens: 摘要字符数上限
+
+        Returns:
+            摘要文本, 失败返回空字符串
+        """
+        if not text.strip():
+            return ""
+        # max_tokens 为 token 数, 取合理上限避免超模型限制
+        max_tokens = min(max(target_tokens // 2, 500), 2000)
+        prompt = f"""请将以下研究上下文压缩为简洁摘要, 保留关键事实与结论, 不超过 {target_tokens} 字:
+
+{text[:8000]}
+
+摘要:"""
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            response = await self._llm.achat(
+                messages,
+                tier=LLMTier.FAST,
+                max_tokens=max_tokens,
+                temperature=0.3,
+                span_name="context-hybrid-summarize",
+                step="context_manager",
+            )
+            return response.content
+        except Exception as e:  # noqa: BLE001
+            logger.warning("混合压缩 LLM 摘要失败, 降级返回空摘要: %s", e)
+            return ""
 
     async def get_similar_content(
         self,

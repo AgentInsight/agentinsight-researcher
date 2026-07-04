@@ -32,30 +32,33 @@ CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user ON research_sessions
 CREATE INDEX IF NOT EXISTS idx_research_sessions_session ON research_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_sessions_expires ON research_sessions(expires_at);
 
--- ========== 迁移: 行业重构 (V3, 对标 GPTR 4 层机制, 删除 GICS 行业分类) ==========
--- 旧列 industry_code/industry_name 已弃用并删除
--- 新列 agent_role/agent_role_server 由 LLM 动态角色生成器写入 (对标 GPTR choose_agent)
-ALTER TABLE IF EXISTS research_sessions DROP COLUMN IF EXISTS industry_code;
-ALTER TABLE IF EXISTS research_sessions DROP COLUMN IF EXISTS industry_name;
-ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS agent_role VARCHAR(256);
-ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS agent_role_server VARCHAR(64);
-
--- ========== 业务表: 研究报告 ==========
+-- ========== 业务表: 研究报告存储 (P1-Future-09) ==========
+-- 对标 GPTR backend/server/report_store.py
+-- report_id UUID 主键, 支持 save/get/list/delete 四类操作
 CREATE TABLE IF NOT EXISTS research_reports (
-    id BIGSERIAL PRIMARY KEY,
-    session_id VARCHAR(64) NOT NULL,
-    agent_id VARCHAR(64) NOT NULL,
-    user_id VARCHAR(64) NOT NULL,
-    report_md TEXT,                            -- Markdown 原文
-    report_html TEXT,                          -- HTML 渲染
-    report_pdf_path VARCHAR(512),              -- PDF 文件路径
-    sources JSONB NOT NULL DEFAULT '[]',       -- 引用来源列表
-    sub_queries JSONB NOT NULL DEFAULT '[]',   -- 拆解的子查询
-    word_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(256) NOT NULL,
+    user_id VARCHAR(256) NOT NULL,
+    agent_id VARCHAR(256) NOT NULL,
+    query TEXT NOT NULL,
+    report_md TEXT NOT NULL,
+    report_format VARCHAR(32) DEFAULT 'markdown',
+    sources JSONB DEFAULT '[]'::jsonb,
+    agent_role VARCHAR(256),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_research_reports_agent_user ON research_reports(agent_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_session ON research_reports(session_id);
+CREATE INDEX IF NOT EXISTS idx_research_reports_user ON research_reports(user_id);
+CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
+-- 迁移: 已有 research_reports 表补充 P1-Future-09 新增列 (PostgreSQL 9.6+)
+ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_id UUID DEFAULT gen_random_uuid();
+ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS query TEXT;
+ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_format VARCHAR(32) DEFAULT 'markdown';
+ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS agent_role VARCHAR(256);
+ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+-- 兜底唯一索引: 旧表无 report_id PK 时保证唯一 (新表已有 PK, IF NOT EXISTS 跳过)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_research_reports_report_id ON research_reports(report_id);
 
 -- ========== 业务表: 搜索记录 (用于审计与质量分析) ==========
 CREATE TABLE IF NOT EXISTS research_search_logs (

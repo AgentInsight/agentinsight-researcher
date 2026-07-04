@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     smart_token_limit: int = 6000
     strategic_token_limit: int = 4000
     summary_token_limit: int = 700
+    max_total_tokens: int = 128000  # 单次研究流程总 token 预算上限 (P1-02)
     temperature: float = 0.4
     llm_timeout: int = 60
     llm_max_retries: int = 2
@@ -67,6 +68,12 @@ class Settings(BaseSettings):
     qdrant_collection: str = "agents"
     qdrant_vector_size: int = 1024
     qdrant_distance: str = "Cosine"
+
+    # Qdrant HNSW 索引参数调优 (P0-03)
+    qdrant_hnsw_m: int = 32  # HNSW 图连接数 (默认 16, 中文建议 32)
+    qdrant_hnsw_ef_construct: int = 200  # 构建时搜索宽度 (默认 100, 建议 200)
+    qdrant_hnsw_full_scan_threshold: int = 10000  # 全扫描阈值
+    qdrant_quantization: str = "scalar"  # 量化方式 (scalar/int8/binary, 默认 scalar)
 
     # ========== Embeddings (AGENTS.md 第 1/7 章, 远程 TEI) ==========
     embeddings_base_url: str = "http://embeddings:8088"
@@ -108,6 +115,9 @@ class Settings(BaseSettings):
     # ========== Redis (AGENTS.md 第 1/6 章) ==========
     redis_url: str = "redis://redis:6379/0"
     redis_auth: str | None = None  # Redis 鉴权密码 (与 docker-compose REDIS_AUTH 对齐)
+    # Redis 缓存 LRU 淘汰 (P1-03)
+    redis_cache_max_size: int = 1000  # LRU 最大缓存条目数 (超过时淘汰最久未访问)
+    redis_cache_lru_enabled: bool = True  # 是否启用 LRU 淘汰 (默认 True, 关闭则仅 TTL)
 
     # ========== 可观测性 (AGENTS.md 第 10 章) ==========
     agentinsight_public_key: str | None = None
@@ -148,6 +158,11 @@ class Settings(BaseSettings):
     serper_api_key: str | None = None  # Serper.dev Google Search (全球)
     pubmed_email: str = ""  # PubMed NCBI 建议邮箱 (无需 Key)
     semantic_scholar_api_key: str | None = None  # Semantic Scholar Graph API (可选 Key)
+    # 新增 5 个搜索引擎 (P2-Future-04, 对标 GPTR retrievers/)
+    exa_api_key: str | None = None  # Exa 搜索 (全球, Bearer token)
+    searchapi_api_key: str | None = None  # SearchAPI.io (全球, query param)
+    searx_url: str = "http://localhost:8080"  # SearXNG 自托管实例 URL (无需 Key)
+    openalex_email: str = ""  # OpenAlex polite pool 邮箱 (可选, 无需 Key)
     max_search_results_per_query: int = 5
 
     # ========== 抓取 (GPT Researcher 模式) ==========
@@ -155,10 +170,16 @@ class Settings(BaseSettings):
     scraper_rate_limit_delay: float = 0.0
     browse_chunk_max_length: int = 8192
     scraper: str = "bs"
+    # Firecrawl (P1-Future-08)
+    firecrawl_api_key: str | None = None
+    firecrawl_api_url: str = "https://api.firecrawl.dev"
+    # nodriver (P1-Future-08)
+    nodriver_enabled: bool = False  # 默认关闭, 需要时手动启用
 
     # ========== Token 优化 (GPT Researcher 模式) ==========
     similarity_threshold: float = 0.35
     compression_threshold: int = 8000
+    context_sliding_window: int = 5  # 滑动窗口大小: 保留最近 N 条原文 (V4-P1-04)
     max_context_words: int = 25_000
     max_iterations: int = 3  # Planner 拆解子查询数量 (非图迭代上限)
     graph_max_iterations: int = 10  # 图迭代硬上限 (AGENTS.md 第 5 章, P0-05 守卫用)
@@ -166,11 +187,19 @@ class Settings(BaseSettings):
     deep_research_breadth: int = 3
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
+    deep_research_adaptive: bool = False  # 自适应深度开关 (V4-P2-02, 默认关闭)
     curate_sources: bool = False
 
     # ========== 评审与事实核查 (P0-Future-01/02) ==========
     max_revisions: int = 3  # Reviewer→Reviser 修订循环上限 (P0-Future-01 守卫)
     fact_check_enabled: bool = True  # FactChecker 事实核查开关 (P0-Future-02)
+
+    # ========== 短查询保护 (P0-Future-05/06, 用户可配置回复语) ==========
+    short_query_enabled: bool = True  # 短查询保护开关
+    short_query_min_length: int = 2  # 最小有效查询长度(字符)
+    short_query_reply: str = "您好！我是研究助手，请提供您想研究的主题，我将为您生成详细的研究报告。"  # 短查询回复语(用户可配置)
+    # 语义匹配相似度阈值 (Embeddings + Qdrant 检测短查询, top-1 score > 阈值 → SHORT_QUERY)
+    short_query_similarity_threshold: float = 0.85
 
     # ========== 人在回路 (P0-Future-03 Human-in-the-loop) ==========
     # human_review_enabled=True 时, 多 Agent 图在 agent_creator 之后、supervisor 之前
@@ -187,10 +216,20 @@ class Settings(BaseSettings):
     #   3. 可选: 节点进度结构化推送 (node_progress)
     websocket_enabled: bool = True
 
+    # WebSocket 安全加固 (V4-P0-03)
+    # 防止 CSWSH (跨站 WebSocket 劫持) 攻击:
+    #   - ws_auth_required: JWT token 鉴权开关 (prod 环境强制开启)
+    #   - ws_origin_check: Origin 白名单校验开关 (prod 环境强制开启)
+    # dev 环境可关闭但仍记录警告日志
+    ws_auth_required: bool = True  # WebSocket JWT 鉴权开关
+    ws_origin_check: bool = True  # WebSocket Origin 校验开关
+
     # ========== MCP (用户需求 9) ==========
     mcp_strategy: Literal["fast", "deep", "disabled"] = "fast"
     mcp_auto_tool_selection: bool = True
     mcp_max_tools: int = 3
+    mcp_cache_ttl: int = 300  # MCP 工具调用结果缓存 TTL (秒, V4-P1-01)
+    mcp_cache_enabled: bool = True  # MCP 缓存开关
 
     # ========== 报告输出 (用户需求 6) ==========
     default_report_format: Literal["markdown", "html", "pdf", "docx", "json"] = "markdown"
@@ -199,6 +238,8 @@ class Settings(BaseSettings):
     ] = "basic_report"
     total_words: int = 1200
     report_format_style: str = "APA"
+    # V4-P2-01: 报告风格预设, 支持 academic/business/casual/news 4 种风格
+    report_style: Literal["academic", "business", "casual", "news"] = "academic"
 
     # ========== PromptFamily 策略模式 (P1-Future-04) ==========
     # 选择 prompt 策略: "default" 中文优先 | "english" 英文
@@ -219,6 +260,9 @@ class Settings(BaseSettings):
     upload_dir: str = "/tmp/uploads"
     max_upload_size_mb: int = 50
     allowed_upload_extensions: str = "pdf,docx,md,txt,html,csv,xlsx,pptx"
+
+    # ========== AG2 框架 (P2-Future-06, 可选) ==========
+    ag2_enabled: bool = False  # AG2 框架开关 (默认关闭, 启用后可用 AG2 替代 LangGraph)
 
     # ========== CORS (AGENTS.md 第 11 章, 禁 *) ==========
     cors_allow_origins: str = "http://localhost:3000,http://localhost:8066"

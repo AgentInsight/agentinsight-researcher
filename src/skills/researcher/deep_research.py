@@ -73,6 +73,17 @@ class DeepResearcher:
         Returns:
             {"query", "context", "sources", "children": [...]}
         """
+        # V4-P2-02: 自适应深度仅在顶层调用且未显式传参时启用, 避免递归层重复评估
+        if (
+            _current_depth == 0
+            and self.settings.deep_research_adaptive
+            and breadth is None
+            and depth is None
+        ):
+            params = await self._assess_complexity(query, user_id=user_id, session_id=session_id)
+            breadth = params["breadth"]
+            depth = params["depth"]
+
         breadth = breadth or self.settings.deep_research_breadth
         depth = depth or self.settings.deep_research_depth
 
@@ -147,6 +158,94 @@ class DeepResearcher:
                 "sources": all_sources,
                 "children": list(children),
             }
+
+    async def _assess_complexity(
+        self,
+        query: str,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, int]:
+        """评估查询复杂度, 返回自适应参数 (V4-P2-02).
+
+        用 LLMTier.FAST 评估查询复杂度 (1-5), 映射到 breadth/depth/concurrency:
+            1-2 (简单): breadth=2, depth=1, concurrency=2
+            3   (中等): breadth=3, depth=2, concurrency=4 (默认值)
+            4-5 (复杂): breadth=4, depth=3, concurrency=6
+
+        LLM 失败时返回 settings 中的默认配置 (不阻断主流程).
+        """
+        # 默认参数兜底 (LLM 失败时使用)
+        default_params: dict[str, int] = {
+            "breadth": self.settings.deep_research_breadth,
+            "depth": self.settings.deep_research_depth,
+            "concurrency": self.settings.deep_research_concurrency,
+        }
+
+        prompt = (
+            "评估以下查询的研究复杂度 (1-5), 返回 JSON: "
+            '{"complexity": 1-5, "reason": "..."}\n'
+            "复杂度参考:\n"
+            "  1-2: 单一事实/简单定义 (如 '什么是 RAG')\n"
+            "  3: 多维度分析 (如 '对比 React 和 Vue 的优缺点')\n"
+            "  4-5: 综合性深度研究 (如 '分析 2026 年 AI Agent 行业趋势与竞争格局')\n\n"
+            f"查询: {query}\n\n"
+            "仅返回 JSON:"
+        )
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            response = await self._llm.achat(
+                messages,
+                tier=LLMTier.FAST,
+                temperature=0.0,
+                max_tokens=200,
+                user_id=user_id,
+                session_id=session_id,
+                span_name="deep-research-complexity",
+                step="deep_research",
+            )
+            parsed = safe_json_parse(response.content, fallback=None)
+            if not isinstance(parsed, dict):
+                logger.warning(
+                    "复杂度评估返回非 dict, 降级默认值, query=%s",
+                    query[:50],
+                )
+                return default_params
+
+            complexity = parsed.get("complexity")
+            if not isinstance(complexity, int) or complexity < 1 or complexity > 5:
+                logger.warning(
+                    "复杂度评分非法 (%r), 降级默认值, query=%s",
+                    complexity,
+                    query[:50],
+                )
+                return default_params
+
+            # 复杂度映射表 (硬约束)
+            if complexity <= 2:
+                params = {"breadth": 2, "depth": 1, "concurrency": 2}
+            elif complexity == 3:
+                params = {"breadth": 3, "depth": 2, "concurrency": 4}
+            else:  # complexity 4-5
+                params = {"breadth": 4, "depth": 3, "concurrency": 6}
+
+            logger.info(
+                "自适应深度评估: complexity=%d → breadth=%d depth=%d concurrency=%d (query=%s)",
+                complexity,
+                params["breadth"],
+                params["depth"],
+                params["concurrency"],
+                query[:50],
+            )
+            return params
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "复杂度评估失败, 降级默认值: %s (query=%s)",
+                e,
+                query[:50],
+            )
+            return default_params
 
     async def _generate_sub_queries(
         self,

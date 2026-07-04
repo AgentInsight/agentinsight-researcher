@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from enum import StrEnum
 from typing import Any
 
@@ -109,6 +110,7 @@ def get_searchers(
     # 学术区域优先: PubMed + Semantic Scholar + Arxiv
     if region == SearchRegion.ACADEMIC:
         from src.skills.researcher.searchers.arxiv import ArxivSearcher
+        from src.skills.researcher.searchers.openalex import OpenAlexSearcher
         from src.skills.researcher.searchers.pubmed_searcher import PubMedSearcher
         from src.skills.researcher.searchers.semantic_scholar_searcher import (
             SemanticScholarSearcher,
@@ -117,6 +119,7 @@ def get_searchers(
         searchers.append(PubMedSearcher(settings))  # 学术, 无需 Key
         searchers.append(SemanticScholarSearcher(settings))  # 学术, 无需 Key
         searchers.append(ArxivSearcher(settings))  # 学术, 无需 Key
+        searchers.append(OpenAlexSearcher(settings))  # 学术, 无需 Key (P2-Future-04)
         return searchers
 
     if region in (SearchRegion.CN, SearchRegion.AUTO):
@@ -133,11 +136,15 @@ def get_searchers(
         from src.skills.researcher.searchers.arxiv import ArxivSearcher
         from src.skills.researcher.searchers.bing_searcher import BingSearcher
         from src.skills.researcher.searchers.brave_searcher import BraveSearcher
+        from src.skills.researcher.searchers.exa import ExaSearcher
         from src.skills.researcher.searchers.google_searcher import GoogleSearcher
         from src.skills.researcher.searchers.pubmed_searcher import PubMedSearcher
+        from src.skills.researcher.searchers.searchapi import SearchApiSearcher
+        from src.skills.researcher.searchers.searx import SearXNGSearcher
         from src.skills.researcher.searchers.semantic_scholar_searcher import (
             SemanticScholarSearcher,
         )
+        from src.skills.researcher.searchers.serpapi import SerpApiSearcher
         from src.skills.researcher.searchers.serper_searcher import SerperSearcher
         from src.skills.researcher.searchers.tavily import TavilySearcher
 
@@ -149,8 +156,20 @@ def get_searchers(
             searchers.append(BingSearcher(settings))
         if settings.serpapi_key:
             searchers.append(GoogleSearcher(settings))
+            searchers.append(SerpApiSearcher(settings))  # 复用 serpapi_key (P2-Future-04)
         if settings.serper_api_key:
             searchers.append(SerperSearcher(settings))
+        if settings.exa_api_key:
+            searchers.append(ExaSearcher(settings))  # P2-Future-04
+        if settings.searchapi_api_key:
+            searchers.append(SearchApiSearcher(settings))  # P2-Future-04
+        searchers.append(SearXNGSearcher(settings))  # 自托管, 无需 Key (P2-Future-04)
+        # Custom retriever (企业私有端点, 仅当环境变量配置时启用)
+        # 对标 GPTR retrievers/custom/custom.py
+        if os.getenv("CUSTOM_RETRIEVER_ENDPOINT"):
+            from src.skills.researcher.searchers.custom import CustomSearcher
+
+            searchers.append(CustomSearcher(settings))
         # 学术引擎 (无需 Key, GLOBAL/AUTO 也加入)
         searchers.append(ArxivSearcher(settings))
         searchers.append(PubMedSearcher(settings))
@@ -219,3 +238,59 @@ def detect_region(query: str) -> SearchRegion:
     if chinese_chars == 0:
         return SearchRegion.GLOBAL
     return SearchRegion.AUTO
+
+
+# ========== 插件注册表 (可选增强, 对标 GPTR 字典静态注册) ==========
+# 用装饰器注册 searcher, 不破坏现有 get_searchers() 函数式工厂.
+# 第三方扩展可通过 @register_searcher("xxx") 自注册, 再由
+# get_registered_searchers() 查询, 未来可逐步迁移工厂到注册表驱动.
+_SEARCHER_REGISTRY: dict[str, type[BaseSearcher]] = {}
+
+
+def register_searcher(name: str):
+    """搜索引擎注册装饰器.
+
+    Args:
+        name: 注册键名 (如 "custom").
+
+    Returns:
+        类装饰器, 将 cls 注册到 _SEARCHER_REGISTRY 后原样返回.
+    """
+
+    def decorator(cls: type[BaseSearcher]) -> type[BaseSearcher]:
+        _SEARCHER_REGISTRY[name] = cls
+        return cls
+
+    return decorator
+
+
+def get_registered_searchers() -> dict[str, type[BaseSearcher]]:
+    """返回已注册的搜索引擎字典 (浅拷贝, 防外部篡改)."""
+    return dict(_SEARCHER_REGISTRY)
+
+
+def deduplicate_results(
+    results: list[dict[str, Any]],
+    *,
+    key: str = "url",
+) -> list[dict[str, Any]]:
+    """跨搜索引擎 URL 去重 (P1-01).
+
+    保留首次出现, 后续重复项丢弃. 保序输出.
+
+    Args:
+        results: 多引擎聚合后的结果列表.
+        key: 去重键 (默认 "url").
+
+    Returns:
+        去重后的结果列表.
+    """
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for r in results:
+        k = r.get(key, "")
+        if not k or k not in seen:
+            if k:
+                seen.add(k)
+            deduped.append(r)
+    return deduped

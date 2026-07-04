@@ -7,11 +7,21 @@ AGENTS.md 用户需求 9: 支持用户配置 MCP 作为数据源.
 - fast (默认): 仅对原始查询运行一次, 缓存复用
 - deep: 每子查询都运行
 - disabled: 完全跳过
+
+V4-P1-01: 工具调用结果 TTL 缓存, 缓存 key = hash(query + tool_name + tool_args),
+命中直接返回, 未命中调用 MCP Server 后写入缓存.
+
+P1-04: 多工具并发调用 (asyncio.gather + 信号量), 默认并发上限 3,
+单个工具失败不影响其他工具. 保留 V4-P1-01 TTL 缓存逻辑.
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
+import time
 from typing import Any
 
 from src.config.settings import Settings, get_settings
@@ -19,6 +29,34 @@ from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_tool
 
 logger = logging.getLogger(__name__)
+
+# 模块级 TTL 缓存 (V4-P1-01): key -> (result, expire_time)
+_MCP_CACHE: dict[str, tuple[Any, float]] = {}
+
+# P1-04: MCP 工具调用并发上限 (信号量)
+MCP_MAX_CONCURRENCY = 3
+
+
+def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> str:
+    """生成 MCP 工具调用缓存 key (V4-P1-01).
+
+    key = md5(query + tool_name + tool_args 序列化), 保证可哈希且定长.
+
+    Args:
+        query: 用户查询
+        tool_name: 工具名
+        tool_args: 工具调用参数
+
+    Returns:
+        32 位 hex 摘要字符串
+    """
+    try:
+        args_str = json.dumps(tool_args, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        # 含不可序列化对象时降级为 repr
+        args_str = repr(tool_args)
+    raw = f"{query}:{tool_name}:{args_str}"
+    return hashlib.md5(raw.encode()).hexdigest()
 
 
 class MCPCoordinator:
@@ -146,15 +184,18 @@ class MCPCoordinator:
                 session_id=session_id,
             )
 
-            # 执行工具调用 (动态参数, 不再固定 {"query": query})
-            contexts: list[str] = []
-            for tool, tool_args in selected:
-                try:
-                    result = await tool.ainvoke(tool_args)
-                    if result:
-                        contexts.append(str(result))
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("MCP 工具 %s 调用失败: %s", getattr(tool, "name", "?"), e)
+            # P1-04: 并发执行工具调用 (asyncio.gather + 信号量, 默认并发 3)
+            # 单个工具失败返回 None 不影响其他工具; 保留 V4-P1-01 TTL 缓存逻辑
+            cache_enabled = self.settings.mcp_cache_enabled
+            sem = asyncio.Semaphore(MCP_MAX_CONCURRENCY)
+            results = await asyncio.gather(
+                *[
+                    self._call_single_tool(tool, args, query, cache_enabled, sem)
+                    for tool, args in selected
+                ],
+                return_exceptions=False,
+            )
+            contexts: list[str] = [r for r in results if r is not None]
 
             return contexts
         except ImportError:
@@ -163,6 +204,55 @@ class MCPCoordinator:
         except Exception as e:  # noqa: BLE001
             logger.warning("MCP 执行失败: %s", e)
             return []
+
+    async def _call_single_tool(
+        self,
+        tool: Any,
+        tool_args: dict[str, Any],
+        query: str,
+        cache_enabled: bool,
+        sem: asyncio.Semaphore,
+    ) -> str | None:
+        """执行单个 MCP 工具调用 (P1-04 并发 + V4-P1-01 TTL 缓存).
+
+        缓存命中直接返回 (不消耗信号量); 缓存未命中在信号量内调用工具.
+        单个工具失败返回 None, 不影响其他工具 (由 gather 调用方过滤).
+
+        Args:
+            tool: MCP 工具对象 (含 ainvoke / name 属性)
+            tool_args: 工具调用参数
+            query: 用户查询 (用于缓存 key)
+            cache_enabled: 是否启用 TTL 缓存
+            sem: 并发信号量
+
+        Returns:
+            工具结果字符串, 失败/空结果返回 None
+        """
+        tool_name = getattr(tool, "name", "")
+        # V4-P1-01: TTL 缓存检查 (缓存命中不消耗信号量)
+        cache_key: str | None = None
+        if cache_enabled:
+            cache_key = _make_cache_key(query, tool_name, tool_args)
+            if cache_key in _MCP_CACHE:
+                cached_result, expire = _MCP_CACHE[cache_key]
+                if time.time() < expire:
+                    logger.debug("MCP 缓存命中: tool=%s", tool_name)
+                    return str(cached_result)
+        # P1-04: 信号量限制并发
+        async with sem:
+            try:
+                result = await tool.ainvoke(tool_args)
+                if result:
+                    # V4-P1-01: 调用成功写入缓存
+                    if cache_key is not None:
+                        _MCP_CACHE[cache_key] = (
+                            result,
+                            time.time() + self.settings.mcp_cache_ttl,
+                        )
+                    return str(result)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("MCP 工具 %s 调用失败: %s", tool_name or "?", e)
+            return None
 
     async def _select_tool_with_llm(
         self,
@@ -206,8 +296,6 @@ class MCPCoordinator:
                     "parameters": args,
                 }
             )
-
-        import json
 
         tools_json = json.dumps(tools_desc, ensure_ascii=False, indent=2)
 

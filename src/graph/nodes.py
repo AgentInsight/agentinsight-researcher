@@ -21,6 +21,7 @@ from src.agents.researcher.reviewer import Reviewer
 from src.agents.researcher.reviser import Reviser
 from src.config.settings import Settings
 from src.graph.state import ResearcherState
+from src.memory.report_store import get_report_store
 from src.observability.tracing import trace_chain
 from src.skills.researcher.agent_creator import AgentCreator
 from src.skills.researcher.publisher import Publisher
@@ -260,6 +261,21 @@ async def publisher_node(
             delta["report_docx"] = result["content"]
         elif result.get("format") == "json":
             delta["report_json"] = result["content"]
+        # P1-Future-09: 报告持久化存储 (失败不阻断主流程)
+        try:
+            report_store = get_report_store()
+            await report_store.save_report(
+                session_id=state.get("session_id", ""),
+                user_id=state.get("user_id", ""),
+                agent_id=state.get("agent_id", ""),
+                query=state.get("query", ""),
+                report_md=state.get("report_md", ""),
+                report_format=state.get("report_format", "markdown"),
+                sources=state.get("curated_sources") or state.get("sources", []),
+                agent_role=state.get("agent_role_server"),
+            )
+        except Exception:
+            logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
         return delta
 
 

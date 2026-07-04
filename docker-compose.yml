@@ -1,12 +1,30 @@
 # agentinsight-researcher 容器编排 (生产/联网模式)
 # 严格遵循 AGENTS.md 第 12 章: depends_on service_healthy + 命名卷
 # 联网模式: 构建时从 PyPI/Docker Hub 下载依赖与镜像, 适用于开源社区
-# PostgreSQL 由外部托管 (env 配置 POSTGRES_HOST/PORT/USER/PASSWORD/DB), 不在 compose 内构建
-# 依赖顺序: redis → qdrant → embeddings → agent (rerank 可选)
+# 生产联网模式 PostgreSQL 由本地 postgres 容器提供, 与 redis/qdrant/embeddings 同属 compose 编排
+# 业务表由 Agent 启动时执行 scripts/init.sql 创建 (幂等)
+# 依赖顺序: postgres → redis → qdrant → embeddings → agent (rerank 可选)
 # 所有环境变量统一从 .env 加载 (env_file + compose 插值), compose 文件不含硬编码
 # rerank 容器通过 profile 控制, 默认不启动; 启用: docker compose --profile rerank up -d
 
 services:
+  postgres:
+    image: docker.io/postgres:${POSTGRES_VERSION:-17}
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - agentinsight-net
+
   redis:
     image: docker.io/redis:${REDIS_VERSION:-7}
     restart: always
@@ -54,6 +72,8 @@ services:
 
   embeddings:
     # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取
+    # 模型权重: 优先挂载本地预下载 (packages/models/bge-large-zh-v1.5), 避免运行时联网下载
+    # 生产联网模式若本地无模型, TEI 会从 HuggingFace 下载到 /data 缓存 (AGENTS.md 第 12 章允许联网)
     image: ${TEI_IMAGE:-tei-embedding}:${TEI_TAG:-cpu-1.9}
     restart: always
     env_file:
@@ -70,6 +90,7 @@ services:
     ports:
       - "${EMBEDDINGS_PORT:-8088}:${EMBEDDINGS_PORT:-8088}"
     volumes:
+      - ./packages/models/bge-large-zh-v1.5:/data/bge-large-zh-v1.5:ro
       - embeddings_models:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${EMBEDDINGS_PORT:-8088}/health"]
@@ -100,6 +121,7 @@ services:
     ports:
       - "${RERANK_PORT:-8089}:${RERANK_PORT:-8089}"
     volumes:
+      - ./packages/models/bge-reranker-v2-m3:/data/bge-reranker-v2-m3:ro
       - rerank_models:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${RERANK_PORT:-8089}/health"]
@@ -142,6 +164,8 @@ services:
       - agentinsight-net
 
 volumes:
+  postgres_data:
+    driver: local
   redis_data:
     driver: local
   qdrant_data:

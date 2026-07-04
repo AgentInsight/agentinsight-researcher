@@ -26,10 +26,11 @@ from __future__ import annotations
 import logging
 from typing import Any, ClassVar
 
+import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.api.feedback_queue import get_feedback_queue
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,35 @@ ALL_WS_MSG_TYPES: tuple[str, ...] = (
 )
 
 
+async def _verify_token(token: str, settings: Settings) -> bool:
+    """验证 JWT token 有效性 (复用 JWTAuthMiddleware 的验证逻辑).
+
+    AGENTS.md 第 8 章: 调用 GET /api/user 获取 user_id 验证 token.
+    禁止将原始 token 写入日志.
+
+    返回 True 表示 token 有效, False 表示无效或验证失败.
+    """
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=settings.user_info_api_timeout) as client:
+            response = await client.get(
+                settings.user_info_api_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.status_code != 200:
+                return False
+            data = response.json()
+            user_id = str(data.get("id") or data.get("user_id") or "")
+            return bool(user_id)
+    except httpx.TimeoutException:
+        logger.warning("WebSocket token 验证超时 (%ss)", settings.user_info_api_timeout)
+        return False
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WebSocket token 验证失败: %s", e)
+        return False
+
+
 class WebSocketManager:
     """按 session_id 索引的 WebSocket 连接管理器.
 
@@ -69,8 +99,50 @@ class WebSocketManager:
     def __init__(self) -> None:
         self._active_connections: dict[str, WebSocket] = {}
 
-    async def connect(self, websocket: WebSocket, session_id: str) -> None:
-        """接受连接并存储 (覆盖同 session_id 旧连接)."""
+    async def connect(self, websocket: WebSocket, session_id: str) -> bool:
+        """接受连接并存储 (覆盖同 session_id 旧连接).
+
+        V4-P0-03: 新增 Origin 校验 + JWT token 校验, 防止 CSWSH 攻击.
+        返回 True 表示连接成功, False 表示被拒绝 (已发送 close 帧).
+        """
+        settings = get_settings()
+
+        # ========== V4-P0-03: Origin 校验 (防 CSWSH 跨站 WebSocket 劫持) ==========
+        # 生产环境强制开启; dev 环境可配置放宽但仍记录警告
+        origin_check_enabled = settings.ws_origin_check or settings.env == "prod"
+        if origin_check_enabled:
+            origin = websocket.headers.get("origin", "")
+            allowed = settings.cors_origins_list  # 复用 CORS 白名单
+            if origin and origin not in allowed:
+                logger.warning(
+                    "WebSocket Origin 拒绝: origin=%s session_id=%s",
+                    origin,
+                    session_id,
+                )
+                await websocket.close(code=4003, reason="Origin not allowed")
+                return False
+        elif settings.env == "dev":
+            logger.warning("DEV: WebSocket Origin 校验已关闭 (不安全), session_id=%s", session_id)
+
+        # ========== V4-P0-03: JWT Token 校验 ==========
+        # 生产环境强制开启; dev 环境可配置放宽但仍记录警告
+        auth_required = settings.ws_auth_required or settings.env == "prod"
+        if auth_required:
+            # 从 query params 或 Authorization 头提取 token
+            token = (
+                websocket.query_params.get("token")
+                or websocket.headers.get("authorization", "").replace("Bearer ", "").strip()
+            )
+            if not token:
+                await websocket.close(code=4001, reason="Missing authentication token")
+                return False
+            # 复用 JWTAuthMiddleware 的 token 验证逻辑 (调用 /api/user 校验)
+            if not await _verify_token(token, settings):
+                await websocket.close(code=4001, reason="Invalid token")
+                return False
+        elif settings.env == "dev":
+            logger.warning("DEV: WebSocket JWT 鉴权已关闭 (不安全), session_id=%s", session_id)
+
         old = self._active_connections.get(session_id)
         if old is not None:
             try:
@@ -80,6 +152,7 @@ class WebSocketManager:
         await websocket.accept()
         self._active_connections[session_id] = websocket
         logger.info("WebSocket 已连接: session_id=%s", session_id)
+        return True
 
     def disconnect(self, session_id: str) -> None:
         """移除连接."""
@@ -145,7 +218,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         return
 
     manager = get_websocket_manager()
-    await manager.connect(websocket, session_id)
+    connected = await manager.connect(websocket, session_id)
+    if not connected:
+        # V4-P0-03: Origin/JWT 校验失败, connect() 已发送 close 帧, 直接返回
+        return
 
     # 发送连接成功消息
     await manager.send_message(

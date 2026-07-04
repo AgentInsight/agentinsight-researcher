@@ -41,15 +41,50 @@ class QdrantManager:
         )
 
     async def ensure_collection(self) -> None:
-        """确保集合存在 (不存在则创建)."""
+        """确保集合存在 (不存在则创建, 含 HNSW 参数调优 P0-03).
+
+        AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=1024.
+        P0-03: 中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
+        scalar 量化降低内存 50%.
+        """
         from qdrant_client.http.exceptions import UnexpectedResponse
 
         try:
             await self._client.get_collection(self.settings.qdrant_collection)
             logger.debug("Qdrant 集合 %s 已存在", self.settings.qdrant_collection)
         except (UnexpectedResponse, Exception):  # noqa: BLE001
-            logger.info("创建 Qdrant 集合 %s", self.settings.qdrant_collection)
-            from qdrant_client.http.models import Distance, VectorParams
+            logger.info(
+                "创建 Qdrant 集合 %s (HNSW m=%d, ef_construct=%d, quantization=%s)",
+                self.settings.qdrant_collection,
+                self.settings.qdrant_hnsw_m,
+                self.settings.qdrant_hnsw_ef_construct,
+                self.settings.qdrant_quantization,
+            )
+            from qdrant_client.http.models import (
+                Distance,
+                HnswConfigDiff,
+                ScalarQuantization,
+                ScalarQuantizationConfig,
+                ScalarType,
+                VectorParams,
+            )
+
+            # HNSW 参数 (P0-03: 中文密集检索调优)
+            hnsw_config = HnswConfigDiff(
+                m=self.settings.qdrant_hnsw_m,
+                ef_construct=self.settings.qdrant_hnsw_ef_construct,
+                full_scan_threshold=self.settings.qdrant_hnsw_full_scan_threshold,
+            )
+
+            # 标量量化 (P0-03: int8 量化降低内存 50%)
+            # qdrant-client ≥1.18 枚举为大写 ScalarType.INT8
+            quantization_config = ScalarQuantization(
+                scalar=ScalarQuantizationConfig(
+                    type=ScalarType.INT8,
+                    quantile=0.99,
+                    always_ram=True,
+                ),
+            )
 
             await self._client.create_collection(
                 collection_name=self.settings.qdrant_collection,
@@ -57,6 +92,8 @@ class QdrantManager:
                     size=self.settings.qdrant_vector_size,
                     distance=Distance.COSINE,
                 ),
+                hnsw_config=hnsw_config,
+                quantization_config=quantization_config,
             )
 
     def build_shared_namespace(self) -> str:
@@ -118,6 +155,29 @@ class QdrantManager:
             namespace,
             user_id,
         )
+
+    async def delete_by_namespace(self, namespace: str) -> None:
+        """删除指定 namespace 下的所有点 (按 payload namespace 字段过滤).
+
+        用于种子模式版本更新时清理旧数据 (AGENTS.md 第 7 章: payload namespace 隔离).
+        """
+        from qdrant_client.http.models import (
+            FieldCondition,
+            Filter,
+            FilterSelector,
+            MatchValue,
+        )
+
+        query_filter = Filter(
+            must=[
+                FieldCondition(key="namespace", match=MatchValue(value=namespace)),
+            ],
+        )
+        await self._client.delete(
+            collection_name=self.settings.qdrant_collection,
+            points_selector=FilterSelector(filter=query_filter),
+        )
+        logger.debug("Qdrant 删除 namespace=%s 下所有点", namespace)
 
     async def search(
         self,

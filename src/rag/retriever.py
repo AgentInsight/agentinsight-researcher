@@ -12,12 +12,20 @@ AGENTS.md 第 7 章硬约束:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import time
 from typing import Any, cast
 
 import httpx
 import jieba
 from rank_bm25 import BM25Okapi
+
+try:  # P2-04: redis 在 requirements.txt, 但运行环境缺失时降级无缓存 (AGENTS.md 降级策略)
+    import redis.asyncio as aioredis
+except ImportError:  # pragma: no cover
+    aioredis = None  # type: ignore[assignment,unused-ignore]
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_retriever
@@ -34,10 +42,13 @@ class HybridRetriever:
     rerank_enabled=True 时经 bge-reranker-v2-m3.
     """
 
+    RETRIEVER_CACHE_TTL: int = 3600  # 检索结果缓存 TTL (秒, 1 小时, 可配置)
+
     settings: Settings
     _embeddings: EmbeddingsClient
     _qdrant: QdrantManager
     _rerank_client: httpx.AsyncClient
+    _redis: Any  # aioredis.Redis | None (Redis 客户端, 不可用时为 None)
     _bm25_corpus: list[list[str]]  # BM25 语料 (jieba 分词后)
     _bm25_docs: list[dict[str, Any]]  # BM25 原始文档
     _bm25: BM25Okapi | None
@@ -56,6 +67,19 @@ class HybridRetriever:
             timeout=30.0,
             headers=headers,
         )
+        # P2-04: Redis 缓存客户端 (AGENTS.md 第 7 章: 键格式 {agent_id}:{user_id}:{module}:{type}:{id})
+        # Redis 不可用时降级为无缓存, 不阻断检索 (含 redis 库未安装场景)
+        self._redis: Any = None
+        if aioredis is not None:
+            try:
+                self._redis = aioredis.from_url(
+                    self.settings.redis_url,
+                    password=self.settings.redis_auth or None,
+                    decode_responses=True,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Redis 客户端初始化失败, 降级无缓存: %s", e)
+                self._redis = None
         self._bm25_corpus = []
         self._bm25_docs = []
         self._bm25 = None
@@ -84,6 +108,13 @@ class HybridRetriever:
         """
         k = top_k or self.settings.rerank_top_k
         namespaces = self.build_namespaces(user_id)
+
+        # P2-04: 检查 Redis 缓存 (命中直接返回, 不走 BM25+Vector)
+        cache_key = self._cache_key(query, user_id)
+        cached = await self._get_cache(cache_key, user_id)
+        if cached is not None:
+            logger.info("RAG 缓存命中: query=%s", query[:50])
+            return cached
 
         async with trace_retriever(
             name="hybrid-retrieve",
@@ -124,6 +155,9 @@ class HybridRetriever:
                 bm25_weight=self.settings.bm25_weight,
             )
 
+            # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 对标 GPTR context 去重)
+            fused = self._deduplicate_by_content_hash(fused)
+
             # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
             if self.settings.rerank_enabled:
                 reranked = await self._rerank(query, fused, k)
@@ -140,6 +174,8 @@ class HybridRetriever:
                     "top_score": reranked[0]["score"] if reranked else 0.0,
                 },
             )
+            # P2-04: 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
+            await self._set_cache(cache_key, reranked, user_id)
             return reranked
 
     async def _vector_search(
@@ -229,6 +265,106 @@ class HybridRetriever:
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [{**docs[content], "score": score} for content, score in ranked]
 
+    def _deduplicate_by_content_hash(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """按内容 hash 去重 (对标 GPTR context 去重).
+
+        P1-02: RRF 融合后调用, 去除相同内容不同来源的重复文档.
+        """
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for r in results:
+            content = r.get("content", r.get("body", ""))
+            h = hashlib.md5(content.encode("utf-8")).hexdigest()
+            if h not in seen:
+                seen.add(h)
+                deduped.append(r)
+        return deduped
+
+    def _cache_key(self, query: str, user_id: str | None) -> str:
+        """构建 Redis 缓存键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:{module}:{type}:{id})."""
+        agent_id = self.settings.agent_name
+        uid = user_id or self.settings.default_user_id
+        query_hash = hashlib.md5(query.encode("utf-8")).hexdigest()
+        return f"{agent_id}:{uid}:rag:retriever:{query_hash}"
+
+    def _lru_key(self, user_id: str | None = None) -> str:
+        """构建 LRU 访问时间 Sorted Set 键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:cache_access_times)."""
+        agent_id = self.settings.agent_name
+        uid = user_id or self.settings.default_user_id
+        return f"{agent_id}:{uid}:cache_access_times"
+
+    async def _get_cache(
+        self,
+        key: str,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """读取 Redis 缓存 (TTL + LRU 双策略, P1-03).
+
+        命中时更新访问时间 (LRU 排序). Redis 不可用时降级返回 None, 不阻断检索.
+        """
+        if self._redis is None:
+            return None
+        try:
+            data = await self._redis.get(key)
+            if data is None:
+                return None
+            # P1-03: 命中时更新 LRU 访问时间 (ZADD score=当前时间戳)
+            if self.settings.redis_cache_lru_enabled:
+                lru_key = self._lru_key(user_id)
+                await self._redis.zadd(lru_key, {key: time.time()})
+            return cast(list[dict[str, Any]], json.loads(data))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Redis 缓存读取失败, 降级无缓存: %s", e)
+            return None
+
+    async def _set_cache(
+        self,
+        key: str,
+        results: list[dict[str, Any]],
+        user_id: str | None = None,
+    ) -> None:
+        """写入 Redis 缓存 (TTL + LRU 双策略, P1-03).
+
+        写入后检查总数, 超过 max_size 时淘汰最久未访问.
+        Redis 不可用时静默跳过.
+        """
+        if self._redis is None:
+            return
+        try:
+            await self._redis.set(
+                key,
+                json.dumps(results, ensure_ascii=False, default=str),
+                ex=self.RETRIEVER_CACHE_TTL,
+            )
+            # P1-03: 写入 LRU 访问时间 + 检查总数淘汰最久未访问
+            if self.settings.redis_cache_lru_enabled:
+                lru_key = self._lru_key(user_id)
+                await self._redis.zadd(lru_key, {key: time.time()})
+                count = await self._redis.zcard(lru_key)
+                if count > self.settings.redis_cache_max_size:
+                    # 取最久未访问的 (count - max_size) 条
+                    to_evict = await self._redis.zrange(
+                        lru_key,
+                        0,
+                        count - self.settings.redis_cache_max_size - 1,
+                    )
+                    if to_evict:
+                        # 删除缓存数据 + LRU 记录 (pipeline 批量减少 RTT)
+                        pipe = self._redis.pipeline()
+                        for k in to_evict:
+                            k_str = k.decode() if isinstance(k, bytes) else k
+                            pipe.delete(k_str)
+                            pipe.zrem(lru_key, k_str)
+                        await pipe.execute()
+                        logger.debug(
+                            "LRU 淘汰 %d 条缓存 (当前 %d > 上限 %d)",
+                            len(to_evict),
+                            count,
+                            self.settings.redis_cache_max_size,
+                        )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Redis 缓存写入失败, 降级无缓存: %s", e)
+
     async def _rerank(
         self,
         query: str,
@@ -284,6 +420,8 @@ class HybridRetriever:
         await self._embeddings.close()
         await self._qdrant.close()
         await self._rerank_client.aclose()
+        if self._redis is not None:
+            await self._redis.aclose()
 
 
 # ========== 全局单例 ==========

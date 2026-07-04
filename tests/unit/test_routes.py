@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server import app
+from src.config.settings import Settings
 
 
 def test_models_endpoint():
@@ -124,3 +126,95 @@ def test_security_headers():
     assert response.headers.get("X-Frame-Options") == "DENY"
     assert response.headers.get("X-XSS-Protection") == "1; mode=block"
     assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+# ========== 文件上传 (用户需求 8) ==========
+
+
+def test_files_upload_txt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+) -> None:
+    """上传 .txt 文件 → 201 + file_id 三段格式 (agent_id:user_id:uuid)."""
+    settings = Settings(_env_file=None, upload_dir=str(tmp_path))
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/files",
+        files={"file": ("test.txt", b"hello world", "text/plain")},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert "file_id" in data
+    # file_id 格式: agent_id:user_id:uuid (三段)
+    parts = data["file_id"].split(":")
+    assert len(parts) == 3
+    assert "filename" in data
+    assert data["filename"] == "test.txt"
+    assert data["extension"] == "txt"
+    assert data["size_bytes"] == len(b"hello world")
+
+
+def test_files_upload_too_large(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+) -> None:
+    """上传超大文件 → 413 (mock settings.max_upload_size_mb)."""
+    # max_upload_size_mb 为 int 类型, 设为 0 → 任何非空文件都超限
+    settings = Settings(
+        _env_file=None,
+        upload_dir=str(tmp_path),
+        max_upload_size_mb=0,
+    )
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/files",
+        files={"file": ("big.txt", b"x" * 2048, "text/plain")},
+    )
+    assert response.status_code == 413
+
+
+def test_files_upload_invalid_extension(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+) -> None:
+    """上传 .exe → 415 (扩展名白名单)."""
+    settings = Settings(_env_file=None, upload_dir=str(tmp_path))
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/files",
+        files={"file": ("malware.exe", b"MZ\x90\x00", "application/octet-stream")},
+    )
+    assert response.status_code == 415
+
+
+# ========== 人在回路反馈 (P0-Future-03) ==========
+
+
+def test_feedback_no_pending() -> None:
+    """POST /v1/feedback 无待处理 → 404."""
+    client = TestClient(app)
+    response = client.post(
+        "/v1/feedback",
+        json={"session_id": "no-pending-session-xyz", "feedback": "approve"},
+    )
+    assert response.status_code == 404
+
+
+# ========== Agent Discovery Protocol (P1-Future-03) ==========
+
+
+def test_agent_discovery_endpoint() -> None:
+    """GET /.well-known/agent-discovery.json → 200."""
+    client = TestClient(app)
+    response = client.get("/.well-known/agent-discovery.json")
+    assert response.status_code == 200
+    data = response.json()
+    assert "name" in data
+    assert "version" in data
+    assert "description" in data

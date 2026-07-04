@@ -90,20 +90,23 @@ class ChatAgent:
             report_md = state.get("report_md", "")
             # 截断 report_md 避免 token 过大
             report_md_truncated = report_md[:_REPORT_TRUNCATE_CHARS]
+
+            # P1-Future-06: 首轮 chat (report_md 为空) 使用通用系统提示, 不依赖报告上下文
             if not report_md_truncated:
-                # 无报告上下文时仍可回答, 但声明无报告 (防御性兜底)
-                report_md_truncated = "(无已有报告上下文)"
-
-            role_persona = (
-                state.get("agent_role") or "你是一位资深研究分析专家, 擅长多领域综合研究."
-            )
-
-            # P1-Future-04: 系统提示经 PromptFamily 策略注入 (含 report_md)
-            system_prompt = self._prompt_family.chat_prompt(
-                query=query,
-                report_md=report_md_truncated,
-                agent_role=role_persona,
-            )
+                system_prompt = (
+                    "你是一个智能研究助手。用户可能想进行简短对话或询问简单问题。"
+                    "请友好地回答，并在适当时引导用户提供研究主题。"
+                )
+            else:
+                role_persona = (
+                    state.get("agent_role") or "你是一位资深研究分析专家, 擅长多领域综合研究."
+                )
+                # P1-Future-04: 系统提示经 PromptFamily 策略注入 (含 report_md)
+                system_prompt = self._prompt_family.chat_prompt(
+                    query=query,
+                    report_md=report_md_truncated,
+                    agent_role=role_persona,
+                )
 
             # 历史 messages 取最近 10 条, 转换为 LLM dict 格式
             history: list[BaseMessage] = state.get("messages", []) or []
