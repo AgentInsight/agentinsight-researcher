@@ -5,9 +5,9 @@ AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
 
 ChatAgent 职责:
 - 基于历史消息 + 已有报告上下文回答用户追问
-- 系统提示含 report_md (截断 50000 字符)
-- 历史 messages 取最近 10 条
-- 用 LLMClient tier=SMART 调用 (适合对话推理)
+- 系统提示含 report_md (截断 chat_report_truncate_chars 字符, P2 配置化)
+- 历史 messages 取最近 chat_history_limit 条 (P2 配置化)
+- CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由 (简单追问 FAST / 复杂追问 SMART)
 - 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
 - 用 PromptFamily.chat_prompt 注入 prompt (P1-Future-04 策略模式)
 
@@ -31,17 +31,17 @@ from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 
 logger = logging.getLogger(__name__)
 
-# report_md 截断上限 (避免 token 过大)
-_REPORT_TRUNCATE_CHARS = 50_000
-# 历史消息取最近 N 条
-_HISTORY_LIMIT = 10
-
 
 class ChatAgent:
     """对话式追问 Agent (P2-Future-03).
 
     基于历史消息 + 已有报告上下文回答用户追问.
     对标 GPT Researcher chat_with_report 对话模式.
+
+    CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由
+    - 简单追问 (短查询/总结/复述) → FAST_LLM (glm-4-flash, 免费)
+    - 复杂追问 (跨章节分析/对比/推理) → SMART_LLM (deepseek-v4-flash)
+    - SMART 失败 → 降级 FAST (FrugalGPT cascade)
     """
 
     settings: Settings
@@ -57,6 +57,28 @@ class ChatAgent:
         self.settings = settings or get_settings()
         self._llm = llm or LLMClient(self.settings)
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
+
+    def _assess_chat_complexity(self, query: str) -> LLMTier:
+        """评估追问复杂度, 决定 LLM tier (cascade 路由).
+
+        CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md §5.3.1:
+        - 简单追问 (tier=FAST): 总结/复述/单点确认/短问题
+        - 复杂追问 (tier=SMART): 跨章节分析/对比/推理/需引用报告细节
+
+        Args:
+            query: 用户追问
+
+        Returns:
+            LLMTier.FAST 或 LLMTier.SMART
+        """
+        # 短查询走 FAST
+        if len(query) < self.settings.chat_simple_query_threshold_chars:
+            return LLMTier.FAST
+        # 命中复杂关键词走 SMART
+        if any(kw in query for kw in self.settings.chat_complex_keywords):
+            return LLMTier.SMART
+        # 默认走 FAST (闲聊/简单追问)
+        return LLMTier.FAST
 
     async def chat(
         self,
@@ -88,8 +110,8 @@ class ChatAgent:
         ) as span:
             query = state.get("query", "")
             report_md = state.get("report_md", "")
-            # 截断 report_md 避免 token 过大
-            report_md_truncated = report_md[:_REPORT_TRUNCATE_CHARS]
+            # 截断 report_md 避免 token 过大 (P2: 配置化, 替换 _REPORT_TRUNCATE_CHARS)
+            report_md_truncated = report_md[: self.settings.chat_report_truncate_chars]
 
             # P1-Future-06: 首轮 chat (report_md 为空) 使用通用系统提示, 不依赖报告上下文
             if not report_md_truncated:
@@ -108,9 +130,9 @@ class ChatAgent:
                     agent_role=role_persona,
                 )
 
-            # 历史 messages 取最近 10 条, 转换为 LLM dict 格式
+            # 历史 messages 取最近 chat_history_limit 条 (P2: 配置化, 替换 _HISTORY_LIMIT)
             history: list[BaseMessage] = state.get("messages", []) or []
-            recent_history = history[-_HISTORY_LIMIT:]
+            recent_history = history[-self.settings.chat_history_limit :]
             history_dicts = self._convert_messages(recent_history)
 
             # 构建完整消息列表: system + history + current query
@@ -119,30 +141,67 @@ class ChatAgent:
             # 当前追问作为最新 user 消息
             messages.append({"role": "user", "content": query})
 
+            # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由
+            # 简单追问走 FAST (glm-4-flash, 免费), 复杂追问走 SMART (deepseek-v4-flash)
+            tier = self._assess_chat_complexity(query)
+            span_tier = tier.value
+            logger.debug("ChatAgent cascade 路由: query=%s, tier=%s", query[:50], span_tier)
+
             try:
                 response = await self._llm.achat(
                     messages,
-                    tier=LLMTier.SMART,
-                    temperature=0.4,
-                    max_tokens=4000,
+                    tier=tier,
+                    temperature=self.settings.chat_temperature,
+                    max_tokens=self.settings.chat_max_tokens,
                     user_id=user_id,
                     session_id=session_id,
                     span_name="chat-agent-llm",
                     step="chat",
                 )
             except Exception as e:  # noqa: BLE001
-                logger.warning("ChatAgent LLM 调用失败: %s", e)
-                span.update(
-                    output={"error": "llm_failed"},
-                    metadata={"error": str(e)},
-                )
-                # 返回错误信息作为 AI 消息 (保持消息流连贯)
-                return {
-                    "messages": [
-                        HumanMessage(content=query),
-                        AIMessage(content=f"抱歉, 对话服务暂时不可用: {str(e)[:200]}"),
-                    ]
-                }
+                # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md §5.5.1: SMART 失败降级 FAST
+                if tier == LLMTier.SMART:
+                    logger.warning("SMART 闲聊失败, 降级 FAST: %s", e)
+                    span.update(
+                        output={"error": "smart_failed_fallback_fast"},
+                        metadata={"error": str(e)[:200], "original_tier": span_tier},
+                    )
+                    try:
+                        response = await self._llm.achat(
+                            messages,
+                            tier=LLMTier.FAST,
+                            temperature=self.settings.chat_temperature,
+                            max_tokens=self.settings.chat_max_tokens,
+                            user_id=user_id,
+                            session_id=session_id,
+                            span_name="chat-agent-llm-fallback",
+                            step="chat",
+                        )
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("ChatAgent FAST 降级也失败: %s", e2)
+                        span.update(
+                            output={"error": "llm_failed"},
+                            metadata={"error": str(e2)[:200]},
+                        )
+                        return {
+                            "messages": [
+                                HumanMessage(content=query),
+                                AIMessage(content=f"抱歉, 对话服务暂时不可用: {str(e2)[:200]}"),
+                            ]
+                        }
+                else:
+                    logger.warning("ChatAgent LLM 调用失败: %s", e)
+                    span.update(
+                        output={"error": "llm_failed"},
+                        metadata={"error": str(e)[:200]},
+                    )
+                    # 返回错误信息作为 AI 消息 (保持消息流连贯)
+                    return {
+                        "messages": [
+                            HumanMessage(content=query),
+                            AIMessage(content=f"抱歉, 对话服务暂时不可用: {str(e)[:200]}"),
+                        ]
+                    }
 
             ai_response = response.content.strip() or "(无响应)"
 
@@ -150,11 +209,13 @@ class ChatAgent:
                 output={
                     "response_len": len(ai_response),
                     "history_used": len(history_dicts),
+                    "tier": response.model,
                 },
                 metadata={
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "cost_usd": response.cost_usd,
+                    "tier_used": span_tier,
                 },
             )
 

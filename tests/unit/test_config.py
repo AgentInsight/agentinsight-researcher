@@ -65,8 +65,8 @@ def test_settings_production_validation(monkeypatch):
     assert "POSTGRES_PASSWORD" in str(exc_info.value)
 
 
-def test_settings_cors_wildcard_rejected_in_prod(monkeypatch):
-    """测试生产环境 CORS 禁 * (AGENTS.md 第 11 章)."""
+def test_settings_cors_wildcard_allowed_in_prod(monkeypatch):
+    """测试生产环境 CORS 允许 * (AGENTS.md 第 11 章 CORS * 限制已移除)."""
     for key in [
         "AGENTINSIGHT_PUBLIC_KEY",
         "AGENTINSIGHT_SECRET_KEY",
@@ -77,9 +77,8 @@ def test_settings_cors_wildcard_rejected_in_prod(monkeypatch):
     monkeypatch.setenv("AGENTINSIGHT_SECRET_KEY", "sk")
     monkeypatch.setenv("POSTGRES_PASSWORD", "pwd")
     settings = Settings(env="prod", cors_allow_origins="*", _env_file=None)
-    with pytest.raises(ValueError) as exc_info:
-        settings.validate_production()
-    assert "CORS" in str(exc_info.value)
+    # CORS * 限制已移除, 不应抛出异常
+    settings.validate_production()
 
 
 def test_postgres_dsn():

@@ -13,6 +13,15 @@ from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
 
+# 优先 ddgs 新包名 (v8+), 回退 duckduckgo_search 旧包名 (v6/v7)
+try:
+    from ddgs import DDGS
+except ImportError:
+    try:
+        from duckduckgo_search import DDGS  # type: ignore[no-redef]
+    except ImportError:
+        DDGS = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,11 +48,19 @@ class DuckDuckGoSearcher(BaseSearcher):
             input={"query": query[:100], "max_results": max_results},
             metadata={"tool_name": "duckduckgo"},
         ) as span:
+            if DDGS is None:
+                logger.warning("ddgs/duckduckgo_search 库未安装, 跳过 DuckDuckGo 搜索")
+                span.update(
+                    metadata={
+                        "tool_name": "duckduckgo",
+                        "success": False,
+                        "error": "ddgs not installed",
+                    }
+                )
+                return []
             try:
                 # ddgs 是同步库, 用 asyncio.to_thread 包装
                 import asyncio
-
-                from ddgs import DDGS
 
                 def _sync_search() -> list[dict[str, Any]]:
                     results: list[dict[str, Any]] = []
@@ -67,16 +84,6 @@ class DuckDuckGoSearcher(BaseSearcher):
                     metadata={"tool_name": "duckduckgo", "success": True},
                 )
                 return results
-            except ImportError:
-                logger.warning("ddgs 库未安装, 跳过 DuckDuckGo 搜索")
-                span.update(
-                    metadata={
-                        "tool_name": "duckduckgo",
-                        "success": False,
-                        "error": "ddgs not installed",
-                    }
-                )
-                return []
             except Exception as e:  # noqa: BLE001
                 logger.warning("DuckDuckGo 搜索失败: %s", e)
                 span.update(metadata={"tool_name": "duckduckgo", "success": False, "error": str(e)})

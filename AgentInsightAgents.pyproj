@@ -82,6 +82,7 @@
     <Folder Include="src\api\" />
     <Folder Include="src\common\" />
     <Folder Include="src\config\" />
+    <Folder Include="src\config\researcher\" />
     <Folder Include="src\graph\" />
     <Folder Include="src\llm\" />
     <Folder Include="src\memory\" />
@@ -97,6 +98,7 @@
     <Folder Include="tests\api\" />
     <Folder Include="tests\e2e\" />
     <Folder Include="tests\functional\" />
+    <Folder Include="tests\manual\" />
     <Folder Include="tests\regression\" />
     <Folder Include="tests\unit\" />
   </ItemGroup>

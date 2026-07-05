@@ -1,0 +1,251 @@
+# 离题/闲聊种子模式 (P1-Future-07)
+# 懒初始化时预填充到 Qdrant off_topic_patterns namespace, 用 Embeddings 语义匹配.
+# 涵盖身份/情感/娱乐/常识/能力/话题转移/问候/评价等闲聊意图.
+# 共 118 条不重复种子, 与 short_query_seeds 互补:
+#   - short_query_seeds 覆盖短词/短语 (长度通常 ≤6)
+#   - off_topic_seeds 覆盖句子/完整问句 (语义匹配闲聊意图)
+seeds:
+  # ===== identity 身份询问 (37) =====
+  - text: "你叫什么名字"
+    category: identity
+  - text: "你叫啥"
+    category: identity
+  - text: "你多大了"
+    category: identity
+  - text: "你几岁了"
+    category: identity
+  - text: "你是男是女"
+    category: identity
+  - text: "你有女朋友吗"
+    category: identity
+  - text: "你有男朋友吗"
+    category: identity
+  - text: "你结婚了吗"
+    category: identity
+  - text: "你在哪里"
+    category: identity
+  - text: "你住哪里"
+    category: identity
+  - text: "你是真人吗"
+    category: identity
+  - text: "你有兄弟姐妹吗"
+    category: identity
+  - text: "你开心吗"
+    category: identity
+  - text: "你累吗"
+    category: identity
+  - text: "你忙吗"
+    category: identity
+  - text: "你心情怎么样"
+    category: identity
+  - text: "你怎么了"
+    category: identity
+  - text: "你在干嘛"
+    category: identity
+  - text: "你在做什么"
+    category: identity
+  - text: "你家有几口人"
+    category: identity
+  - text: "你会做饭吗"
+    category: identity
+  - text: "what's your name"
+    category: identity
+  - text: "how old are you"
+    category: identity
+  - text: "are you a robot"
+    category: identity
+  - text: "are you human"
+    category: identity
+  - text: "do you have feelings"
+    category: identity
+  - text: "are you conscious"
+    category: identity
+  - text: "你最喜欢什么颜色"
+    category: identity
+  - text: "你能记住我吗"
+    category: identity
+  - text: "你有什么爱好"
+    category: identity
+  - text: "你平时做什么"
+    category: identity
+  - text: "你会唱歌吗"
+    category: identity
+  - text: "你喜欢什么音乐"
+    category: identity
+  - text: "你看过什么电影"
+    category: identity
+  - text: "你有什么特长"
+    category: identity
+  - text: "你喜欢读书吗"
+    category: identity
+  - text: "你会做什么菜"
+    category: identity
+  # ===== greeting 问候 (4) =====
+  - text: "今天怎么样"
+    category: greeting
+  - text: "你今天过得好吗"
+    category: greeting
+  - text: "你最近怎么样"
+    category: greeting
+  - text: "how are you today"
+    category: greeting
+  # ===== emotion 情绪表达 (16) =====
+  - text: "我好开心"
+    category: emotion
+  - text: "我好难过"
+    category: emotion
+  - text: "我好累"
+    category: emotion
+  - text: "我好无聊"
+    category: emotion
+  - text: "我好孤独"
+    category: emotion
+  - text: "我心情不好"
+    category: emotion
+  - text: "我不开心"
+    category: emotion
+  - text: "我很难过"
+    category: emotion
+  - text: "我很郁闷"
+    category: emotion
+  - text: "我烦死了"
+    category: emotion
+  - text: "和我聊天"
+    category: emotion
+  - text: "陪我聊聊"
+    category: emotion
+  - text: "和我说说话"
+    category: emotion
+  - text: "我讨厌我自己"
+    category: emotion
+  - text: "我太开心了"
+    category: emotion
+  - text: "i'm bored"
+    category: emotion
+  # ===== entertainment 娱乐请求 (14) =====
+  - text: "讲个笑话"
+    category: entertainment
+  - text: "说个笑话"
+    category: entertainment
+  - text: "讲个故事"
+    category: entertainment
+  - text: "说个故事"
+    category: entertainment
+  - text: "写首诗"
+    category: entertainment
+  - text: "写首歌"
+    category: entertainment
+  - text: "唱首歌"
+    category: entertainment
+  - text: "出个谜语"
+    category: entertainment
+  - text: "说个绕口令"
+    category: entertainment
+  - text: "陪我玩个游戏"
+    category: entertainment
+  - text: "给我讲个段子"
+    category: entertainment
+  - text: "来个脑筋急转弯"
+    category: entertainment
+  - text: "tell me a joke"
+    category: entertainment
+  - text: "sing me a song"
+    category: entertainment
+  # ===== common_sense 常识问题 (20) =====
+  - text: "1加1等于几"
+    category: common_sense
+  - text: "1+1等于几"
+    category: common_sense
+  - text: "2+2等于几"
+    category: common_sense
+  - text: "天空为什么是蓝的"
+    category: common_sense
+  - text: "太阳从哪边升起"
+    category: common_sense
+  - text: "水为什么会沸腾"
+    category: common_sense
+  - text: "地球是圆的吗"
+    category: common_sense
+  - text: "地球有多大"
+    category: common_sense
+  - text: "光速是多少"
+    category: common_sense
+  - text: "人为什么要睡觉"
+    category: common_sense
+  - text: "现在几点"
+    category: common_sense
+  - text: "今天星期几"
+    category: common_sense
+  - text: "今天天气怎么样"
+    category: common_sense
+  - text: "明天天气如何"
+    category: common_sense
+  - text: "今天会下雨吗"
+    category: common_sense
+  - text: "今天冷吗"
+    category: common_sense
+  - text: "今天热吗"
+    category: common_sense
+  - text: "现在什么时间"
+    category: common_sense
+  - text: "what time is it"
+    category: common_sense
+  - text: "what's the weather"
+    category: common_sense
+  # ===== evaluation 评价表达 (11) =====
+  - text: "你真聪明"
+    category: evaluation
+  - text: "你真棒"
+    category: evaluation
+  - text: "你真厉害"
+    category: evaluation
+  - text: "你真笨"
+    category: evaluation
+  - text: "你真傻"
+    category: evaluation
+  - text: "我喜欢你"
+    category: evaluation
+  - text: "我爱你"
+    category: evaluation
+  - text: "我讨厌你"
+    category: evaluation
+  - text: "我恨你"
+    category: evaluation
+  - text: "你真可爱"
+    category: evaluation
+  - text: "i love you"
+    category: evaluation
+  # ===== topic_switch 话题转移 (8) =====
+  - text: "我不想研究"
+    category: topic_switch
+  - text: "我不想用了"
+    category: topic_switch
+  - text: "算了"
+    category: topic_switch
+  - text: "不研究了"
+    category: topic_switch
+  - text: "不用了"
+    category: topic_switch
+  - text: "不需要了"
+    category: topic_switch
+  - text: "换个别的话题"
+    category: topic_switch
+  - text: "聊点别的"
+    category: topic_switch
+  # ===== capability_check 能力询问 (8) =====
+  - text: "你聪明吗"
+    category: capability_check
+  - text: "你有意识吗"
+    category: capability_check
+  - text: "你有感情吗"
+    category: capability_check
+  - text: "你会思考吗"
+    category: capability_check
+  - text: "你能听懂我说话吗"
+    category: capability_check
+  - text: "你能理解我吗"
+    category: capability_check
+  - text: "你明白我在说什么吗"
+    category: capability_check
+  - text: "你是人工智能吗"
+    category: capability_check

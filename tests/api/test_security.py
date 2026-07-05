@@ -2,7 +2,7 @@
 
 AGENTS.md 第 11/13/14 章硬约束:
 - 安全响应头中间件不可绕过: nosniff / DENY / XSS-Protection / Referrer-Policy
-- CORS 禁 * (生产环境强制校验)
+- CORS 中间件正确响应 OPTIONS 预检请求 (CORS * 限制已移除, 见 AGENTS.md 第 11 章)
 - Agent Discovery Protocol 公开发现端点: GET /.well-known/agent-discovery.json → 200
 
 执行方式 (宿主机, 容器栈已 healthy):
@@ -53,29 +53,25 @@ def test_security_headers() -> None:
 
 @pytest.mark.api
 def test_cors_config() -> None:
-    """验证 CORS 配置不含 * (允许的源为具体列表).
+    """验证 CORS 中间件正确响应 OPTIONS 预检请求.
 
-    AGENTS.md 第 11 章: CORS 禁 *.
-    发送一个不在白名单的 Origin, 验证不返回 Access-Control-Allow-Origin: *.
+    AGENTS.md 第 11 章: CORS * 限制已移除, 允许配置 * 或具体白名单.
+    本测试仅验证 CORS 中间件能正确返回 Access-Control-Allow-Origin 头.
     """
-    # 发送带非白名单 Origin 的 OPTIONS 预检请求
+    # 发送带 Origin 的 OPTIONS 预检请求
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.options(
             f"{AGENT_URL}/v1/chat/completions",
             headers={
-                "Origin": "https://evil.example.com",
+                "Origin": "http://localhost:8066",
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "content-type",
             },
         )
-    # CORS 中间件对非白名单 Origin 不返回 Access-Control-Allow-Origin 头
+    # CORS 中间件应返回 Access-Control-Allow-Origin 头 (* 或具体 Origin)
     allow_origin = r.headers.get("access-control-allow-origin", "")
-    assert allow_origin != "*", (
-        f"CORS 配置允许 *, 违反 AGENTS.md 第 11 章: allow_origin={allow_origin}"
-    )
-    # 非白名单 Origin 不应回显
-    assert allow_origin != "https://evil.example.com", (
-        f"CORS 回显了非白名单 Origin, 安全风险: {allow_origin}"
+    assert allow_origin, (
+        f"CORS 未返回 Access-Control-Allow-Origin 头: status={r.status_code}"
     )
 
 

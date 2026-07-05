@@ -88,11 +88,55 @@ class HybridRetriever:
         """构建检索 namespace 列表 (共享 + 用户私有).
 
         AGENTS.md 第 7 章: 检索时必须显式传目标 namespace 列表 (共享 + 当前用户私有).
+        旧版兼容: 仍使用 build_shared_namespace / build_user_namespace.
+        新代码应使用 build_data_namespaces (含私有数据存在性检查).
         """
         namespaces = [self._qdrant.build_shared_namespace()]
         if user_id:
             namespaces.append(self._qdrant.build_user_namespace(user_id))
         return namespaces
+
+    async def build_data_namespaces(self, user_id: str | None = None) -> tuple[list[str], bool]:
+        """构建数据检索 namespace 列表 (新 API, 含私有数据存在性检查).
+
+        用户需求: "私有数据搜索的时候先判断有没有私有数据,
+        先判断有没有对应命名空间, 再看命名空间里面有没有数据, 有的话才搜索".
+
+        新命名空间设计:
+        - 共享数据: {agent_id}-data (所有用户共享)
+        - 用户私有数据: {agent_id}-data:{user_id} (仅该用户可检索)
+
+        P1-04: 同时检查共享 namespace 是否有数据, 避免无数据时调用 embeddings (减少 429).
+
+        Args:
+            user_id: 用户 ID, 为 None 或空字符串时只检索共享数据
+
+        Returns:
+            (namespaces, has_private): namespaces 为检索列表 (可能为空),
+            has_private 表示是否有私有数据
+        """
+        namespaces: list[str] = []
+        has_private = False
+
+        # P1-04: 检查共享 namespace 是否有数据, 无数据时不加入检索列表
+        # 避免无数据时调用 embeddings (减少 429)
+        shared_namespace = self._qdrant.build_data_shared_namespace()
+        shared_has_data = await self._qdrant.namespace_has_data(shared_namespace)
+        if shared_has_data:
+            namespaces.append(shared_namespace)
+            logger.debug("共享 namespace 有数据, 加入检索列表")
+        else:
+            logger.debug("共享 namespace 无数据, 不加入检索列表 (避免无意义 embeddings 调用)")
+
+        if user_id:
+            # 先判断有没有私有数据, 有的话才加入检索列表 (避免空 namespace 无效检索)
+            has_private = await self._qdrant.has_user_private_data(user_id)
+            if has_private:
+                namespaces.append(self._qdrant.build_data_user_namespace(user_id))
+                logger.debug("用户 %s 有私有数据, 加入检索 namespace", user_id)
+            else:
+                logger.debug("用户 %s 无私有数据", user_id)
+        return namespaces, has_private
 
     async def retrieve(
         self,
@@ -107,7 +151,17 @@ class HybridRetriever:
         AGENTS.md 第 7 章: 默认 vector_weight=0.7 / bm25_weight=0.3, RRF k=60.
         """
         k = top_k or self.settings.rerank_top_k
-        namespaces = self.build_namespaces(user_id)
+        # 新 API: 含私有数据存在性检查, 仅当用户有私有数据时才加入私有 namespace
+        namespaces, has_private = await self.build_data_namespaces(user_id)
+
+        # P1-04: namespaces 为空时直接返回 (共享和私有 namespace 均无数据)
+        # 避免无数据时调用 embeddings (减少 429), 上游走搜索引擎路径
+        if not namespaces:
+            logger.info(
+                "RAG 检索跳过 (无可用 namespace, 共享和私有均无数据): query=%s",
+                query[:50],
+            )
+            return []
 
         # P2-04: 检查 Redis 缓存 (命中直接返回, 不走 BM25+Vector)
         cache_key = self._cache_key(query, user_id)
@@ -119,7 +173,7 @@ class HybridRetriever:
         async with trace_retriever(
             name="hybrid-retrieve",
             input={"query": query[:200], "namespaces": namespaces, "top_k": k},
-            metadata={"retriever_type": "hybrid"},
+            metadata={"retriever_type": "hybrid", "has_private_data": has_private},
             user_id=user_id,
             session_id=session_id,
         ) as span:

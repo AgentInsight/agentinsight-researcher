@@ -28,8 +28,8 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# 联网安装运行时共享库 (WeasyPrint/lxml/psycopg 依赖)
-# 联网模式: apt-get 从 Debian 仓库安装
+# 联网安装运行时共享库 (WeasyPrint/lxml/psycopg 依赖) + Node.js 22 LTS (MCP 运行时)
+# 联网模式: apt-get 从 NodeSource 仓库安装 Node.js (MCP 服务依赖 npx)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
@@ -39,7 +39,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1.1 \
     libpq5 \
     fonts-dejavu-core \
+    ca-certificates \
+    curl \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# 联网安装 Playwright chromium (JS 渲染抓取, 方案 E)
+# 联网模式: playwright install --with-deps 自动安装 chromium + 系统依赖
+# 注意: 必须在切换非 root 用户前安装 (需要 root 权限安装系统依赖)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN pip install playwright>=1.49 \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rx /opt/pw-browsers
 
 # 复制 Python site-packages (含已安装依赖)
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

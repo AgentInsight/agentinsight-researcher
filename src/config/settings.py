@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     embeddings_dimension: int = 1024
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
     embeddings_max_client_batch_size: int = 32  # 客户端单次 TEI 请求上限 (P1-1, 超过则分批并发)
+    # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
+    # 注意: TEI CPU 后端强制 max_batch_requests=4, 客户端并发应略低于此值
+    # 过高 (如 10) 会导致请求在 TEI 队列排队 30+s, 触发客户端 ReadTimeout
+    embeddings_max_concurrent: int = 3
+    # P1-04: 429 重试配置 (指数退避)
+    embeddings_max_retries: int = 3
+    embeddings_retry_base_delay: float = 0.5  # 基础延迟 (秒), 实际 = base * 2^attempt
 
     # ========== Rerank (AGENTS.md 第 7 章) ==========
     rerank_enabled: bool = False  # 默认不启用, rerank_enabled=True 时启用 bge-reranker-v2-m3
@@ -211,6 +218,15 @@ class Settings(BaseSettings):
     scraper_rate_limit_delay: float = 0.0
     browse_chunk_max_length: int = 8192
     scraper: str = "bs"
+    # 方案 E: 抓取模式 (P1-04)
+    # auto: BS 优先, 内容过短降级 Playwright (默认, 需 chromium)
+    # lightweight: 仅 BS, 不安装 chromium (适合离线最小化部署)
+    # playwright: 强制 Playwright (调试用)
+    scraper_mode: str = "auto"
+    # Playwright chromium 路径 (可选, 系统 chromium 时设置)
+    playwright_chromium_executable_path: str | None = None
+    # Playwright 浏览器目录 (离线模式预下载, 默认 ~/.cache/ms-playwright)
+    playwright_browsers_path: str | None = None
     # Firecrawl (P1-Future-08)
     firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.dev"
@@ -274,6 +290,44 @@ class Settings(BaseSettings):
     llm_classify_fallback: Literal["research", "off_topic"] = "off_topic"
     # CHAT 意图首轮保护: 无已有报告时降级 OFF_TOPIC (避免首轮闲聊消耗 SMART LLM)
     chat_requires_report: bool = True
+
+    # ========== 闲聊响应优化 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0-P2) ==========
+    # 闲聊响应器: FAST_LLM 实时生成 + Persona + 三段式 + 多模板兜底
+    # 对标 Anthropic Claude system prompt 四段式 + Character.AI persona 一致性
+    chitchat_config_dir: str = "src/config/researcher"  # 闲聊配置目录 (相对项目根)
+    chitchat_enabled: bool = True  # 闲聊响应器总开关
+    chitchat_use_fast_llm: bool = True  # 是否走 FAST_LLM (False 则用固定话术)
+    chitchat_temperature: float = 0.7  # 闲聊温度 (略高创意)
+    chitchat_max_tokens: int = 200  # 闲聊响应 max_tokens
+    chitchat_stream_char_by_char: bool = True  # 流式是否逐字 yield
+    chitchat_fallback_to_template: bool = True  # FAST 失败降级多模板
+
+    # ChatAgent 配置 (原 chat_agent.py 硬编码, P2 收敛到 Settings)
+    chat_temperature: float = 0.4
+    chat_max_tokens: int = 4000
+    chat_history_limit: int = 10  # 替换 _HISTORY_LIMIT
+    chat_report_truncate_chars: int = 50_000  # 替换 _REPORT_TRUNCATE_CHARS
+    chat_simple_query_threshold_chars: int = 20  # 简单追问长度阈值 (cascade 路由)
+    chat_complex_keywords: tuple[str, ...] = (
+        "对比",
+        "分析",
+        "为什么",
+        "展开",
+        "评估",
+        "论证",
+    )  # 复杂追问关键词 (命中则走 SMART)
+
+    # QueryClassifier 阈值 (原硬编码, P2 收敛到 Settings)
+    query_classify_llm_max_tokens: int = 64  # 替换 query_classifier.py LLM 分类 max_tokens
+    query_classify_llm_query_truncate: int = 1000  # 替换 LLM 分类 query 截断长度
+    query_classify_single_word_max_chars: int = 6  # 替换单单词长度上限
+    query_classify_trace_input_truncate: int = 200  # trace span input 截断长度
+
+    # FAST LLM 场景化 max_tokens (原散落硬编码, P2 收敛到 Settings)
+    fast_classify_max_tokens: int = 200  # 复杂度评估/MCP 工具选择
+    fast_summarize_max_tokens: int = 2000  # 上下文压缩/Mermaid
+    fast_json_max_tokens: int = 64  # 意图分类 JSON
+    fast_summary_mode_max_tokens: int = 1000  # 摘要模式
 
     # ========== 人在回路 (P0-Future-03 Human-in-the-loop) ==========
     # human_review_enabled=True 时, 多 Agent 图在 agent_creator 之后、supervisor 之前

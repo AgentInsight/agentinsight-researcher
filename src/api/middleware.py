@@ -6,7 +6,7 @@ AGENTS.md 第 8/11 章硬约束:
 - self_host=False (云托管): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
 - 禁止将原始 JWT token 写入日志或持久化存储
 - 安全响应头中间件不可绕过
-- CORS 禁 *
+- CORS * 限制已移除 (AGENTS.md 第 11 章已更新)
 """
 
 from __future__ import annotations
@@ -72,12 +72,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self._client = httpx.AsyncClient(timeout=self.settings.user_info_api_timeout)
 
     # 公开路径白名单 (无需 JWT 校验, AGENTS.md 第 14 章: /health 与测试页面静态资源)
+    # /.well-known/agent-discovery.json 为 Agent Discovery Protocol 公开发现端点 (无需鉴权)
     _PUBLIC_PATHS: tuple[str, ...] = (
         "/health",
         "/docs",
         "/redoc",
         "/openapi.json",
         "/favicon.ico",
+        "/.well-known/agent-discovery.json",
     )
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:

@@ -44,10 +44,16 @@ packages/wheels/
 packages/debs/
 packages/models/
 packages/images/
+packages/nodejs/
+packages/npm-pkgs/
+packages/playwright-browsers/
 !packages/wheels/.gitkeep
 !packages/debs/.gitkeep
 !packages/models/.gitkeep
 !packages/images/.gitkeep
+!packages/nodejs/.gitkeep
+!packages/npm-pkgs/.gitkeep
+!packages/playwright-browsers/.gitkeep
 
 # QA 模式构建文件 (AGENTS.md 第 12 章三套构建模式, 不入仓)
 docker-compose-qa.yaml

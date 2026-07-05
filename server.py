@@ -98,7 +98,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.env == "dev" else None,
     )
 
-    # CORS (AGENTS.md 第 11 章, 禁 *)
+    # CORS (AGENTS.md 第 11 章, * 限制已移除)
     allow_credentials = "*" not in settings.cors_allow_origins
     app.add_middleware(
         CORSMiddleware,

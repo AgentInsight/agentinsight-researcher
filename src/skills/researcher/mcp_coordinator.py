@@ -78,9 +78,11 @@ async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, An
 
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # 仅获取用户私有的启用 MCP (不含系统公用 MCP, is_system=FALSE)
+            # AGENTS.md: Agent 只调用用户自己启用且不属于系统的 MCP
             rows = await conn.fetch(
                 "SELECT name, server_url, transport_type, command, args, env_vars "
-                "FROM mcp_configs WHERE agent_id=$1 AND user_id=$2 AND enabled=TRUE",
+                "FROM mcp_configs WHERE agent_id=$1 AND user_id=$2 AND enabled=TRUE AND is_system=FALSE",
                 agent_id,
                 user_id,
             )
@@ -183,26 +185,63 @@ class MCPCoordinator:
         """执行 MCP 工具调用.
 
         对标 GPT Researcher MCPClientManager + MCPToolSelector.
-        阶段 4 完整实现, 此处为骨架.
+        支持两种传输模式 (对标 MCP 协议):
+        - stdio (本地模式): 通过 command/args/env 启动本地进程, 经 stdin/stdout 通信
+        - sse / streamable_http (远程模式): 通过 server_url 连接远程 HTTP 服务器
         """
         try:
             from langchain_mcp_adapters.client import MultiServerMCPClient
 
             # 转换配置格式 (对标 GPT Researcher convert_configs_to_langchain_format)
+            # 根据数据库 transport_type 字段构建配置 (不再从 URL 推断)
             server_configs = {}
             for cfg in mcp_configs:
                 name = cfg.get("name", "default")
-                url = cfg.get("url", "")
-                if url.startswith(("wss://", "ws://")):
-                    transport = "websocket"
-                elif url.startswith(("https://", "http://")):
-                    transport = "streamable_http"
+                transport_type = cfg.get("transport_type", "stdio")
+                url = cfg.get("url") or cfg.get("server_url") or ""
+
+                if transport_type == "stdio":
+                    # 本地模式: 通过 command/args/env 启动本地进程
+                    command = cfg.get("command")
+                    if not command:
+                        logger.warning("MCP 配置 %s: stdio 模式缺少 command, 跳过", name)
+                        continue
+                    # args/env_vars 可能是 JSONB 字符串或已解析的 list/dict
+                    args = cfg.get("args")
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except (json.JSONDecodeError, TypeError):
+                            args = None
+                    env_vars = cfg.get("env_vars")
+                    if isinstance(env_vars, str):
+                        try:
+                            env_vars = json.loads(env_vars)
+                        except (json.JSONDecodeError, TypeError):
+                            env_vars = None
+                    server_configs[name] = {
+                        "command": command,
+                        "args": args or [],
+                        "env": env_vars or {},
+                        "transport": "stdio",
+                    }
                 else:
-                    transport = "stdio"
-                server_configs[name] = {
-                    "url": url,
-                    "transport": transport,
-                }
+                    # 远程模式 (sse / streamable_http): 通过 server_url 连接
+                    if not url:
+                        logger.warning(
+                            "MCP 配置 %s: %s 模式缺少 server_url, 跳过",
+                            name,
+                            transport_type,
+                        )
+                        continue
+                    server_configs[name] = {
+                        "url": url,
+                        "transport": transport_type,
+                    }
+
+            if not server_configs:
+                logger.warning("MCP 无可用配置 (所有配置均无效)")
+                return []
 
             client = MultiServerMCPClient(server_configs)
             tools = await client.get_tools()

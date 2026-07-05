@@ -38,6 +38,7 @@ from src.api.middleware import (
 )
 from src.config.settings import get_settings
 from src.observability.tracing import trace_agent
+from src.skills.researcher.chitchat_responder import get_chitchat_responder
 from src.skills.researcher.query_classifier import (
     QueryIntent,
     get_query_intent_classifier,
@@ -245,8 +246,77 @@ async def chat_completions(
         )
         intent = QueryIntent.OFF_TOPIC
 
-    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 直接返回回复语, 不走任何 graph
+    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 走 ChitchatResponder 或固定话术
+    # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: chitchat_enabled=True 时走 FAST_LLM 人性化响应
     if intent in (QueryIntent.SHORT_QUERY, QueryIntent.OFF_TOPIC):
+        if settings.chitchat_enabled:
+            # 新路径: ChitchatResponder (FAST_LLM + Persona + 三段式 + 多模板兜底)
+            category = (
+                _infer_off_topic_category(query) if intent == QueryIntent.OFF_TOPIC else "greeting"
+            )
+            responder = get_chitchat_responder()
+            if intent == QueryIntent.SHORT_QUERY:
+                if request.stream:
+                    return StreamingResponse(
+                        _stream_chitchat(
+                            responder.respond_short_query(
+                                query, session_id=session_id, user_id=user_id, stream=True
+                            ),
+                            request,
+                            session_id,
+                            intent=intent.value,
+                        ),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "X-Session-Id": session_id,
+                        },
+                    )
+                return await _run_chitchat(
+                    responder.respond_short_query(
+                        query, session_id=session_id, user_id=user_id, stream=False
+                    ),
+                    request,
+                    session_id,
+                    intent=intent.value,
+                )
+            else:  # OFF_TOPIC
+                if request.stream:
+                    return StreamingResponse(
+                        _stream_chitchat(
+                            responder.respond_off_topic(
+                                query,
+                                category=category,
+                                session_id=session_id,
+                                user_id=user_id,
+                                stream=True,
+                            ),
+                            request,
+                            session_id,
+                            intent=intent.value,
+                        ),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "X-Session-Id": session_id,
+                        },
+                    )
+                return await _run_chitchat(
+                    responder.respond_off_topic(
+                        query,
+                        category=category,
+                        session_id=session_id,
+                        user_id=user_id,
+                        stream=False,
+                    ),
+                    request,
+                    session_id,
+                    intent=intent.value,
+                )
+
+        # 旧路径: chitchat_enabled=False 时走固定话术 (向后兼容)
         reply = (
             settings.short_query_reply
             if intent == QueryIntent.SHORT_QUERY
@@ -825,6 +895,173 @@ async def _run_short_query(
         session_id=session_id,
     ):
         content = reply
+
+    prompt_tokens = 0
+    completion_tokens = len(content) // 4
+
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=request.model,
+        choices=[
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    )
+
+
+# ========== ChitchatResponder 辅助函数 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0) ==========
+
+
+def _infer_off_topic_category(query: str) -> str:
+    """从用户查询推断 OFF_TOPIC 子类.
+
+    P0 简单实现: 关键词匹配. P1 可由分类器语义匹配返回 category.
+    8 类: greeting/identity/emotion/entertainment/common_sense/capability_check/topic_switch/evaluation.
+    """
+    q = query.lower().strip()
+    # 身份询问
+    if any(
+        kw in q
+        for kw in (
+            "你叫什么",
+            "你是谁",
+            "你多大了",
+            "你是真人",
+            "你是机器人",
+            "什么模型",
+            "你的名字",
+        )
+    ):
+        return "identity"
+    # 情绪表达
+    if any(kw in q for kw in ("我好累", "我好开心", "心情", "难过", "开心", "烦", "生气", "无聊")):
+        return "emotion"
+    # 娱乐请求
+    if any(kw in q for kw in ("讲个笑话", "说个故事", "唱首歌", "玩游戏", "讲笑话")):
+        return "entertainment"
+    # 常识问题
+    if any(kw in q for kw in ("等于几", "天气", "几点", "日期", "今天", "现在时间")):
+        return "common_sense"
+    # 能力询问
+    if any(kw in q for kw in ("你能做什么", "你会什么", "功能", "能力", "怎么用", "帮助")):
+        return "capability_check"
+    # 话题转移
+    if any(kw in q for kw in ("不想", "算了", "退出", "结束", "拜拜", "再见")):
+        return "topic_switch"
+    # 评价
+    if any(kw in q for kw in ("谢谢", "感谢", "很好", "不错", "太棒了", "厉害")):
+        return "evaluation"
+    # 默认: 问候
+    return "greeting"
+
+
+async def _stream_chitchat(
+    content_iterator: Any,
+    request: ChatCompletionRequest,
+    session_id: str,
+    *,
+    intent: str = "short_query",
+) -> Any:
+    """流式 SSE 闲聊响应生成器 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0).
+
+    从 ChitchatResponder 的 AsyncIterator 逐块 yield 内容, 包装为 SSE 格式.
+    AGENTS.md 第 10 章: trace_agent 根 span.
+
+    Args:
+        content_iterator: ChitchatResponder 返回的 AsyncIterator[str]
+        request: OpenAI 兼容请求
+        session_id: 会话 ID
+        intent: 意图类型 ("short_query" 或 "off_topic")
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    def _sse_chunk(delta: dict[str, Any], finish_reason: str | None = None) -> str:
+        """构造 SSE 数据帧."""
+        chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }
+            ],
+        }
+        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    # SSE 首块 (role)
+    yield _sse_chunk({"role": "assistant"})
+
+    span_name = f"agentinsight-researcher-{intent}"
+    async with trace_agent(
+        name=span_name,
+        input={"session_id": session_id, "intent": intent},
+        metadata={
+            "session_id": session_id,
+            "intent": intent,
+            "mode": "chitchat_responder",
+        },
+        session_id=session_id,
+    ):
+        # 逐块 yield FAST_LLM 流式内容
+        async for chunk in content_iterator:
+            if chunk:
+                yield _sse_chunk({"content": chunk})
+
+    # SSE 末块 (finish_reason)
+    yield _sse_chunk({}, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
+async def _run_chitchat(
+    content_or_future: Any,
+    request: ChatCompletionRequest,
+    session_id: str,
+    *,
+    intent: str = "short_query",
+) -> ChatCompletionResponse:
+    """非流式闲聊响应 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0).
+
+    从 ChitchatResponder 获取完整字符串响应.
+    AGENTS.md 第 10 章: trace_agent 根 span.
+
+    Args:
+        content_or_future: ChitchatResponder 返回的字符串或 coroutine (await 后得到字符串)
+        request: OpenAI 兼容请求
+        session_id: 会话 ID
+        intent: 意图类型 ("short_query" 或 "off_topic")
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    span_name = f"agentinsight-researcher-{intent}"
+    async with trace_agent(
+        name=span_name,
+        input={"session_id": session_id, "intent": intent},
+        metadata={
+            "session_id": session_id,
+            "intent": intent,
+            "mode": "chitchat_responder",
+        },
+        session_id=session_id,
+    ):
+        # await coroutine (ChitchatResponder.respond_xxx(stream=False) 返回 coroutine)
+        content = (
+            await content_or_future if not isinstance(content_or_future, str) else content_or_future
+        )
 
     prompt_tokens = 0
     completion_tokens = len(content) // 4

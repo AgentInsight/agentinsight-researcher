@@ -422,6 +422,16 @@
     .mcp-item .mcp-edit:hover { background: var(--surface-2); border-color: var(--border-strong); }
     .mcp-item .mcp-del { color: var(--error); }
     .mcp-item .mcp-del:hover { background: var(--error-bg); border-color: var(--error); }
+    .mcp-item .mcp-test {
+      padding: 4px 10px; font-size: 12px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); transition: background .15s, border-color .15s, opacity .15s;
+    }
+    .mcp-item .mcp-test:hover { background: var(--surface-2); border-color: var(--border-strong); }
+    .mcp-item .mcp-test:disabled { opacity: .5; cursor: not-allowed; }
+    .mcp-item .mcp-test.testing { color: var(--primary); border-color: var(--primary); }
+    .mcp-item .mcp-test.success { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+    .mcp-item .mcp-test.failed { color: var(--error); border-color: var(--error); background: var(--error-bg); }
     .mcp-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 16px; }
     /* MCP enabled toggle switch (green=on, gray=off) */
     .mcp-toggle {
@@ -449,6 +459,32 @@
     .mcp-form-footer {
       display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
       padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2);
+    }
+    /* MCP 双标签页 (我的 MCP / 公用 MCP) */
+    .mcp-tabs {
+      display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+    .mcp-tab {
+      padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted);
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      cursor: pointer; transition: color .15s, border-color .15s; margin-bottom: -1px;
+    }
+    .mcp-tab:hover { color: var(--text); }
+    .mcp-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .mcp-tab-content { display: none; }
+    .mcp-tab-content.active { display: block; }
+    /* 公用 MCP 克隆按钮 */
+    .mcp-item .mcp-clone {
+      padding: 4px 10px; font-size: 12px; border-radius: 4px;
+      border: 1px solid var(--primary); background: var(--primary-soft);
+      color: var(--primary); transition: background .15s, opacity .15s;
+    }
+    .mcp-item .mcp-clone:hover { background: var(--primary); color: #fff; }
+    .mcp-item .mcp-clone:disabled { opacity: .5; cursor: not-allowed; }
+    .mcp-system-badge {
+      display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px;
+      background: var(--primary-soft); color: var(--primary); margin-left: 6px; font-weight: 500;
     }
 
     /* ===== 历史报告面板 (任务8) ===== */
@@ -674,12 +710,27 @@
         <button class="mcp-close" id="mcpCloseBtn" title="关闭">✕</button>
       </div>
       <div class="mcp-body">
-        <div class="mcp-add-row">
-          <button class="review-btn primary" id="mcp_add" title="新增 MCP 配置">+ 新增 MCP 配置</button>
+        <!-- 双标签页: 我的 MCP / 公用 MCP -->
+        <div class="mcp-tabs">
+          <button class="mcp-tab active" data-tab="user" id="mcp_tab_user">我的 MCP</button>
+          <button class="mcp-tab" data-tab="system" id="mcp_tab_system">公用 MCP</button>
         </div>
-        <div class="mcp-list">
-          <div class="mcp-list-title">已保存配置</div>
-          <div id="mcp_list"></div>
+        <!-- 我的 MCP 标签页 (用户私有, 可编辑/删除/切换启用) -->
+        <div class="mcp-tab-content active" id="mcp-content-user">
+          <div class="mcp-add-row">
+            <button class="review-btn primary" id="mcp_add" title="新增 MCP 配置">+ 新增 MCP 配置</button>
+          </div>
+          <div class="mcp-list">
+            <div class="mcp-list-title">已保存配置</div>
+            <div id="mcp_list"></div>
+          </div>
+        </div>
+        <!-- 公用 MCP 标签页 (系统预置, 只读, 可克隆到我的列表) -->
+        <div class="mcp-tab-content" id="mcp-content-system">
+          <div class="mcp-list">
+            <div class="mcp-list-title">系统预置公用 MCP (官方参考实现, 点击「+ 添加」克隆到我的列表后编辑)</div>
+            <div id="mcp_system_list"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -699,27 +750,27 @@
             <input type="text" id="mcp_name" placeholder="如: weather-server" />
           </div>
           <div>
-            <label for="mcp_url">Server URL *</label>
-            <input type="text" id="mcp_url" placeholder="如: http://localhost:8080/mcp" />
-          </div>
-          <div>
             <label for="mcp_transport">传输类型</label>
             <select id="mcp_transport">
-              <option value="stdio">stdio</option>
-              <option value="sse">sse</option>
-              <option value="streamable_http">streamable_http</option>
+              <option value="stdio">stdio (本地模式)</option>
+              <option value="sse">sse (远程模式)</option>
+              <option value="streamable_http">streamable_http (远程模式)</option>
             </select>
           </div>
           <div>
-            <label for="mcp_command">命令 (stdio 类型)</label>
-            <input type="text" id="mcp_command" placeholder="如: python /path/to/server.py" />
+            <label for="mcp_url" id="mcp_url_label">Server URL</label>
+            <input type="text" id="mcp_url" placeholder="远程模式必填, 如: http://localhost:8080/mcp" />
+          </div>
+          <div>
+            <label for="mcp_command" id="mcp_command_label">命令</label>
+            <input type="text" id="mcp_command" placeholder="stdio 模式必填, 如: python /path/to/server.py" />
           </div>
           <div class="field-full">
-            <label for="mcp_args">参数 (每行一个参数)</label>
+            <label for="mcp_args">参数 (每行一个参数, stdio 模式)</label>
             <textarea id="mcp_args" rows="3" placeholder="--port&#10;8080"></textarea>
           </div>
           <div class="field-full">
-            <label for="mcp_env">环境变量 (每行 KEY=VALUE)</label>
+            <label for="mcp_env">环境变量 (每行 KEY=VALUE, stdio 模式)</label>
             <textarea id="mcp_env" rows="3" placeholder="API_KEY=xxx&#10;DEBUG=true"></textarea>
           </div>
           <div class="field-full">
@@ -736,6 +787,7 @@
       </div>
       <div class="mcp-form-footer">
         <button class="review-btn" id="mcp_cancel">取消</button>
+        <button class="review-btn" id="mcp_test" title="测试当前配置是否可用 (不保存)">测试</button>
         <button class="review-btn primary" id="mcp_save">保存</button>
       </div>
     </div>
@@ -1063,6 +1115,8 @@
         // P2-04: SSE 元数据 (工具调用 / 检索来源, 含 score)
         toolCalls: [],
         sourcesMeta: [],
+        // 任务7: 保存本次响应收到的 report_id (仅 publisher 节点推送时存在, 用于条件显示下载链接)
+        reportId: null,
       };
     }
 
@@ -1353,6 +1407,7 @@
               // 任务8: publisher 节点推送的 report_id 帧 (触发历史报告列表刷新)
               // 该帧通常为 {"report_id": "..."}, 无 choices 字段, 由下方 !choice 兜底跳过
               if (chunk.report_id) {
+                bubble.reportId = chunk.report_id;  // 保存到 bubble 供后续下载链接判断使用
                 handleReportId(chunk.report_id);
               }
               // 默认: OpenAI chat completion chunk
@@ -1387,8 +1442,13 @@
         }
         // 隐藏"生成中"状态
         bubble.statusEl.style.display = 'none';
-        // 任务7: 响应完成后显示下载链接 (基于 session_id 生成多格式下载 URL)
-        updateDownloadLinks(state.sessionId);
+        // 任务7: 响应完成后, 仅当本次生成了报告 (收到 report_id) 时才显示下载链接
+        if (bubble.reportId) {
+          updateDownloadLinks(bubble.reportId);
+        } else {
+          // 无报告时主动隐藏 (避免前一次响应的下载链接残留)
+          $('download_links').style.display = 'none';
+        }
       } catch (err) {
         if (err.name === 'AbortError') {
           bubble.statusEl.innerHTML = '<span style="color:var(--text-muted)">已停止</span>';
@@ -1584,17 +1644,17 @@
     loadReportList();
 
     // ========== 下载链接 (任务7) ==========
-    /** 响应完成后, 基于 session_id 生成多格式下载链接并显示 */
-    function updateDownloadLinks(sessionId) {
-      if (!sessionId) return;
+    /** 响应完成后, 基于 report_id 生成多格式下载链接并显示 */
+    function updateDownloadLinks(reportId) {
+      if (!reportId) return;
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       const links = $('download_links');
       links.style.display = 'flex';
-      $('dl_markdown').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=markdown';
-      $('dl_html').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=html';
-      $('dl_pdf').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=pdf';
-      $('dl_docx').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=docx';
-      $('dl_json').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=json';
+      $('dl_markdown').href = base + '/v1/reports/' + encodeURIComponent(reportId) + '/download?format=markdown';
+      $('dl_html').href     = base + '/v1/reports/' + encodeURIComponent(reportId) + '/download?format=html';
+      $('dl_pdf').href      = base + '/v1/reports/' + encodeURIComponent(reportId) + '/download?format=pdf';
+      $('dl_docx').href     = base + '/v1/reports/' + encodeURIComponent(reportId) + '/download?format=docx';
+      $('dl_json').href     = base + '/v1/reports/' + encodeURIComponent(reportId) + '/download?format=json';
     }
 
     // 关闭下载链接面板
@@ -1605,6 +1665,8 @@
     // ========== MCP 配置管理 (任务7, 含编辑/启用禁用) ==========
     // MCP 配置缓存 (供编辑/切换启用状态时读取完整字段)
     let mcpConfigsCache = [];
+    // 系统公用 MCP 配置缓存 (只读, 用于克隆时判断是否已添加)
+    let mcpSystemConfigsCache = [];
     // 当前编辑的配置 ID (null = 新增模式, 非 null = 编辑模式)
     let mcpEditingId = null;
 
@@ -1616,7 +1678,7 @@
       if (token) headers['Authorization'] = 'Bearer ' + token;
 
       try {
-        const resp = await fetch(base + '/v1/mcp/configs', { headers });
+        const resp = await fetch(base + '/v1/mcp', { headers });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const configs = await resp.json();
         mcpConfigsCache = Array.isArray(configs) ? configs : [];
@@ -1630,6 +1692,12 @@
           const url = c.server_url || '';
           const transport = c.transport_type || 'stdio';
           const desc = c.description || '';
+          const command = c.command || '';
+          // stdio 模式显示 command, 远程模式显示 URL
+          const transportLabel = transport === 'stdio' ? 'stdio (本地)' : transport;
+          const metaText = transport === 'stdio'
+            ? (command || '(无命令)') + ' · ' + transportLabel
+            : (url || '(无URL)') + ' · ' + transportLabel;
           return '<div class="mcp-item">' +
             '<label class="mcp-toggle" title="' + (enabled ? '点击禁用' : '点击启用') + '">' +
               '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-id="' + escapeHtml(c.id) + '" />' +
@@ -1637,10 +1705,11 @@
             '</label>' +
             '<div class="mcp-info">' +
               '<div class="mcp-name">' + escapeHtml(c.name || '(未命名)') + '</div>' +
-              '<div class="mcp-meta-line">' + escapeHtml(url) + (url ? ' · ' : '') + escapeHtml(transport) + '</div>' +
+              '<div class="mcp-meta-line">' + escapeHtml(metaText) + '</div>' +
               (desc ? '<div class="mcp-desc">' + escapeHtml(desc) + '</div>' : '') +
             '</div>' +
             '<div class="mcp-actions">' +
+              '<button class="mcp-test" data-id="' + escapeHtml(c.id) + '" title="测试 MCP 可用性">测试</button>' +
               '<button class="mcp-edit" data-id="' + escapeHtml(c.id) + '" title="编辑">编辑</button>' +
               '<button class="mcp-del" data-id="' + escapeHtml(c.id) + '" title="删除">删除</button>' +
             '</div>' +
@@ -1656,6 +1725,10 @@
         list.querySelectorAll('.mcp-edit').forEach((btn) => {
           btn.addEventListener('click', () => editMcpConfig(btn.dataset.id));
         });
+        // 绑定测试按钮
+        list.querySelectorAll('.mcp-test').forEach((btn) => {
+          btn.addEventListener('click', () => testMcpConfigById(btn.dataset.id, btn));
+        });
         // 绑定删除按钮 (带确认)
         list.querySelectorAll('.mcp-del').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -1669,6 +1742,176 @@
       }
     }
 
+    /** 加载系统公用 MCP 配置列表 (GET /v1/mcp/system, 只读) */
+    async function loadSystemMcpConfigs() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      try {
+        const resp = await fetch(base + '/v1/mcp/system', { headers });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const configs = await resp.json();
+        mcpSystemConfigsCache = Array.isArray(configs) ? configs : [];
+        const list = $('mcp_system_list');
+        if (mcpSystemConfigsCache.length === 0) {
+          list.innerHTML = '<div class="mcp-empty">暂无系统公用 MCP</div>';
+          return;
+        }
+        // 计算哪些已被克隆到我的列表 (按 name 匹配)
+        const userNames = new Set(mcpConfigsCache.map((c) => c.name));
+        list.innerHTML = mcpSystemConfigsCache.map((c) => {
+          const url = c.server_url || '';
+          const transport = c.transport_type || 'stdio';
+          const desc = c.description || '';
+          const command = c.command || '';
+          const transportLabel = transport === 'stdio' ? 'stdio (本地)' : transport;
+          const metaText = transport === 'stdio'
+            ? (command || '(无命令)') + ' · ' + transportLabel
+            : (url || '(无URL)') + ' · ' + transportLabel;
+          const alreadyCloned = userNames.has(c.name);
+          const cloneBtn = alreadyCloned
+            ? '<button class="mcp-clone" disabled title="已存在同名配置, 请先删除我的列表中同名项">已添加</button>'
+            : '<button class="mcp-clone" data-id="' + escapeHtml(c.id) + '" title="克隆到我的 MCP 列表">+ 添加</button>';
+          return '<div class="mcp-item">' +
+            '<div class="mcp-info">' +
+              '<div class="mcp-name">' + escapeHtml(c.name || '(未命名)') +
+                '<span class="mcp-system-badge">系统</span>' +
+              '</div>' +
+              '<div class="mcp-meta-line">' + escapeHtml(metaText) + '</div>' +
+              (desc ? '<div class="mcp-desc">' + escapeHtml(desc) + '</div>' : '') +
+            '</div>' +
+            '<div class="mcp-actions">' + cloneBtn + '</div>' +
+            '</div>';
+        }).join('');
+        // 绑定克隆按钮
+        list.querySelectorAll('.mcp-clone[data-id]').forEach((btn) => {
+          btn.addEventListener('click', () => cloneSystemMcp(btn.dataset.id));
+        });
+      } catch (e) {
+        $('mcp_system_list').innerHTML = '<div class="mcp-empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    /** 检测 MCP 配置是否需要填入 API Key (env_vars 含占位符或空值) */
+    function needsApiKey(envVars) {
+      if (!envVars || typeof envVars !== 'object') return false;
+      // JSONB 可能返回字符串, 先解析
+      let env = envVars;
+      if (typeof env === 'string') {
+        try { env = JSON.parse(env); } catch { return false; }
+      }
+      if (!env || typeof env !== 'object') return false;
+      // 任何 value 匹配 <...> 占位符或为空字符串 → 需 Key
+      return Object.values(env).some((v) => !v || /<[^>]+>/.test(String(v)));
+    }
+
+    /** 克隆系统公用 MCP 到我的列表 (POST /v1/mcp/system/{id}/clone)
+     *  用户需求 2: 需 Key 的系统 MCP 克隆后打开编辑表单, 用户填 Key 后测试启用;
+     *  无需 Key 的 MCP 克隆后自动测试, 通过则启用, 失败则保持禁用.
+     */
+    async function cloneSystemMcp(id) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      // 1. 从系统 MCP 缓存中查找原配置, 检测是否需要 Key
+      const numId = Number(id);
+      const sysConfig = mcpSystemConfigsCache.find((c) => c.id === numId);
+      const needKey = sysConfig ? needsApiKey(sysConfig.env_vars) : false;
+
+      try {
+        // 2. 调用 clone 端点 (后端统一 enabled=FALSE)
+        const resp = await fetch(base + '/v1/mcp/system/' + encodeURIComponent(id) + '/clone', {
+          method: 'POST',
+          headers,
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        const cloned = await resp.json();
+        // 刷新两个列表 (用户列表新增项, 系统列表按钮变「已添加」)
+        await loadMcpConfigs();
+        await loadSystemMcpConfigs();
+
+        // 3. 根据是否需 Key 分支处理
+        if (needKey) {
+          // 需 Key: 打开编辑表单, 让用户填入 Key
+          toast('已添加 (未启用). 请填入 API Key 后保存, 系统将自动验证');
+          // 找到克隆后的用户配置 (按 name 匹配)
+          const userCfg = mcpConfigsCache.find((c) => c.name === cloned.name);
+          if (userCfg) openMcpForm(userCfg);
+        } else {
+          // 无需 Key: 自动测试, 通过则启用
+          toast('已添加, 正在验证可用性...');
+          const testResult = await testMcpConfigById(cloned.id, null, true);
+          if (testResult && testResult.success) {
+            // 测试通过, 调用 PUT 启用
+            await enableMcpAfterTest(cloned.id);
+            toast('已添加并启用: ' + (testResult.message || '连接成功'));
+          } else if (testResult) {
+            toast('已添加但未启用: ' + (testResult.message || 'MCP 不可用'));
+          }
+        }
+      } catch (e) {
+        toast('添加失败: ' + e.message);
+      }
+    }
+
+    /** 测试通过后启用 MCP (PUT enabled=TRUE, 后端会再次校验) */
+    async function enableMcpAfterTest(id) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const numId = Number(id);
+      const config = mcpConfigsCache.find((c) => c.id === numId);
+      if (!config) return;
+
+      const body = {
+        name: config.name,
+        server_url: config.server_url,
+        transport_type: config.transport_type,
+        command: config.command || null,
+        args: (() => {
+          if (typeof config.args === 'string') {
+            try { return JSON.parse(config.args); } catch { return null; }
+          }
+          return Array.isArray(config.args) ? config.args : null;
+        })(),
+        env_vars: (() => {
+          if (typeof config.env_vars === 'string') {
+            try { return JSON.parse(config.env_vars); } catch { return null; }
+          }
+          return config.env_vars || null;
+        })(),
+        description: config.description || null,
+        enabled: true,
+      };
+
+      try {
+        const resp = await fetch(base + '/v1/mcp/' + encodeURIComponent(id), {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        await loadMcpConfigs();
+      } catch (e) {
+        toast('启用失败: ' + e.message);
+        await loadMcpConfigs();
+      }
+    }
+
     /** 打开 MCP 表单模态框 (config=null 为新增, config=对象 为编辑) */
     function openMcpForm(config) {
       if (config) {
@@ -1678,11 +1921,19 @@
         $('mcp_url').value = config.server_url || '';
         $('mcp_transport').value = config.transport_type || 'stdio';
         $('mcp_command').value = config.command || '';
-        // args 是 list[str], 每行一个参数
-        $('mcp_args').value = Array.isArray(config.args) ? config.args.join('\n') : '';
-        // env_vars 是 dict[str,str], 每行 KEY=VALUE
-        const env = config.env_vars || {};
-        $('mcp_env').value = Object.keys(env).map((k) => k + '=' + env[k]).join('\n');
+        // args 是 list[str], 每行一个参数 (防御性: JSONB 可能返回字符串)
+        let argsList = config.args;
+        if (typeof argsList === 'string') {
+          try { argsList = JSON.parse(argsList); } catch { argsList = []; }
+        }
+        $('mcp_args').value = Array.isArray(argsList) ? argsList.join('\n') : '';
+        // env_vars 是 dict[str,str], 每行 KEY=VALUE (防御性: JSONB 可能返回字符串)
+        let env = config.env_vars || {};
+        if (typeof env === 'string') {
+          try { env = JSON.parse(env); } catch { env = {}; }
+        }
+        $('mcp_env').value = (env && typeof env === 'object') ?
+          Object.keys(env).map((k) => k + '=' + env[k]).join('\n') : '';
         $('mcp_desc').value = config.description || '';
         $('mcp_enabled').checked = config.enabled !== false;
       } else {
@@ -1697,6 +1948,8 @@
         $('mcp_desc').value = '';
         $('mcp_enabled').checked = true;
       }
+      // 触发 transport change 事件, 更新 URL/command 字段的必填标记
+      $('mcp_transport').dispatchEvent(new Event('change'));
       $('mcp-form-panel').classList.add('open');
     }
 
@@ -1726,7 +1979,10 @@
       return env;
     }
 
-    /** 保存 MCP 配置 (新增=POST / 编辑=PUT) */
+    /** 保存 MCP 配置 (新增=POST / 编辑=PUT)
+     *  用户需求 1: 新增时后端自动测试, 不可用则 enabled=FALSE, 不阻止添加.
+     *  用户需求 3: 编辑时若启用, 后端会先测试, 不可用则拒绝启用.
+     */
     async function saveMcpConfig() {
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       const token = $('tokenInput').value.trim();
@@ -1734,10 +1990,27 @@
       if (token) headers['Authorization'] = 'Bearer ' + token;
 
       const name = $('mcp_name').value.trim();
+      const transport = $('mcp_transport').value;
       const url = $('mcp_url').value.trim();
-      if (!name || !url) {
-        toast('配置名称和 Server URL 为必填项');
+      const command = $('mcp_command').value.trim();
+
+      if (!name) {
+        toast('配置名称为必填项');
         return;
+      }
+      // 根据传输类型校验必填字段
+      if (transport === 'stdio') {
+        // stdio (本地模式): command 必填, server_url 可选
+        if (!command) {
+          toast('stdio 本地模式必须提供启动命令');
+          return;
+        }
+      } else {
+        // sse / streamable_http (远程模式): server_url 必填
+        if (!url) {
+          toast(transport + ' 远程模式必须提供 Server URL');
+          return;
+        }
       }
 
       const args = parseArgsTextarea($('mcp_args').value);
@@ -1745,9 +2018,9 @@
 
       const body = {
         name: name,
-        server_url: url,
-        transport_type: $('mcp_transport').value,
-        command: $('mcp_command').value.trim() || null,
+        server_url: url || null,
+        transport_type: transport,
+        command: command || null,
         args: args.length ? args : null,
         env_vars: Object.keys(envVars).length ? envVars : null,
         description: $('mcp_desc').value.trim() || null,
@@ -1756,8 +2029,8 @@
 
       const isEdit = mcpEditingId != null;
       const apiUrl = isEdit
-        ? base + '/v1/mcp/configs/' + encodeURIComponent(mcpEditingId)
-        : base + '/v1/mcp/configs';
+        ? base + '/v1/mcp/' + encodeURIComponent(mcpEditingId)
+        : base + '/v1/mcp';
       const method = isEdit ? 'PUT' : 'POST';
 
       try {
@@ -1767,26 +2040,193 @@
           try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
           throw new Error(detail);
         }
+        const saved = await resp.json();
         await loadMcpConfigs();
-        closeMcpForm();
-        toast(isEdit ? 'MCP 配置已更新' : 'MCP 配置已保存');
+
+        // 根据 test_result 展示差异化 toast (后端自动测试结果)
+        const tr = saved.test_result;
+        if (tr) {
+          if (tr.success) {
+            closeMcpForm();
+            toast('已保存: ' + (tr.message || '可用性验证通过'));
+          } else {
+            // 测试失败: 后端已将 enabled 设为 FALSE, 提示用户
+            closeMcpForm();
+            toast('已保存 (未启用): ' + (tr.message || 'MCP 不可用'));
+          }
+        } else {
+          closeMcpForm();
+          toast(isEdit ? 'MCP 配置已更新' : 'MCP 配置已保存');
+        }
       } catch (e) {
         toast('保存失败: ' + e.message);
       }
     }
 
-    /** 切换 MCP 配置启用状态 (PUT, 仅更新 enabled 字段, 需发送完整 body) */
+    /** 测试表单中的当前配置 (POST /v1/mcp/test, 不保存) */
+    async function testMcpFormConfig() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const name = $('mcp_name').value.trim() || 'test-config';
+      const transport = $('mcp_transport').value;
+      const url = $('mcp_url').value.trim();
+      const command = $('mcp_command').value.trim();
+
+      if (transport === 'stdio' && !command) {
+        toast('stdio 模式必须提供启动命令');
+        return;
+      }
+      if (transport !== 'stdio' && !url) {
+        toast(transport + ' 远程模式必须提供 Server URL');
+        return;
+      }
+
+      const args = parseArgsTextarea($('mcp_args').value);
+      const envVars = parseEnvTextarea($('mcp_env').value);
+
+      const body = {
+        name: name,
+        server_url: url || null,
+        transport_type: transport,
+        command: command || null,
+        args: args.length ? args : null,
+        env_vars: Object.keys(envVars).length ? envVars : null,
+        description: $('mcp_desc').value.trim() || null,
+        enabled: $('mcp_enabled').checked,
+      };
+
+      const btn = $('mcp_test');
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '测试中...';
+      try {
+        const resp = await fetch(base + '/v1/mcp/test', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        const result = await resp.json();
+        if (result.success) {
+          toast('✅ ' + (result.message || '可用') + ' (' + result.tools_count + ' 工具, ' + result.latency_ms + 'ms)');
+        } else {
+          toast('⚠️ ' + (result.message || '不可用'));
+        }
+      } catch (e) {
+        toast('测试失败: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
+    }
+
+    /** 测试已保存的 MCP 配置 (POST /v1/mcp/{id}/test)
+     *  Args:
+     *    id: 配置 ID
+     *    btn: 触发测试的按钮元素 (可选, 用于显示测试状态)
+     *    silent: 静默模式 (不弹 toast, 返回结果由调用方处理)
+     *  Returns:
+     *    测试结果 dict, 失败返回 null
+     */
+    async function testMcpConfigById(id, btn, silent) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const origText = btn ? btn.textContent : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('testing');
+        btn.classList.remove('success', 'failed');
+        btn.textContent = '测试中...';
+      }
+      try {
+        const resp = await fetch(base + '/v1/mcp/' + encodeURIComponent(id) + '/test', {
+          method: 'POST',
+          headers,
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        const result = await resp.json();
+        if (btn) {
+          btn.classList.remove('testing');
+          if (result.success) {
+            btn.classList.add('success');
+            btn.textContent = '✓ ' + result.tools_count;
+          } else {
+            btn.classList.add('failed');
+            btn.textContent = '✗';
+          }
+        }
+        if (!silent) {
+          if (result.success) {
+            toast('✅ ' + (result.message || '可用') + ' (' + result.tools_count + ' 工具, ' + result.latency_ms + 'ms)');
+          } else {
+            toast('⚠️ ' + (result.message || '不可用'));
+          }
+        }
+        return result;
+      } catch (e) {
+        if (btn) {
+          btn.classList.remove('testing');
+          btn.classList.add('failed');
+          btn.textContent = '✗';
+        }
+        if (!silent) toast('测试失败: ' + e.message);
+        return null;
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          // 3 秒后恢复按钮原始文本
+          setTimeout(() => {
+            btn.textContent = origText;
+            btn.classList.remove('success', 'failed');
+          }, 3000);
+        }
+      }
+    }
+
+    /** 切换 MCP 配置启用状态 (PUT, 仅更新 enabled 字段, 需发送完整 body)
+     *  用户需求 3: 启用 MCP 服务时需验证是否可用, 只有可用的服务才能启用.
+     *  - 启用 (enabled=true): 先调用 /v1/mcp/{id}/test, 通过才发 PUT; 失败则不切换开关
+     *  - 禁用 (enabled=false): 直接 PUT, 无需测试
+     */
     async function toggleMcpEnabled(id, enabled) {
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       const token = $('tokenInput').value.trim();
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
 
-      const config = mcpConfigsCache.find((c) => c.id === id);
+      // data-id 属性返回字符串, 需转为 number 与缓存中的 c.id (int) 比较
+      const numId = Number(id);
+      const config = mcpConfigsCache.find((c) => c.id === numId);
       if (!config) {
         toast('配置不存在, 无法切换');
         await loadMcpConfigs();
         return;
+      }
+
+      // 启用前先测试可用性 (用户需求 3)
+      if (enabled) {
+        toast('正在验证可用性...');
+        const testResult = await testMcpConfigById(id, null, true);
+        if (!testResult || !testResult.success) {
+          toast('启用失败: MCP 不可用 (' + (testResult ? testResult.message : '测试失败') + ')');
+          // 测试失败, 不切换开关 (重新加载以恢复开关状态)
+          await loadMcpConfigs();
+          return;
+        }
       }
 
       const body = {
@@ -1794,14 +2234,25 @@
         server_url: config.server_url,
         transport_type: config.transport_type,
         command: config.command || null,
-        args: Array.isArray(config.args) ? config.args : null,
-        env_vars: config.env_vars || null,
+        // 防御性: JSONB 可能返回字符串, 需解析为 list/dict
+        args: (() => {
+          if (typeof config.args === 'string') {
+            try { return JSON.parse(config.args); } catch { return null; }
+          }
+          return Array.isArray(config.args) ? config.args : null;
+        })(),
+        env_vars: (() => {
+          if (typeof config.env_vars === 'string') {
+            try { return JSON.parse(config.env_vars); } catch { return null; }
+          }
+          return config.env_vars || null;
+        })(),
         description: config.description || null,
         enabled: enabled,
       };
 
       try {
-        const resp = await fetch(base + '/v1/mcp/configs/' + encodeURIComponent(id), {
+        const resp = await fetch(base + '/v1/mcp/' + encodeURIComponent(id), {
           method: 'PUT',
           headers,
           body: JSON.stringify(body),
@@ -1811,7 +2262,14 @@
           try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
           throw new Error(detail);
         }
-        toast(enabled ? '已启用' : '已禁用');
+        const saved = await resp.json();
+        // 后端可能在 PUT 时再次拒绝启用 (并发场景), 检查 test_result
+        const tr = saved.test_result;
+        if (enabled && tr && !tr.success) {
+          toast('启用失败: ' + (tr.message || 'MCP 不可用'));
+        } else {
+          toast(enabled ? '已启用' : '已禁用');
+        }
         await loadMcpConfigs();
       } catch (e) {
         toast('切换失败: ' + e.message);
@@ -1822,7 +2280,9 @@
 
     /** 编辑 MCP 配置: 从缓存读取并填入表单 */
     function editMcpConfig(id) {
-      const config = mcpConfigsCache.find((c) => c.id === id);
+      // data-id 属性返回字符串, 需转为 number 与缓存中的 c.id (int) 比较
+      const numId = Number(id);
+      const config = mcpConfigsCache.find((c) => c.id === numId);
       if (!config) {
         toast('配置不存在');
         return;
@@ -1838,7 +2298,7 @@
       if (token) headers['Authorization'] = 'Bearer ' + token;
 
       try {
-        const resp = await fetch(base + '/v1/mcp/configs/' + encodeURIComponent(id), {
+        const resp = await fetch(base + '/v1/mcp/' + encodeURIComponent(id), {
           method: 'DELETE',
           headers,
         });
@@ -1858,7 +2318,9 @@
     $('mcpToggle').addEventListener('click', () => {
       const panel = $('mcp-panel');
       panel.classList.add('open');
+      // 同时加载用户私有 MCP 和系统公用 MCP 两个列表
       loadMcpConfigs();
+      loadSystemMcpConfigs();
     });
     $('mcpCloseBtn').addEventListener('click', () => {
       $('mcp-panel').classList.remove('open');
@@ -1867,10 +2329,35 @@
     $('mcp-panel').addEventListener('click', (e) => {
       if (e.target === $('mcp-panel')) $('mcp-panel').classList.remove('open');
     });
+    // 双标签页切换: 我的 MCP / 公用 MCP
+    document.querySelectorAll('.mcp-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.mcp-tab').forEach((t) => t.classList.remove('active'));
+        document.querySelectorAll('.mcp-tab-content').forEach((c) => c.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab === 'user' ? 'mcp-content-user' : 'mcp-content-system';
+        $(target).classList.add('active');
+      });
+    });
     // 新增按钮: 打开空表单
     $('mcp_add').addEventListener('click', () => openMcpForm(null));
+    // 传输类型切换: 动态更新 URL/command 字段的必填标记
+    $('mcp_transport').addEventListener('change', () => {
+      const transport = $('mcp_transport').value;
+      const isStdio = transport === 'stdio';
+      // stdio 模式: command 必填, URL 可选; 远程模式: URL 必填, command 可选
+      $('mcp_url_label').textContent = isStdio ? 'Server URL (可选)' : 'Server URL *';
+      $('mcp_command_label').textContent = isStdio ? '命令 *' : '命令 (可选)';
+      $('mcp_url').placeholder = isStdio
+        ? '本地模式可选, 如: http://localhost:8080/mcp'
+        : '远程模式必填, 如: http://localhost:8080/mcp';
+      $('mcp_command').placeholder = isStdio
+        ? '本地模式必填, 如: python /path/to/server.py'
+        : '远程模式不需要命令';
+    });
     // 表单按钮
     $('mcp_save').addEventListener('click', saveMcpConfig);
+    $('mcp_test').addEventListener('click', testMcpFormConfig);
     $('mcp_cancel').addEventListener('click', closeMcpForm);
     $('mcpFormCloseBtn').addEventListener('click', closeMcpForm);
     // 点击遮罩关闭表单模态框

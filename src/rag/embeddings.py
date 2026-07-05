@@ -85,7 +85,10 @@ class EmbeddingsClient:
             base_url=self.settings.embeddings_base_url,
             timeout=httpx.Timeout(
                 connect=5.0,
-                read=60.0,  # 读超时加大, 适应大 batch
+                # P1-04: 读超时 120s, 应对大 batch 慢推理
+                # TEI CPU 后端 inference_time 可达 10s+, queue_time 可达 30s+
+                # 60s 会踩边界触发 ReadTimeout
+                read=120.0,
                 write=10.0,
                 pool=5.0,
             ),
@@ -96,6 +99,8 @@ class EmbeddingsClient:
                 keepalive_expiry=30.0,
             ),
         )
+        # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
+        self._semaphore = asyncio.Semaphore(self.settings.embeddings_max_concurrent)
 
     async def embed_texts(
         self,
@@ -154,6 +159,7 @@ class EmbeddingsClient:
         """单次 TEI 调用 (原 embed_texts 逻辑, 不分批).
 
         供 embed_texts 内部分批并发调用, 每批一次 TEI /embed 请求.
+        P1-04: Semaphore 限流 + 429 指数退避重试.
         """
         if not texts:
             return []
@@ -165,33 +171,79 @@ class EmbeddingsClient:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            try:
-                # TEI 服务 /embed 接口
-                response = await self._client.post(
-                    "/embed",
-                    json={"inputs": texts},
-                )
-                response.raise_for_status()
-                vectors = response.json()
+            # P1-04: Semaphore 限流 (避免高并发击穿 TEI 限流阈值导致 429)
+            max_retries = self.settings.embeddings_max_retries
+            base_delay = self.settings.embeddings_retry_base_delay
+            last_error: Exception | None = None
 
-                # 估算 token 数 (粗略: 字符数 / 3)
-                total_chars = sum(len(t) for t in texts)
-                token_count = total_chars // 3
+            for attempt in range(max_retries + 1):
+                try:
+                    async with self._semaphore:
+                        # TEI 服务 /embed 接口
+                        response = await self._client.post(
+                            "/embed",
+                            json={"inputs": texts},
+                        )
+                        response.raise_for_status()
+                        vectors = response.json()
 
-                span.update(
-                    output={"vector_count": len(vectors)},
-                    usage_details={"total_tokens": token_count},
-                )
-                return cast(list[list[float]], vectors)
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    "Embedding 调用失败: type=%s repr=%r str=%s",
-                    type(e).__name__,
-                    e,
-                    e,
-                )
-                span.update(metadata={"error": f"{type(e).__name__}: {e}"})
-                raise
+                        # 估算 token 数 (粗略: 字符数 / 3)
+                        total_chars = sum(len(t) for t in texts)
+                        token_count = total_chars // 3
+
+                        span.update(
+                            output={"vector_count": len(vectors)},
+                            usage_details={"total_tokens": token_count},
+                        )
+                        return cast(list[list[float]], vectors)
+
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    # P1-04: 429 Too Many Requests → 指数退避重试
+                    if e.response.status_code == 429 and attempt < max_retries:
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            "Embedding 429 限流, 第 %d/%d 次重试 (延迟 %.2fs): "
+                            "text_count=%d",
+                            attempt + 1,
+                            max_retries,
+                            delay,
+                            len(texts),
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    # 非 429 或重试次数用尽, 抛出
+                    logger.error(
+                        "Embedding 调用失败 (HTTP %d): %s",
+                        e.response.status_code,
+                        e,
+                    )
+                    span.update(
+                        metadata={
+                            "error": f"HTTPStatusError {e.response.status_code}: {e}",
+                            "retries": attempt,
+                        }
+                    )
+                    raise
+
+                except Exception as e:  # noqa: BLE001
+                    last_error = e
+                    logger.error(
+                        "Embedding 调用失败: type=%s repr=%r str=%s",
+                        type(e).__name__,
+                        e,
+                        e,
+                    )
+                    span.update(
+                        metadata={
+                            "error": f"{type(e).__name__}: {e}",
+                            "retries": attempt,
+                        }
+                    )
+                    raise
+
+            # 理论上不会到达 (重试循环要么 return 要么 raise)
+            raise last_error  # type: ignore[misc]
 
     async def embed_query(
         self,

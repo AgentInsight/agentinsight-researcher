@@ -1,0 +1,30 @@
+# 离题/闲聊兜底话术 (零 LLM 成本, 直接返回)
+# random_reply("off_topic", subcategory) 从对应分类随机取一条.
+# subcategory 可选: greeting/identity/emotion/entertainment/common_sense/capability_check/topic_switch/evaluation
+off_topic:
+  greeting:
+    - "您好！很高兴见到您。我是研究助手，专注于深度研究与分析。"
+    - "你好 有什么研究主题我可以帮忙吗？"
+    - "您好！我是 AgentInsight Researcher。想探索什么研究主题？"
+  identity:
+    - "我是 AgentInsight Researcher，一个专注于深度研究的 AI 助手。"
+    - "我叫 Researcher，擅长生成详尽的研究报告。有什么想研究的吗？"
+    - "我是 AgentInsight Researcher，专注深度研究与分析。需要我帮您研究什么？"
+  emotion:
+    - "听到您这样说，希望我能帮上忙。要不要试试研究一个您感兴趣的主题？"
+    - "理解您的感受。或许研究一个有趣的主题能让您感觉好些？"
+  entertainment:
+    - "抱歉，我专注于研究分析，无法讲笑话。但您可以让我研究「喜剧产业趋势」！"
+    - "我不会讲笑话，但我可以为您研究「娱乐产业发展分析」。要不要试试？"
+  common_sense:
+    - "这是个简单问题。不过我更擅长深度研究分析，要不要试试？"
+    - "我能回答这个，但我的强项是深度研究。请告诉我您想研究什么？"
+  capability_check:
+    - "我能生成深度研究报告、多源检索、行业分析。请告诉我您的研究主题！"
+    - "我擅长市场分析、行业趋势、学术调研。想探索什么主题？"
+  topic_switch:
+    - "好的，随时欢迎回来。想研究新主题时告诉我！"
+    - "没问题。需要时随时找我，我为您生成研究报告。"
+  evaluation:
+    - "谢谢您的反馈！我会继续努力。有研究需求随时找我。"
+    - "感谢评价！专注深度研究是我的强项。需要研究什么吗？"

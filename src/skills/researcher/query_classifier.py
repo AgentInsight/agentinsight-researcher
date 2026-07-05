@@ -531,6 +531,10 @@ class QueryIntentClassifier:
     _qdrant: QdrantManager
     _seed_lock: asyncio.Lock
     _seed_initialized: bool
+    # 种子数据存在性缓存 (None=未知, True=有数据, False=无数据)
+    # 避免每次 _semantic_match 都调用 embeddings (P1-04: embeddings 429 优化)
+    _seed_has_data: bool | None
+    _off_topic_seed_has_data: bool | None
 
     def __init__(
         self,
@@ -547,24 +551,29 @@ class QueryIntentClassifier:
         self._seed_initialized = False
         # P1-Future-07: 离题种子独立初始化状态 (与短查询种子分离, 互不阻断)
         self._off_topic_seed_initialized = False
+        # P1-04: 种子数据存在性缓存 (避免无数据时调用 embeddings)
+        self._seed_has_data = None
+        self._off_topic_seed_has_data = None
 
     @property
     def _short_query_namespace(self) -> str:
         """短查询种子模式的 Qdrant namespace.
 
-        AGENTS.md 第 7 章数据隔离: 按 agent_id 区分, 故 namespace = {agent_id}:short_query_patterns.
+        CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md: 拆分为 chat/data 两个 namespace 池.
+        短查询种子归入 chat namespace: {agent_id}-chat:short_query.
         种子模式为全局通用问候/告别等, 不含 user_id (非用户私有数据).
         """
-        return f"{self.settings.agent_name}:short_query_patterns"
+        return f"{self._qdrant.build_chat_namespace()}:short_query"
 
     @property
     def _off_topic_namespace(self) -> str:
         """离题/闲聊种子模式的 Qdrant namespace (P1-Future-07).
 
-        AGENTS.md 第 7 章数据隔离: 按 agent_id 区分, 故 namespace = {agent_id}:off_topic_patterns.
+        CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md: 拆分为 chat/data 两个 namespace 池.
+        离题种子归入 chat namespace: {agent_id}-chat:off_topic.
         种子模式为全局通用闲聊模式, 不含 user_id (非用户私有数据).
         """
-        return f"{self.settings.agent_name}:off_topic_patterns"
+        return f"{self._qdrant.build_chat_namespace()}:off_topic"
 
     def _rule_classify(self, query: str) -> _RuleResult | None:
         """第一层规则分类 (快速).
@@ -605,9 +614,12 @@ class QueryIntentClassifier:
         if len(q) >= 2 and _REPEAT_PATTERN_RE.match(q):
             return _RuleResult(QueryIntent.SHORT_QUERY, "repeated_pattern")
 
-        # 6. 纯字母/中文单单词且长度≤6 (如 "Hello"/"Hi"/"test"/"ok"/"你好")
+        # 6. 纯字母/中文单单词且长度≤query_classify_single_word_max_chars (如 "Hello"/"Hi"/"test"/"ok"/"你好")
         #    不含空格/数字/标点; 中文 2-6 字短词亦拦截 (避免 "你好" 落入语义层误判)
-        if len(q) <= 6 and _SINGLE_WORD_RE.match(q):
+        #    P2: 配置化 (原硬编码 6, 现 settings.query_classify_single_word_max_chars)
+        if len(q) <= self.settings.query_classify_single_word_max_chars and _SINGLE_WORD_RE.match(
+            q
+        ):
             return _RuleResult(QueryIntent.SHORT_QUERY, "single_word_short")
 
         # 7. 常见短语精确匹配 (大小写不敏感; 含 "你好"/"hello"/"test"/"谢谢" 等 30+ 高频短语)
@@ -701,6 +713,20 @@ class QueryIntentClassifier:
         """
         try:
             await self._ensure_seed_patterns()
+
+            # P1-04: 种子数据存在性检查 (避免无数据时调用 embeddings, 减少 429)
+            # 缓存结果, 避免每次都调用 Qdrant count
+            if self._seed_has_data is None:
+                self._seed_has_data = await self._qdrant.namespace_has_data(
+                    self._short_query_namespace
+                )
+                if not self._seed_has_data:
+                    logger.warning(
+                        "短查询种子 namespace 无数据, 语义层降级到 LLM 层 "
+                        "(避免无意义 embeddings 调用)"
+                    )
+            if not self._seed_has_data:
+                return False
 
             query_vector = await self._embeddings.embed_query(query)
             if not query_vector:
@@ -816,6 +842,20 @@ class QueryIntentClassifier:
         try:
             await self._ensure_off_topic_seed_patterns()
 
+            # P1-04: 种子数据存在性检查 (避免无数据时调用 embeddings, 减少 429)
+            # 缓存结果, 避免每次都调用 Qdrant count
+            if self._off_topic_seed_has_data is None:
+                self._off_topic_seed_has_data = await self._qdrant.namespace_has_data(
+                    self._off_topic_namespace
+                )
+                if not self._off_topic_seed_has_data:
+                    logger.warning(
+                        "离题种子 namespace 无数据, 离题语义层降级到 LLM 层 "
+                        "(避免无意义 embeddings 调用)"
+                    )
+            if not self._off_topic_seed_has_data:
+                return False
+
             query_vector = await self._embeddings.embed_query(query)
             if not query_vector:
                 logger.warning("Embedding 返回空向量, 离题语义层降级")
@@ -879,7 +919,7 @@ class QueryIntentClassifier:
 
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query[:1000]},
+            {"role": "user", "content": query[: self.settings.query_classify_llm_query_truncate]},
         ]
 
         try:
@@ -887,7 +927,7 @@ class QueryIntentClassifier:
                 messages,
                 tier=LLMTier.FAST,
                 temperature=0.0,
-                max_tokens=64,
+                max_tokens=self.settings.query_classify_llm_max_tokens,
                 step="query_intent_classify",
                 span_name="query-intent-classifier",
             )

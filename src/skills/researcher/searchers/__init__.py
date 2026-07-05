@@ -131,6 +131,12 @@ def get_searchers(
             searchers.append(BochaSearcher(settings))
         searchers.append(DuckDuckGoSearcher(settings))  # 兜底, 无需 Key
 
+        # P0 修复: CN 区域也启用已配置 Key 的国外引擎作为跨区域兜底
+        # 避免 Bocha 单点失败导致全空结果
+        if settings.tavily_api_key:
+            from src.skills.researcher.searchers.tavily import TavilySearcher
+            searchers.append(TavilySearcher(settings))
+
     if region in (SearchRegion.GLOBAL, SearchRegion.AUTO):
         # 国外搜索 (按 API Key 是否配置决定是否加入)
         from src.skills.researcher.searchers.arxiv import ArxivSearcher

@@ -91,7 +91,7 @@ class BochaSearcher(BaseSearcher):
                 )
                 return results
             except Exception as e:  # noqa: BLE001
-                logger.warning("博查搜索失败: %s", e)
+                logger.error("博查搜索失败 (query=%s): %s", query[:100], e, exc_info=True)
                 span.update(metadata={"tool_name": "bocha", "success": False, "error": str(e)})
                 return []
 

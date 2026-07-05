@@ -97,12 +97,100 @@ class QdrantManager:
             )
 
     def build_shared_namespace(self) -> str:
-        """共享知识库 namespace = agent_id."""
+        """共享知识库 namespace = agent_id (旧版兼容, 推荐用 build_data_shared_namespace).
+
+        AGENTS.md 第 7 章: 共享知识库 namespace = agent_id, 不含 user_id.
+        """
         return self.settings.agent_name
 
     def build_user_namespace(self, user_id: str) -> str:
-        """用户私有数据 namespace = {agent_id}:{user_id}."""
+        """用户私有数据 namespace = {agent_id}:{user_id} (旧版兼容, 推荐用 build_data_user_namespace).
+
+        AGENTS.md 第 7 章: 用户私有数据 namespace = {agent_id}:{user_id}, payload 含 user_id.
+        """
         return f"{self.settings.agent_name}:{user_id}"
+
+    # ========== 新版 namespace API (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN, 用户需求: 拆分 chat/data) ==========
+    # 两个 namespace 池:
+    # - agentinsight-researcher-chat: 闲聊/短查询种子搜索 (不含 user_id, 全局共享)
+    # - agentinsight-researcher-data: 用户私有数据搜索 (按 user_id 隔离)
+    def build_chat_namespace(self) -> str:
+        """闲聊/短查询搜索 namespace = {agent_id}-chat.
+
+        用户需求: 闲聊/短查询种子独立 namespace, 与用户私有数据隔离.
+        用于 QueryIntentClassifier 的 short_query_patterns + off_topic_patterns.
+        """
+        return f"{self.settings.agent_name}-chat"
+
+    def build_data_shared_namespace(self) -> str:
+        """共享研究数据 namespace = {agent_id}-data (新命名, 替代旧 build_shared_namespace).
+
+        AGENTS.md 第 7 章: 共享知识库, 所有用户共享, 不含 user_id.
+        """
+        return f"{self.settings.agent_name}-data"
+
+    def build_data_user_namespace(self, user_id: str) -> str:
+        """用户私有数据 namespace = {agent_id}-data:{user_id}.
+
+        AGENTS.md 第 7 章: 用户私有数据按 user_id 隔离, payload 含 user_id.
+        """
+        return f"{self.settings.agent_name}-data:{user_id}"
+
+    async def count_points_in_namespace(self, namespace: str) -> int:
+        """统计指定 namespace 下的点数.
+
+        AGENTS.md 第 7 章: 按 payload namespace 字段过滤统计.
+        用于"私有数据搜索前先判断有没有数据"的需求.
+
+        Args:
+            namespace: 要统计的 namespace 名称
+
+        Returns:
+            该 namespace 下的点数; 集合不存在或异常返回 0
+        """
+        from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+        count_filter = Filter(
+            must=[
+                FieldCondition(key="namespace", match=MatchValue(value=namespace)),
+            ],
+        )
+        try:
+            result = await self._client.count(
+                collection_name=self.settings.qdrant_collection,
+                count_filter=count_filter,
+                exact=True,
+            )
+            return int(result.count)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Qdrant count namespace=%s 失败: %s", namespace, e)
+            return 0
+
+    async def namespace_has_data(self, namespace: str) -> bool:
+        """判断指定 namespace 是否有数据 (count > 0).
+
+        用户需求: "私有数据搜索的时候先判断有没有私有数据,
+        先判断有没有对应命名空间, 再看命名空间里面有没有数据".
+        """
+        count = await self.count_points_in_namespace(namespace)
+        return count > 0
+
+    async def has_user_private_data(self, user_id: str) -> bool:
+        """判断用户是否有私有数据 (先检查 namespace 有数据).
+
+        用户需求: 私有数据搜索前先判断有没有数据, 有的话才搜索.
+        走新命名空间 {agent_id}-data:{user_id}.
+
+        Args:
+            user_id: 用户 ID
+
+        Returns:
+            True 表示该用户在 data namespace 下有私有数据
+        """
+        if not user_id:
+            return False
+        namespace = self.build_data_user_namespace(user_id)
+        return await self.namespace_has_data(namespace)
 
     async def upsert_points(
         self,

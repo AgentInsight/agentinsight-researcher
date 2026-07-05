@@ -237,7 +237,12 @@ async def scrape_with_fallback(
     降级链: BS → Playwright → 失败.
     PDF/Arxiv 不降级 (专用抓取器).
     user_agent 参数预留 (session 已含 UA, 由调用方在构建 session 时注入).
+    方案 E: scraper_mode=lightweight 时跳过 Playwright 降级.
     """
+    # 读取配置
+    settings = get_settings()
+    scraper_mode = settings.scraper_mode
+
     url_lower = url.lower()
 
     # PDF / Arxiv 不降级 (专用抓取器)
@@ -251,6 +256,12 @@ async def scrape_with_fallback(
 
         return await _safe_scrape(ArxivScraper(url, session))
 
+    # 方案 E: playwright 模式直接走 Playwright (调试用)
+    if scraper_mode == "playwright":
+        from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
+
+        return await _safe_scrape(PlaywrightScraper(url, session))
+
     # 第一级: BeautifulSoup
     from src.skills.researcher.scrapers.beautiful_soup_scraper import BeautifulSoupScraper
 
@@ -262,7 +273,11 @@ async def scrape_with_fallback(
     if not enable_fallback:
         return bs_result
 
-    # 第二级: Playwright 降级
+    # 方案 E: lightweight 模式跳过 Playwright 降级 (适合离线最小化部署)
+    if scraper_mode == "lightweight":
+        return bs_result
+
+    # 第二级: Playwright 降级 (auto 模式)
     logger.info("BS 抓取内容过短(%d), 降级 Playwright: %s", len(content), url)
     try:
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
