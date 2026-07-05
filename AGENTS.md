@@ -76,6 +76,7 @@ src/
 - `graph/` 是首选编排入口；`agents/` 复用图，不推荐自建编排循环。
 - `tools/`、`rag/`、`llm/`、`memory/` 不推荐互相 import，共享逻辑下沉到 `common/`。
 - 依赖单向向内：`common/` 不应依赖 `agents/` 或业务模块。
+- **临时文件管理（核心约定，优先选择）**：所有临时文件（含临时测试文件/脚本/代码/日志/验证产物等）应放入 `temp/` 目录，不推荐在项目根目录或 `tests/` 正式分层下放置临时文件；`temp/` 目录已加入 `.gitignore` 不入仓。正式测试用例应放在 `tests/` 对应分层（`unit/`/`functional/`/`api/`/`regression/`/`e2e/`），手动调试脚本放在 `tests/manual/`。
 - 配置应经 `config/` + 环境变量，业务代码不应硬编码 URL/密钥（硬编码密钥属第 11 章硬约束）。
 - 子智能体代码应按名称隔离在 `agents/<agent_name>/`、`config/<agent_name>/`、`skills/<agent_name>/` 下，不推荐跨子智能体直接引用；共享能力下沉到 `common/` 或 `skills/` 顶层。
 - 新增顶层目录建议经架构师评审。
@@ -140,7 +141,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 **启动时数据初始化（核心约定，优先选择）**：
 - Agent 容器启动时（`server.py` lifespan）应执行 PostgreSQL 业务表初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
-  - **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）。不推荐在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
+  - **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）；触发器/函数使用 `CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`（PostgreSQL 14+,项目要求 ≥17 满足）保证幂等。不推荐在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
 - 行业适配采用 GPTR 风格 4 层机制（见第 5 章），不再 bootstrap GICS 行业知识库。
 
 ## 7. 数据隔离与检索核心规则
@@ -151,6 +152,11 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - Agent 注册时应声明 `agent_name`，由配置注入，不推荐运行时硬编码。
 
 **PostgreSQL 约定**：单一数据库 `agents`（供多 Agent 共享）。LangGraph Checkpointer 表由官方管理（`thread_id` 已含会话隔离）。业务表应含 `agent_id` + `user_id` 双列（VARCHAR，建复合索引）区分各 Agent 各用户数据；查询应显式 `WHERE agent_id = ... AND user_id = ...`，不推荐无过滤的全表扫描。表名复数 snake_case（如 `sessions`、`messages`），不推荐按 Agent 或用户拆表。
+
+**业务表时间戳字段约定（核心约定，优先选择）**：
+- 所有业务表应含 `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`；状态会变更的表（如 `research_sessions`/`research_reports`/`uploaded_files`/`mcp_configs`）还应含 `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`，并通过 `BEFORE UPDATE` 触发器（`CREATE OR REPLACE FUNCTION update_updated_at_column()` + `CREATE OR REPLACE TRIGGER`）自动维护，不推荐业务代码手动赋值。
+- 纯日志表（如 `research_search_logs`/`token_usage_logs`）只需 `created_at`，不需要 `updated_at`（INSERT-only 设计）。
+- `agent_id`/`user_id`/`session_id` 三列在所有业务表中应保持相同长度（推荐统一 VARCHAR(64)），避免跨表 JOIN 时类型/长度不一致引发隐式转换。
 
 **Qdrant 集合约定**：单一集合 `agents`，`distance=Cosine`，`vector_size=1024`（bge-large-zh-v1.5 固定维度）。按 payload `namespace` 字段隔离数据，分两类：
 - **共享知识库**（非用户导入数据）：`namespace = agent_id`（即 `agent_name`），payload 不含 `user_id`，所有用户共享，检索时默认召回。
@@ -233,7 +239,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - **密钥**：仅环境变量注入，禁止入仓/硬编码/日志；API Key SHA256+BCrypt 双哈希，仅创建时返回一次；密码 BCrypt(cost=12)；发现硬编码密钥即 P0 暂停并人工介入
 - **PII**：用户会话内容加密存储+日志脱敏；API 响应禁止返回密码/密钥原文；最小化收集，按用途设保留期
 - **Prompt Injection**：所有外部输入经 Pydantic 校验；工具调用权限隔离（`read`/`write`/`execute`/`network` 显式授权）；禁止 `eval`/`exec` 求值用户输入；LLM 输出经结构化校验后再入工具
-- **传输与边界**：生产强制 HTTPS；CORS 禁 `*`；安全响应头中间件（nosniff/DENY/HSTS）不可绕过；生产关闭 Debug
+- **传输与边界**：生产强制 HTTPS；安全响应头中间件（nosniff/DENY/HSTS）不可绕过；生产关闭 Debug
 
 ## 12. 部署规则
 
@@ -304,6 +310,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 **容器命名约定（核心约定，优先选择）**：
 - 容器编排应使用 `-p agentinsight` 项目名（即 `docker compose -p agentinsight -f <compose-file> --env-file <env-file> up -d`），不推荐使用默认项目名 `agentinsight-researcher`（即直接 `docker compose up -d`）。
 - 三套构建脚本（`docker-build.qa.bat` / `docker-build.sh` / `docker-build.offline.sh`）均已内置 `-p agentinsight`，应优先使用脚本而非裸 `docker compose up -d`。
+- **部署务必使用脚本而非裸 `docker compose` 命令（核心约定，优先选择）**：QA 环境必须使用 `docker-build.qa.bat` 构建/更新容器，不推荐新建其他构建脚本；生产联网模式用 `docker-build.sh`；生产离线模式用 `docker-build.offline.sh`。如需调整构建参数，应修改现有脚本而非新建。
 - 理由：与 AgentInsightService 项目共享 `agentinsight` 命名空间，容器名统一为 `agentinsight-<service>-1`（如 `agentinsight-agent-1`），不携带 `-researcher` 后缀；两个项目不并行运行，通过停止一方容器释放端口后再启动另一方。
 - 端口冲突处理：AgentInsightService 与本项目共享 8066 端口，切换项目时应先 `docker compose -p agentinsight down` 停止一方，再启动另一方，不推荐同时运行。
 

@@ -115,9 +115,10 @@ def test_insert_image_after_h1_with_url() -> None:
     report = "# 标题\n\n正文"
     result = ReportGenerator._insert_image_into_report(report, "https://x.com/y.png", None)
     lines = result.split("\n")
-    # 第一行是 H1, 第二行应该是图片
+    # 第一行是 H1, image_md 以 \n\n 开头, 所以图片在第三行 (index 2)
     assert lines[0] == "# 标题"
-    assert "![报告配图](https://x.com/y.png)" in lines[1]
+    assert lines[1] == ""  # image_md 前缀 \n 产生的空行
+    assert "![报告配图](https://x.com/y.png)" in lines[2]
 
 
 def test_insert_image_after_h1_with_b64() -> None:

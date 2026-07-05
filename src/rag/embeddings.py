@@ -13,8 +13,12 @@ AGENTS.md 第 7 章硬约束:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import time
 import uuid
+from collections import OrderedDict
 from typing import Any, cast
 
 import httpx
@@ -26,6 +30,36 @@ logger = logging.getLogger(__name__)
 
 # uuid5 命名空间 (AGENTS.md 第 7 章: 点 id 用 uuid5(NAMESPACE_DNS, ...))
 NAMESPACE_DNS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+# ========== 进程内 Embedding 缓存 (P1-3, LRU + TTL) ==========
+_EMBED_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_EMBED_CACHE_MAX_SIZE: int = 1000  # 最大缓存条目
+_EMBED_CACHE_TTL: int = 3600  # 1 小时 TTL (秒)
+
+
+def _cache_key(texts: list[str]) -> str:
+    """生成缓存键 (基于所有文本的 sha256)."""
+    combined = "\n".join(texts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str) -> list[list[float]] | None:
+    """从缓存获取 (带 TTL 检查)."""
+    if key in _EMBED_CACHE:
+        entry = _EMBED_CACHE[key]
+        if time.time() - entry["ts"] < _EMBED_CACHE_TTL:
+            _EMBED_CACHE.move_to_end(key)
+            return cast(list[list[float]], entry["vectors"])
+        del _EMBED_CACHE[key]
+    return None
+
+
+def _cache_set(key: str, vectors: list[list[float]]) -> None:
+    """写入缓存 (LRU 淘汰)."""
+    _EMBED_CACHE[key] = {"vectors": vectors, "ts": time.time()}
+    _EMBED_CACHE.move_to_end(key)
+    while len(_EMBED_CACHE) > _EMBED_CACHE_MAX_SIZE:
+        _EMBED_CACHE.popitem(last=False)
 
 
 class EmbeddingsClient:
@@ -49,8 +83,18 @@ class EmbeddingsClient:
             headers["Authorization"] = f"Bearer {self.settings.embeddings_api_key}"
         self._client = httpx.AsyncClient(
             base_url=self.settings.embeddings_base_url,
-            timeout=30.0,
+            timeout=httpx.Timeout(
+                connect=5.0,
+                read=60.0,  # 读超时加大, 适应大 batch
+                write=10.0,
+                pool=5.0,
+            ),
             headers=headers,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=30.0,
+            ),
         )
 
     async def embed_texts(
@@ -64,6 +108,52 @@ class EmbeddingsClient:
 
         返回与 texts 等长的向量列表, 每条 1024 维.
         高频调用, head-based 采样降存储压力.
+
+        P1-1: 客户端按 embeddings_max_client_batch_size 分批, asyncio.gather 并发.
+        P1-3: 进程内 LRU+TTL 缓存, 命中直接返回.
+        """
+        if not texts:
+            return []
+
+        # P1-3: 缓存命中检查 (分批之前, 整批命中直接返回)
+        key = _cache_key(texts)
+        cached = _cache_get(key)
+        if cached is not None:
+            logger.debug("Embedding 缓存命中: text_count=%d", len(texts))
+            return cached
+
+        # P1-1: 客户端分批 (避免单次请求超过 TEI 上限)
+        batch_size = getattr(self.settings, "embeddings_max_client_batch_size", 32) or 32
+        vectors: list[list[float]]
+        if len(texts) <= batch_size:
+            vectors = await self._embed_texts_single(texts, user_id=user_id, session_id=session_id)
+        else:
+            # 分批并发
+            batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+            tasks = [
+                self._embed_texts_single(batch, user_id=user_id, session_id=session_id)
+                for batch in batches
+            ]
+            results = await asyncio.gather(*tasks)
+            # 拍平结果
+            vectors = []
+            for batch_vectors in results:
+                vectors.extend(batch_vectors)
+
+        # P1-3: 写入缓存
+        _cache_set(key, vectors)
+        return vectors
+
+    async def _embed_texts_single(
+        self,
+        texts: list[str],
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[list[float]]:
+        """单次 TEI 调用 (原 embed_texts 逻辑, 不分批).
+
+        供 embed_texts 内部分批并发调用, 每批一次 TEI /embed 请求.
         """
         if not texts:
             return []
@@ -90,7 +180,7 @@ class EmbeddingsClient:
 
                 span.update(
                     output={"vector_count": len(vectors)},
-                    usage_details={"token_count": token_count},
+                    usage_details={"total_tokens": token_count},
                 )
                 return cast(list[list[float]], vectors)
             except Exception as e:  # noqa: BLE001

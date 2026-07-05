@@ -151,7 +151,7 @@
     .msg.user .avatar { background: #5436da; }
     .msg.assistant .avatar { background: var(--primary); }
     .bubble {
-      max-width: 78%; padding: 12px 14px; border-radius: var(--radius); box-shadow: var(--shadow-bubble);
+      max-width: 78%; padding: 16px 18px; border-radius: var(--radius); box-shadow: var(--shadow-bubble);
       word-break: break-word; position: relative;
     }
     .msg.user .bubble { background: var(--user-bubble); border-top-right-radius: 4px; }
@@ -160,21 +160,23 @@
     /* Markdown 渲染样式 */
     .bubble .content > *:first-child { margin-top: 0; }
     .bubble .content > *:last-child { margin-bottom: 0; }
-    .bubble .content p { margin: 8px 0; }
-    .bubble .content h1, .bubble .content h2, .bubble .content h3, .bubble .content h4 { margin: 14px 0 8px; font-weight: 600; line-height: 1.3; }
-    .bubble .content h1 { font-size: 1.4em; }
-    .bubble .content h2 { font-size: 1.25em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
-    .bubble .content h3 { font-size: 1.1em; }
-    .bubble .content ul, .bubble .content ol { margin: 8px 0; padding-left: 22px; }
-    .bubble .content li { margin: 4px 0; }
+    .bubble .content p { margin: 14px 0; }
+    .bubble .content h1, .bubble .content h2, .bubble .content h3, .bubble .content h4 { margin: 20px 0 12px; font-weight: 600; line-height: 1.35; }
+    .bubble .content h1 { font-size: 1.5em; }
+    .bubble .content h2 { font-size: 1.3em; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 24px; }
+    .bubble .content h3 { font-size: 1.15em; }
+    .bubble .content ul, .bubble .content ol { margin: 12px 0; padding-left: 24px; }
+    .bubble .content li { margin: 6px 0; }
     .bubble .content code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 2px 5px; border-radius: 4px; }
-    .bubble .content pre { background: var(--code-bg); padding: 12px; border-radius: var(--radius-sm); overflow-x: auto; margin: 10px 0; border: 1px solid var(--border); }
+    .bubble .content pre { background: var(--code-bg); padding: 14px; border-radius: var(--radius-sm); overflow-x: auto; margin: 14px 0; border: 1px solid var(--border); }
     .bubble .content pre code { background: none; padding: 0; }
-    .bubble .content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--text-muted); margin: 10px 0; }
-    .bubble .content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
-    .bubble .content th, .bubble .content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    .bubble .content blockquote { border-left: 3px solid var(--primary); padding: 4px 14px; color: var(--text-muted); margin: 14px 0; background: var(--surface-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .bubble .content table { border-collapse: collapse; margin: 14px 0; width: 100%; }
+    .bubble .content th, .bubble .content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+    .bubble .content th { background: var(--surface-2); font-weight: 600; }
     .bubble .content a { color: var(--primary); text-decoration: underline; }
-    .bubble .content hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    .bubble .content hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+    .bubble .content img { max-width: 100%; border-radius: var(--radius-sm); margin: 12px 0; }
 
     /* 折叠面板 (进度 / 来源) */
     .panel {
@@ -338,6 +340,185 @@
     .review-btn.primary:hover { background: var(--primary-hover); }
     .review-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; flex-basis: 100%; text-align: left; }
 
+    /* ===== 下载链接面板 (任务7) ===== */
+    .download-links {
+      position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 10px 16px; box-shadow: var(--shadow-md); z-index: 50;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      max-width: 92%; animation: rvFadeIn .2s ease;
+    }
+    .download-links .dl-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .download-links a {
+      font-size: 12.5px; padding: 4px 10px; background: var(--primary-soft); color: var(--primary);
+      border-radius: 6px; text-decoration: none; transition: background .15s, color .15s;
+    }
+    .download-links a:hover { background: var(--primary); color: #fff; }
+    .download-links .dl-close { font-size: 14px; color: var(--text-muted); padding: 2px 6px; margin-left: 4px; }
+    .download-links .dl-close:hover { color: var(--text); }
+
+    /* ===== MCP 配置管理面板 (任务7) ===== */
+    #mcp-panel {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 9998; animation: rvFadeIn .15s ease;
+    }
+    #mcp-panel.open { display: flex; }
+    .mcp-modal {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow-md); width: 92%; max-width: 680px; max-height: 86vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      animation: rvScaleIn .15s ease;
+    }
+    .mcp-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .mcp-title { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .mcp-close {
+      width: 28px; height: 28px; border-radius: 6px; font-size: 14px;
+      color: var(--text-muted); transition: background .15s, color .15s;
+    }
+    .mcp-close:hover { background: var(--surface-2); color: var(--text); }
+    .mcp-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+    .mcp-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-bottom: 16px; }
+    .mcp-form .field-full { grid-column: 1 / -1; }
+    .mcp-form label { font-size: 11px; color: var(--text-muted); font-weight: 500; display: block; margin-bottom: 3px; }
+    .mcp-form input, .mcp-form select, .mcp-form textarea {
+      width: 100%; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface); font-size: 13px; transition: border-color .15s, box-shadow .15s;
+    }
+    .mcp-form input:focus, .mcp-form select:focus, .mcp-form textarea:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft);
+    }
+    .mcp-form textarea {
+      resize: vertical; font-family: var(--font-mono); font-size: 12.5px; min-height: 60px; line-height: 1.5;
+    }
+    .mcp-form .checkbox-field { display: flex; align-items: center; gap: 6px; }
+    .mcp-form .checkbox-field input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--primary); }
+    .mcp-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+    .mcp-list { border-top: 1px solid var(--border); padding-top: 12px; }
+    .mcp-list-title { font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 8px; }
+    .mcp-add-row { margin-bottom: 12px; }
+    .mcp-item {
+      display: flex; align-items: flex-start; gap: 12px; padding: 12px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      margin-bottom: 8px; font-size: 13px;
+    }
+    .mcp-item .mcp-info { flex: 1; min-width: 0; }
+    .mcp-item .mcp-name { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+    .mcp-item .mcp-meta-line {
+      font-size: 11.5px; color: var(--text-muted); font-family: var(--font-mono);
+      word-break: break-all;
+    }
+    .mcp-item .mcp-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; word-break: break-all; }
+    .mcp-item .mcp-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+    .mcp-item .mcp-edit, .mcp-item .mcp-del {
+      padding: 4px 10px; font-size: 12px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--surface);
+      transition: background .15s, border-color .15s;
+    }
+    .mcp-item .mcp-edit:hover { background: var(--surface-2); border-color: var(--border-strong); }
+    .mcp-item .mcp-del { color: var(--error); }
+    .mcp-item .mcp-del:hover { background: var(--error-bg); border-color: var(--error); }
+    .mcp-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 16px; }
+    /* MCP enabled toggle switch (green=on, gray=off) */
+    .mcp-toggle {
+      position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; margin-top: 2px;
+    }
+    .mcp-toggle input { opacity: 0; width: 0; height: 0; }
+    .mcp-toggle .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--border-strong); border-radius: 20px; transition: background .2s;
+    }
+    .mcp-toggle .slider::before {
+      position: absolute; content: ""; height: 14px; width: 14px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: transform .2s;
+    }
+    .mcp-toggle input:checked + .slider { background: var(--primary); }
+    .mcp-toggle input:checked + .slider::before { transform: translateX(16px); }
+    /* MCP 表单模态框 (复用 mcp-modal 样式, 层级高于 mcp-panel) */
+    #mcp-form-panel {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 10000; animation: rvFadeIn .15s ease;
+    }
+    #mcp-form-panel.open { display: flex; }
+    .mcp-form-footer {
+      display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+      padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2);
+    }
+
+    /* ===== 历史报告面板 (任务8) ===== */
+    #reports-panel {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 9997; animation: rvFadeIn .15s ease;
+    }
+    #reports-panel.open { display: flex; }
+    .reports-modal {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow-md); width: 92%; max-width: 720px; max-height: 86vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      animation: rvScaleIn .15s ease;
+    }
+    .reports-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .reports-title { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .reports-close {
+      width: 28px; height: 28px; border-radius: 6px; font-size: 14px;
+      color: var(--text-muted); transition: background .15s, color .15s;
+    }
+    .reports-close:hover { background: var(--surface-2); color: var(--text); }
+    .reports-toolbar {
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+      flex-wrap: wrap;
+    }
+    .reports-hint { font-size: 12px; color: var(--text-muted); }
+    .reports-body { padding: 12px 18px; overflow-y: auto; flex: 1; }
+    .report-item {
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 12px; margin-bottom: 10px; background: var(--surface-2);
+    }
+    .report-item:last-child { margin-bottom: 0; }
+    .report-item-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 10px; margin-bottom: 6px;
+    }
+    .report-query {
+      font-size: 13px; font-weight: 500; flex: 1; word-break: break-word;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .report-time {
+      font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .report-item-meta { margin-bottom: 8px; }
+    .report-role {
+      font-size: 11px; color: var(--primary); background: var(--primary-soft);
+      padding: 2px 8px; border-radius: 10px; display: inline-block;
+    }
+    .report-downloads { display: flex; gap: 6px; flex-wrap: wrap; }
+    .dl-btn {
+      font-size: 11.5px; padding: 3px 10px; border-radius: 12px;
+      text-decoration: none; color: #fff; font-weight: 500;
+      transition: opacity .15s, transform .15s; border: 1px solid transparent;
+      line-height: 1.5;
+    }
+    .dl-btn:hover { opacity: .85; transform: translateY(-1px); }
+    .dl-md { background: #3b82f6; }   /* Markdown - 蓝色 */
+    .dl-html { background: #f97316; } /* HTML - 橙色 */
+    .dl-pdf { background: #ef4444; }  /* PDF - 红色 */
+    .dl-docx { background: #22c55e; } /* DOCX - 绿色 */
+    .dl-json { background: #a855f7; } /* JSON - 紫色 */
+    .reports-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 32px 16px; }
+
     /* ===== 响应式 ===== */
     @media (max-width: 640px) {
       .config-grid { grid-template-columns: 1fr; }
@@ -362,6 +543,8 @@
       </div>
       <div class="config-actions">
         <button class="ghost-btn" id="toggleConfig" title="折叠/展开配置">⚙ 配置</button>
+        <button class="ghost-btn" id="mcpToggle" title="MCP 配置管理">🔌 MCP 配置</button>
+        <button class="ghost-btn" id="reportsToggle" title="查看当前会话的历史报告">📋 历史报告</button>
         <button class="icon-btn" id="toggleTheme" title="切换主题">🌙</button>
       </div>
     </div>
@@ -398,6 +581,8 @@
             <option value="markdown">markdown</option>
             <option value="html">html</option>
             <option value="pdf">pdf</option>
+            <option value="docx">docx</option>
+            <option value="json">json</option>
           </select>
         </div>
         <div class="field">
@@ -466,6 +651,109 @@
         <span class="review-hint">提交后 Agent 将基于反馈继续研究; 关闭仅隐藏面板, 不通知后端</span>
         <button class="review-btn primary" id="reviewApproveBtn" title="批准研究计划">✓ 通过</button>
         <button class="review-btn" id="reviewSubmitBtn" title="提交修订意见">提交修订</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 下载链接面板 (任务7) ========== -->
+  <div id="download_links" class="download-links" style="display:none;">
+    <span class="dl-label">📥 下载报告</span>
+    <a id="dl_markdown" href="#" target="_blank">Markdown</a>
+    <a id="dl_html" href="#" target="_blank">HTML</a>
+    <a id="dl_pdf" href="#" target="_blank">PDF</a>
+    <a id="dl_docx" href="#" target="_blank">DOCX</a>
+    <a id="dl_json" href="#" target="_blank">JSON</a>
+    <button class="dl-close" id="dlClose" title="关闭">✕</button>
+  </div>
+
+  <!-- ========== MCP 配置管理面板 (任务7) ========== -->
+  <div id="mcp-panel">
+    <div class="mcp-modal" role="dialog" aria-modal="true" aria-labelledby="mcpTitleText">
+      <div class="mcp-header">
+        <span class="mcp-title"><span id="mcpTitleText">🔌 MCP 配置管理</span></span>
+        <button class="mcp-close" id="mcpCloseBtn" title="关闭">✕</button>
+      </div>
+      <div class="mcp-body">
+        <div class="mcp-add-row">
+          <button class="review-btn primary" id="mcp_add" title="新增 MCP 配置">+ 新增 MCP 配置</button>
+        </div>
+        <div class="mcp-list">
+          <div class="mcp-list-title">已保存配置</div>
+          <div id="mcp_list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== MCP 配置表单模态框 (新增/编辑共用) ========== -->
+  <div id="mcp-form-panel">
+    <div class="mcp-modal" role="dialog" aria-modal="true" aria-labelledby="mcpFormTitleText">
+      <div class="mcp-header">
+        <span class="mcp-title"><span id="mcpFormTitleText">新增 MCP 配置</span></span>
+        <button class="mcp-close" id="mcpFormCloseBtn" title="关闭">✕</button>
+      </div>
+      <div class="mcp-body">
+        <div class="mcp-form">
+          <div>
+            <label for="mcp_name">配置名称 *</label>
+            <input type="text" id="mcp_name" placeholder="如: weather-server" />
+          </div>
+          <div>
+            <label for="mcp_url">Server URL *</label>
+            <input type="text" id="mcp_url" placeholder="如: http://localhost:8080/mcp" />
+          </div>
+          <div>
+            <label for="mcp_transport">传输类型</label>
+            <select id="mcp_transport">
+              <option value="stdio">stdio</option>
+              <option value="sse">sse</option>
+              <option value="streamable_http">streamable_http</option>
+            </select>
+          </div>
+          <div>
+            <label for="mcp_command">命令 (stdio 类型)</label>
+            <input type="text" id="mcp_command" placeholder="如: python /path/to/server.py" />
+          </div>
+          <div class="field-full">
+            <label for="mcp_args">参数 (每行一个参数)</label>
+            <textarea id="mcp_args" rows="3" placeholder="--port&#10;8080"></textarea>
+          </div>
+          <div class="field-full">
+            <label for="mcp_env">环境变量 (每行 KEY=VALUE)</label>
+            <textarea id="mcp_env" rows="3" placeholder="API_KEY=xxx&#10;DEBUG=true"></textarea>
+          </div>
+          <div class="field-full">
+            <label for="mcp_desc">描述</label>
+            <input type="text" id="mcp_desc" placeholder="可选描述" />
+          </div>
+          <div class="field-full">
+            <label class="checkbox-field">
+              <input type="checkbox" id="mcp_enabled" checked />
+              <span>启用此配置</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="mcp-form-footer">
+        <button class="review-btn" id="mcp_cancel">取消</button>
+        <button class="review-btn primary" id="mcp_save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 历史报告面板 (任务8) ========== -->
+  <div id="reports-panel">
+    <div class="reports-modal" role="dialog" aria-modal="true" aria-labelledby="reportsTitleText">
+      <div class="reports-header">
+        <span class="reports-title"><span id="reportsTitleText">📋 历史报告</span></span>
+        <button class="reports-close" id="reportsCloseBtn" title="关闭">✕</button>
+      </div>
+      <div class="reports-toolbar">
+        <span class="reports-hint">显示当前会话的所有报告</span>
+        <button class="small-btn primary" id="refresh-reports-btn" title="重新拉取报告列表">刷新报告列表</button>
+      </div>
+      <div class="reports-body">
+        <div id="report-list"></div>
       </div>
     </div>
   </div>
@@ -578,6 +866,8 @@
       state.sessionId = uuidv4();
       refreshSessionDisplay();
       connectWS(); // P2-03: 切换会话后重连 WebSocket
+      // 任务8: 新会话无报告, 清空列表 (下次完成研究后由 SSE report_id 帧自动刷新)
+      $('report-list').innerHTML = '<div class="reports-empty">暂无报告,完成一次研究后自动刷新</div>';
       toast('已新建会话: ' + state.sessionId);
     });
 
@@ -607,6 +897,7 @@
         state.sessionId = v;
         refreshSessionDisplay();
         connectWS(); // P2-03: 切换会话后重连 WebSocket
+        loadReportList(); // 任务8: 切换会话后加载该会话的报告列表
         toast('已切换到会话: ' + v);
       }
     });
@@ -795,8 +1086,17 @@
     function parseAccumulated(raw) {
       let main = raw;
       let sources = [];
-      // 拆出 "## 参考来源" 章节
-      const srcIdx = raw.indexOf('## 参考来源');
+      // 拆出 "## 参考来源" 或 "## References" 章节
+      const srcZhIdx = raw.indexOf('## 参考来源');
+      const srcEnIdx = raw.indexOf('## References');
+      let srcIdx = -1;
+      if (srcZhIdx !== -1 && srcEnIdx !== -1) {
+        srcIdx = Math.min(srcZhIdx, srcEnIdx);
+      } else if (srcZhIdx !== -1) {
+        srcIdx = srcZhIdx;
+      } else if (srcEnIdx !== -1) {
+        srcIdx = srcEnIdx;
+      }
       if (srcIdx !== -1) {
         main = raw.slice(0, srcIdx).replace(/\n+$/, '');
         const srcBlock = raw.slice(srcIdx);
@@ -824,7 +1124,10 @@
           mainLines.push(line);
         }
       });
-      return { main: mainLines.join('\n').trim(), progress, sources };
+      // 归一化:连续 3+ 换行折叠为 2 个,避免 LLM 输出多余空行导致密集
+      let joined = mainLines.join('\n').trim();
+      joined = joined.replace(/\n{3,}/g, '\n\n');
+      return { main: joined, progress, sources };
     }
 
     /** 渲染 assistant 气泡 (增量重渲染) */
@@ -1047,6 +1350,11 @@
                 currentEvent = null;
                 continue;
               }
+              // 任务8: publisher 节点推送的 report_id 帧 (触发历史报告列表刷新)
+              // 该帧通常为 {"report_id": "..."}, 无 choices 字段, 由下方 !choice 兜底跳过
+              if (chunk.report_id) {
+                handleReportId(chunk.report_id);
+              }
               // 默认: OpenAI chat completion chunk
               const choice = chunk.choices && chunk.choices[0];
               if (!choice) continue;
@@ -1079,6 +1387,8 @@
         }
         // 隐藏"生成中"状态
         bubble.statusEl.style.display = 'none';
+        // 任务7: 响应完成后显示下载链接 (基于 session_id 生成多格式下载 URL)
+        updateDownloadLinks(state.sessionId);
       } catch (err) {
         if (err.name === 'AbortError') {
           bubble.statusEl.innerHTML = '<span style="color:var(--text-muted)">已停止</span>';
@@ -1270,6 +1580,392 @@
 
     // 页面加载后连接 WebSocket
     connectWS();
+    // 任务8: 页面初始化时加载当前会话的报告列表
+    loadReportList();
+
+    // ========== 下载链接 (任务7) ==========
+    /** 响应完成后, 基于 session_id 生成多格式下载链接并显示 */
+    function updateDownloadLinks(sessionId) {
+      if (!sessionId) return;
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const links = $('download_links');
+      links.style.display = 'flex';
+      $('dl_markdown').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=markdown';
+      $('dl_html').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=html';
+      $('dl_pdf').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=pdf';
+      $('dl_docx').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=docx';
+      $('dl_json').href = base + '/v1/reports/' + encodeURIComponent(sessionId) + '/download?format=json';
+    }
+
+    // 关闭下载链接面板
+    $('dlClose').addEventListener('click', () => {
+      $('download_links').style.display = 'none';
+    });
+
+    // ========== MCP 配置管理 (任务7, 含编辑/启用禁用) ==========
+    // MCP 配置缓存 (供编辑/切换启用状态时读取完整字段)
+    let mcpConfigsCache = [];
+    // 当前编辑的配置 ID (null = 新增模式, 非 null = 编辑模式)
+    let mcpEditingId = null;
+
+    /** 加载当前用户的 MCP 配置列表 */
+    async function loadMcpConfigs() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      try {
+        const resp = await fetch(base + '/v1/mcp/configs', { headers });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const configs = await resp.json();
+        mcpConfigsCache = Array.isArray(configs) ? configs : [];
+        const list = $('mcp_list');
+        if (mcpConfigsCache.length === 0) {
+          list.innerHTML = '<div class="mcp-empty">暂无配置, 点击「新增 MCP 配置」添加</div>';
+          return;
+        }
+        list.innerHTML = mcpConfigsCache.map((c) => {
+          const enabled = c.enabled !== false;
+          const url = c.server_url || '';
+          const transport = c.transport_type || 'stdio';
+          const desc = c.description || '';
+          return '<div class="mcp-item">' +
+            '<label class="mcp-toggle" title="' + (enabled ? '点击禁用' : '点击启用') + '">' +
+              '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-id="' + escapeHtml(c.id) + '" />' +
+              '<span class="slider"></span>' +
+            '</label>' +
+            '<div class="mcp-info">' +
+              '<div class="mcp-name">' + escapeHtml(c.name || '(未命名)') + '</div>' +
+              '<div class="mcp-meta-line">' + escapeHtml(url) + (url ? ' · ' : '') + escapeHtml(transport) + '</div>' +
+              (desc ? '<div class="mcp-desc">' + escapeHtml(desc) + '</div>' : '') +
+            '</div>' +
+            '<div class="mcp-actions">' +
+              '<button class="mcp-edit" data-id="' + escapeHtml(c.id) + '" title="编辑">编辑</button>' +
+              '<button class="mcp-del" data-id="' + escapeHtml(c.id) + '" title="删除">删除</button>' +
+            '</div>' +
+            '</div>';
+        }).join('');
+        // 绑定 toggle 开关
+        list.querySelectorAll('.mcp-toggle input').forEach((cb) => {
+          cb.addEventListener('change', (e) => {
+            toggleMcpEnabled(e.target.dataset.id, e.target.checked);
+          });
+        });
+        // 绑定编辑按钮
+        list.querySelectorAll('.mcp-edit').forEach((btn) => {
+          btn.addEventListener('click', () => editMcpConfig(btn.dataset.id));
+        });
+        // 绑定删除按钮 (带确认)
+        list.querySelectorAll('.mcp-del').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            if (confirm('确定删除此 MCP 配置?此操作不可撤销。')) {
+              deleteMcpConfig(btn.dataset.id);
+            }
+          });
+        });
+      } catch (e) {
+        $('mcp_list').innerHTML = '<div class="mcp-empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    /** 打开 MCP 表单模态框 (config=null 为新增, config=对象 为编辑) */
+    function openMcpForm(config) {
+      if (config) {
+        mcpEditingId = config.id;
+        $('mcpFormTitleText').textContent = '编辑 MCP 配置';
+        $('mcp_name').value = config.name || '';
+        $('mcp_url').value = config.server_url || '';
+        $('mcp_transport').value = config.transport_type || 'stdio';
+        $('mcp_command').value = config.command || '';
+        // args 是 list[str], 每行一个参数
+        $('mcp_args').value = Array.isArray(config.args) ? config.args.join('\n') : '';
+        // env_vars 是 dict[str,str], 每行 KEY=VALUE
+        const env = config.env_vars || {};
+        $('mcp_env').value = Object.keys(env).map((k) => k + '=' + env[k]).join('\n');
+        $('mcp_desc').value = config.description || '';
+        $('mcp_enabled').checked = config.enabled !== false;
+      } else {
+        mcpEditingId = null;
+        $('mcpFormTitleText').textContent = '新增 MCP 配置';
+        $('mcp_name').value = '';
+        $('mcp_url').value = '';
+        $('mcp_transport').value = 'stdio';
+        $('mcp_command').value = '';
+        $('mcp_args').value = '';
+        $('mcp_env').value = '';
+        $('mcp_desc').value = '';
+        $('mcp_enabled').checked = true;
+      }
+      $('mcp-form-panel').classList.add('open');
+    }
+
+    /** 关闭 MCP 表单模态框 */
+    function closeMcpForm() {
+      $('mcp-form-panel').classList.remove('open');
+      mcpEditingId = null;
+    }
+
+    /** 解析 args textarea (每行一个参数) → list[str] */
+    function parseArgsTextarea(text) {
+      return text.split('\n').map((s) => s.trim()).filter((s) => s);
+    }
+
+    /** 解析 env_vars textarea (每行 KEY=VALUE) → dict[str,str] */
+    function parseEnvTextarea(text) {
+      const env = {};
+      text.split('\n').forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) return;
+        const k = trimmed.slice(0, eqIdx).trim();
+        const v = trimmed.slice(eqIdx + 1).trim();
+        if (k) env[k] = v;
+      });
+      return env;
+    }
+
+    /** 保存 MCP 配置 (新增=POST / 编辑=PUT) */
+    async function saveMcpConfig() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const name = $('mcp_name').value.trim();
+      const url = $('mcp_url').value.trim();
+      if (!name || !url) {
+        toast('配置名称和 Server URL 为必填项');
+        return;
+      }
+
+      const args = parseArgsTextarea($('mcp_args').value);
+      const envVars = parseEnvTextarea($('mcp_env').value);
+
+      const body = {
+        name: name,
+        server_url: url,
+        transport_type: $('mcp_transport').value,
+        command: $('mcp_command').value.trim() || null,
+        args: args.length ? args : null,
+        env_vars: Object.keys(envVars).length ? envVars : null,
+        description: $('mcp_desc').value.trim() || null,
+        enabled: $('mcp_enabled').checked,
+      };
+
+      const isEdit = mcpEditingId != null;
+      const apiUrl = isEdit
+        ? base + '/v1/mcp/configs/' + encodeURIComponent(mcpEditingId)
+        : base + '/v1/mcp/configs';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      try {
+        const resp = await fetch(apiUrl, { method, headers, body: JSON.stringify(body) });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        await loadMcpConfigs();
+        closeMcpForm();
+        toast(isEdit ? 'MCP 配置已更新' : 'MCP 配置已保存');
+      } catch (e) {
+        toast('保存失败: ' + e.message);
+      }
+    }
+
+    /** 切换 MCP 配置启用状态 (PUT, 仅更新 enabled 字段, 需发送完整 body) */
+    async function toggleMcpEnabled(id, enabled) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const config = mcpConfigsCache.find((c) => c.id === id);
+      if (!config) {
+        toast('配置不存在, 无法切换');
+        await loadMcpConfigs();
+        return;
+      }
+
+      const body = {
+        name: config.name,
+        server_url: config.server_url,
+        transport_type: config.transport_type,
+        command: config.command || null,
+        args: Array.isArray(config.args) ? config.args : null,
+        env_vars: config.env_vars || null,
+        description: config.description || null,
+        enabled: enabled,
+      };
+
+      try {
+        const resp = await fetch(base + '/v1/mcp/configs/' + encodeURIComponent(id), {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        toast(enabled ? '已启用' : '已禁用');
+        await loadMcpConfigs();
+      } catch (e) {
+        toast('切换失败: ' + e.message);
+        // 失败时重新加载以恢复开关状态
+        await loadMcpConfigs();
+      }
+    }
+
+    /** 编辑 MCP 配置: 从缓存读取并填入表单 */
+    function editMcpConfig(id) {
+      const config = mcpConfigsCache.find((c) => c.id === id);
+      if (!config) {
+        toast('配置不存在');
+        return;
+      }
+      openMcpForm(config);
+    }
+
+    /** 删除 MCP 配置 (DELETE) */
+    async function deleteMcpConfig(id) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      try {
+        const resp = await fetch(base + '/v1/mcp/configs/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers,
+        });
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); detail = err.detail || detail; } catch { /* 非 JSON */ }
+          throw new Error(detail);
+        }
+        await loadMcpConfigs();
+        toast('MCP 配置已删除');
+      } catch (e) {
+        toast('删除失败: ' + e.message);
+      }
+    }
+
+    // MCP 面板事件绑定
+    $('mcpToggle').addEventListener('click', () => {
+      const panel = $('mcp-panel');
+      panel.classList.add('open');
+      loadMcpConfigs();
+    });
+    $('mcpCloseBtn').addEventListener('click', () => {
+      $('mcp-panel').classList.remove('open');
+    });
+    // 点击遮罩关闭 MCP 面板
+    $('mcp-panel').addEventListener('click', (e) => {
+      if (e.target === $('mcp-panel')) $('mcp-panel').classList.remove('open');
+    });
+    // 新增按钮: 打开空表单
+    $('mcp_add').addEventListener('click', () => openMcpForm(null));
+    // 表单按钮
+    $('mcp_save').addEventListener('click', saveMcpConfig);
+    $('mcp_cancel').addEventListener('click', closeMcpForm);
+    $('mcpFormCloseBtn').addEventListener('click', closeMcpForm);
+    // 点击遮罩关闭表单模态框
+    $('mcp-form-panel').addEventListener('click', (e) => {
+      if (e.target === $('mcp-form-panel') ) closeMcpForm();
+    });
+    // ESC 关闭: 优先关闭表单模态框, 其次关闭 MCP 面板, 再次关闭历史报告面板
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if ($('mcp-form-panel').classList.contains('open')) {
+        closeMcpForm();
+      } else if ($('mcp-panel').classList.contains('open')) {
+        $('mcp-panel').classList.remove('open');
+      } else if ($('reports-panel').classList.contains('open')) {
+        $('reports-panel').classList.remove('open');
+      }
+    });
+
+    // ========== 历史报告 (任务8) ==========
+    // 后端 API:
+    //   GET /v1/reports/session/{session_id}          → 当前会话的报告列表
+    //   GET /v1/reports/{report_id}/download?format=  → 下载指定格式 (markdown|html|pdf|docx|json)
+    //   SSE 流中 publisher 节点会推送 {"report_id": "..."} 帧 (见 handleReportId)
+
+    /** 加载当前 session 的报告列表 */
+    async function loadReportList() {
+      if (!state.sessionId) return;
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      try {
+        const resp = await fetch(base + '/v1/reports/session/' + encodeURIComponent(state.sessionId), { headers });
+        if (!resp.ok) {
+          toast('加载报告列表失败: ' + resp.status);
+          return;
+        }
+        const reports = await resp.json();
+        renderReportList(reports);
+      } catch (e) {
+        toast('加载报告列表异常: ' + e.message);
+      }
+    }
+
+    /** 渲染报告列表 (每项一个卡片, 含 5 种格式下载链接) */
+    function renderReportList(reports) {
+      const container = $('report-list');
+      if (!reports || reports.length === 0) {
+        container.innerHTML = '<div class="reports-empty">暂无报告,完成一次研究后自动刷新</div>';
+        return;
+      }
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      container.innerHTML = reports.map((r) => {
+        const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN') : '—';
+        const queryRaw = r.query || '';
+        const queryShort = queryRaw.substring(0, 80) + (queryRaw.length > 80 ? '...' : '');
+        const role = r.agent_role ? '<span class="report-role">' + escapeHtml(r.agent_role) + '</span>' : '';
+        const rid = r.report_id;
+        const dlUrl = (fmt) => base + '/v1/reports/' + encodeURIComponent(rid) + '/download?format=' + fmt;
+        return '<div class="report-item">' +
+          '<div class="report-item-header">' +
+            '<span class="report-query" title="' + escapeHtml(queryRaw) + '">' + escapeHtml(queryShort) + '</span>' +
+            '<span class="report-time">' + escapeHtml(created) + '</span>' +
+          '</div>' +
+          (role ? '<div class="report-item-meta">' + role + '</div>' : '') +
+          '<div class="report-downloads">' +
+            '<a href="' + dlUrl('markdown') + '" class="dl-btn dl-md" target="_blank" rel="noopener noreferrer">Markdown</a>' +
+            '<a href="' + dlUrl('html') + '" class="dl-btn dl-html" target="_blank" rel="noopener noreferrer">HTML</a>' +
+            '<a href="' + dlUrl('pdf') + '" class="dl-btn dl-pdf" target="_blank" rel="noopener noreferrer">PDF</a>' +
+            '<a href="' + dlUrl('docx') + '" class="dl-btn dl-docx" target="_blank" rel="noopener noreferrer">DOCX</a>' +
+            '<a href="' + dlUrl('json') + '" class="dl-btn dl-json" target="_blank" rel="noopener noreferrer">JSON</a>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    /** 处理流式响应中的 report_id 帧: 收到后自动刷新报告列表 */
+    function handleReportId(reportId) {
+      // 收到 report_id 后, 自动刷新报告列表 (若面板已打开则立即刷新, 否则下次打开时刷新)
+      loadReportList();
+    }
+
+    // 历史报告面板事件绑定
+    $('reportsToggle').addEventListener('click', () => {
+      $('reports-panel').classList.add('open');
+      loadReportList();
+    });
+    $('reportsCloseBtn').addEventListener('click', () => {
+      $('reports-panel').classList.remove('open');
+    });
+    // 点击遮罩关闭历史报告面板
+    $('reports-panel').addEventListener('click', (e) => {
+      if (e.target === $('reports-panel')) $('reports-panel').classList.remove('open');
+    });
+    $('refresh-reports-btn').addEventListener('click', loadReportList);
 
     // 初始 focus
     msgInput.focus();

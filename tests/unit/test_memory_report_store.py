@@ -327,7 +327,7 @@ class TestListReports:
         assert args[0] == "user-1"
 
     async def test_by_session_and_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """list_reports 同时按 session_id 和 user_id 过滤 (OR 条件)."""
+        """list_reports 同时按 session_id 和 user_id 过滤 (AND 条件, 数据隔离)."""
         mock_conn = _MockConn(fetch_result=[])
         _install_mock_connect(monkeypatch, mock_conn)
 
@@ -337,7 +337,7 @@ class TestListReports:
         )
         assert results == []
         query, _ = mock_conn.fetch_calls[0]
-        assert "WHERE session_id = $1 OR user_id = $2" in query
+        assert "WHERE session_id = $1 AND user_id = $2" in query
 
     async def test_no_filter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_reports 无过滤时返回全部 (无 WHERE 子句)."""

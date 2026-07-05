@@ -152,8 +152,9 @@ services:
         condition: service_healthy
       embeddings:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
       # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
-      # PostgreSQL 由外部托管, 不在 depends_on 内
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
       interval: 30s

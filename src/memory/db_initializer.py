@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 # Agent 容器内: /app/scripts/init.sql (Dockerfile COPY . . 已包含)
 INIT_SQL_PATH = Path(__file__).parent.parent.parent / "scripts" / "init.sql"
 
+# P0-02: 模块级 asyncpg 连接池单例 (业务表 CRUD 共用, 与 Checkpointer 的 psycopg 池独立)
+# AGENTS.md 第 6 章: 业务表读写复用同一 asyncpg 池, 避免每次请求创建新连接.
+_pool_instance: asyncpg.Pool | None = None
+_pool_lock = asyncio.Lock()
+
 
 def _read_init_sql() -> str:
     """同步读取 init.sql (在 asyncio.to_thread 中执行, 避免阻塞事件循环).
@@ -74,4 +79,50 @@ async def init_database(settings: Settings | None = None) -> bool:
         return False
 
 
-__all__ = ["init_database"]
+__all__ = ["get_pool", "init_database"]
+
+
+async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
+    """获取 asyncpg 连接池单例 (业务表 CRUD 共用).
+
+    AGENTS.md 第 6 章: 业务表读写复用同一 asyncpg 池, 与 Checkpointer 的 psycopg 池独立.
+    双重检查锁保证并发场景下只创建一个实例; 池大小从 settings.postgres_connection_pool_size 读取.
+
+    Args:
+        settings: 全局配置 (仅首次调用生效, 后续调用忽略).
+
+    Returns:
+        已创建的 asyncpg.Pool 实例.
+
+    Raises:
+        asyncpg.PostgresError: 连接池创建失败时抛出 (调用方应捕获并降级).
+    """
+    global _pool_instance
+
+    # 快路径: 已有单例直接返回 (无锁开销)
+    if _pool_instance is not None:
+        return _pool_instance
+
+    settings = settings or get_settings()
+
+    async with _pool_lock:
+        # 双重检查: 持锁后再次确认 (防止并发重复创建)
+        if _pool_instance is not None:
+            return _pool_instance
+
+        # asyncpg 原生 DSN: postgresql:// (非 sqlalchemy 的 postgresql+asyncpg://)
+        dsn = settings.postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+        pool_size = max(int(settings.postgres_connection_pool_size), 1)
+
+        _pool_instance = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=min(2, pool_size),
+            max_size=pool_size,
+            command_timeout=30,
+        )
+        logger.info(
+            "asyncpg 连接池已初始化 (业务表 CRUD, min=%d max=%d)",
+            min(2, pool_size),
+            pool_size,
+        )
+        return _pool_instance

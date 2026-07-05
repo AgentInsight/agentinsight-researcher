@@ -132,7 +132,7 @@ class ReportStore:
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """列出报告 (按 session_id 或 user_id 过滤).
+        """列出报告 (按 session_id + user_id 组合过滤, AND 语义).
 
         Args:
             session_id: 会话 ID (可选过滤)
@@ -150,7 +150,7 @@ class ReportStore:
                 rows = await conn.fetch(
                     f"""
                     SELECT {_SELECT_COLUMNS} FROM research_reports
-                    WHERE session_id = $1 OR user_id = $2
+                    WHERE session_id = $1 AND user_id = $2
                     ORDER BY created_at DESC LIMIT $3 OFFSET $4
                     """,
                     session_id,

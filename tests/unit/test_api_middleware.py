@@ -193,8 +193,8 @@ def test_jwt_token_call_fails_falls_back_to_default(
 
     assert response.status_code == 200
     assert response.json()["user_id"] == "fallback-user"
-    # 应记录降级告警
-    assert any("降级" in rec.message for rec in caplog.records)
+    # 应记录解析失败告警 (中间件 _resolve_user_id 捕获异常并降级到 default_user_id)
+    assert any("解析失败" in rec.message for rec in caplog.records)
 
 
 def test_jwt_token_call_http_error_falls_back(
@@ -340,8 +340,12 @@ def test_security_headers_hsts_in_prod(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_security_headers_no_hsts_in_dev() -> None:
+def test_security_headers_no_hsts_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
     """dev 环境不注入 HSTS 头."""
+    # 显式 mock dev 环境, 避免受 .env 中 ENV=prod 影响导致测试不稳定
+    dev_settings = Settings(env="dev", _env_file=None)
+    monkeypatch.setattr("src.api.middleware.get_settings", lambda: dev_settings)
+
     client = TestClient(_make_security_app())
     response = client.get("/test")
     assert "Strict-Transport-Security" not in response.headers

@@ -112,3 +112,72 @@ CREATE TABLE IF NOT EXISTS token_usage_logs (
 CREATE INDEX IF NOT EXISTS idx_token_usage_logs_agent_user ON token_usage_logs(agent_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_logs_session ON token_usage_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_logs_stage ON token_usage_logs(stage);
+
+-- ========== V7: 时间戳字段完整性修复 (P0) ==========
+-- 1. 回填 research_reports 历史 NULL 值
+UPDATE research_reports SET created_at = NOW() WHERE created_at IS NULL;
+UPDATE research_reports SET updated_at = NOW() WHERE updated_at IS NULL;
+
+-- 2. 加固 research_reports NOT NULL 约束 (对齐 research_sessions)
+ALTER TABLE IF EXISTS research_reports
+    ALTER COLUMN created_at SET NOT NULL,
+    ALTER COLUMN created_at SET DEFAULT NOW(),
+    ALTER COLUMN updated_at SET NOT NULL,
+    ALTER COLUMN updated_at SET DEFAULT NOW();
+
+-- 3. 为 uploaded_files 补 updated_at 字段 (status 会变更, 需要追踪)
+ALTER TABLE IF EXISTS uploaded_files
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- 4. 通用触发器函数: 自动维护 updated_at (幂等: CREATE OR REPLACE)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 5. 为状态会变更的 3 张表挂触发器 (PostgreSQL 14+ 支持 CREATE OR REPLACE TRIGGER)
+CREATE OR REPLACE TRIGGER trg_research_sessions_updated_at
+    BEFORE UPDATE ON research_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE OR REPLACE TRIGGER trg_research_reports_updated_at
+    BEFORE UPDATE ON research_reports
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE OR REPLACE TRIGGER trg_uploaded_files_updated_at
+    BEFORE UPDATE ON uploaded_files
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 6. 新增 MCP 配置表 (任务7: 前端 MCP 配置 + Postgres 持久化)
+CREATE TABLE IF NOT EXISTS mcp_configs (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    server_url TEXT NOT NULL,
+    transport_type VARCHAR(32) NOT NULL DEFAULT 'stdio',
+    command VARCHAR(512),
+    args JSONB,
+    env_vars JSONB,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_configs_agent_user ON mcp_configs (agent_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_configs_enabled ON mcp_configs (agent_id, user_id, enabled);
+
+CREATE OR REPLACE TRIGGER trg_mcp_configs_updated_at
+    BEFORE UPDATE ON mcp_configs
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 7. 字段长度统一: agent_id/user_id/session_id 统一 VARCHAR(64)
+-- (research_reports 当前是 VARCHAR(256), 留待后续数据迁移, 此处仅记录)

@@ -377,10 +377,9 @@ class LLMClient:
                             "completion_tokens": response.output_tokens,
                         },
                         cost_details={
-                            "cost_usd": response.cost_usd,
-                            "input_cost": breakdown["input_cost"],
-                            "output_cost": breakdown["output_cost"],
-                            "model": response.model,
+                            "input": breakdown["input_cost"],
+                            "output": breakdown["output_cost"],
+                            "total": response.cost_usd,
                         },
                         metadata={
                             "step": step,
@@ -589,10 +588,9 @@ class LLMClient:
                         "completion_tokens": total_output_tokens,
                     },
                     cost_details={
-                        "cost_usd": cost_usd,
-                        "input_cost": breakdown["input_cost"],
-                        "output_cost": breakdown["output_cost"],
-                        "model": used_model,
+                        "input": breakdown["input_cost"],
+                        "output": breakdown["output_cost"],
+                        "total": cost_usd,
                     },
                     metadata={
                         "step": step,

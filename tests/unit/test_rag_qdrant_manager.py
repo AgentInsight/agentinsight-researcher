@@ -47,6 +47,18 @@ class _FakeEmbeddingsClient:
         return str(uuid.uuid5(_FakeEmbeddingsClient._NAMESPACE_DNS, f"{namespace}:{content_hash}"))
 
 
+class _FakeQueryResponse:
+    """伪造 qdrant-client ≥1.18 QueryResponse (query_points 返回值).
+
+    qdrant-client ≥1.18: AsyncQdrantClient.search 已移除, 改用 query_points,
+    返回 QueryResponse, 命中列表在 .points 字段, 每个 point.payload/point.score
+    结构与旧 hit 一致.
+    """
+
+    def __init__(self, points: list[Any]) -> None:
+        self.points = points
+
+
 class _FakeQdrantClient:
     """伪造 AsyncQdrantClient, 捕获调用."""
 
@@ -63,7 +75,7 @@ class _FakeQdrantClient:
             "create_collection": [],
             "upsert": [],
             "delete": [],
-            "search": [],
+            "query_points": [],
         }
 
     async def get_collection(self, collection_name: str) -> Any:
@@ -84,16 +96,17 @@ class _FakeQdrantClient:
         self.calls["delete"].append(kwargs)
         return None
 
-    async def search(self, **kwargs: Any) -> Any:
-        self.calls["search"].append(kwargs)
-        return self.search_results
+    async def query_points(self, **kwargs: Any) -> _FakeQueryResponse:
+        """qdrant-client ≥1.18: query_points 替代旧 search, 返回 QueryResponse."""
+        self.calls["query_points"].append(kwargs)
+        return _FakeQueryResponse(points=self.search_results)
 
     async def close(self) -> None:
         pass
 
 
 class _FakeSearchHit:
-    """伪造 qdrant search hit."""
+    """伪造 qdrant search hit (与 QueryResponse.points 元素结构一致)."""
 
     def __init__(self, payload: dict[str, Any], score: float) -> None:
         self.payload = payload
@@ -234,7 +247,7 @@ async def test_search_returns_mapped_fields() -> None:
     assert results[0]["namespace"] == "ns1"
     assert results[0]["score"] == 0.95
 
-    search_kwargs = fake.calls["search"][0]
+    search_kwargs = fake.calls["query_points"][0]
     query_filter = search_kwargs["query_filter"]
     assert len(query_filter.should) == 2
     assert query_filter.should[0].match.value == "ns1"
@@ -252,7 +265,7 @@ async def test_search_uses_default_score_threshold() -> None:
 
     await mgr.search([0.1] * 1024, ["ns1"], limit=5)
 
-    search_kwargs = fake.calls["search"][0]
+    search_kwargs = fake.calls["query_points"][0]
     assert search_kwargs["score_threshold"] == 0.3
 
 

@@ -280,7 +280,10 @@ async def publisher_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
-        delta: dict[str, Any] = {"status": "completed"}
+        delta: dict[str, Any] = {
+            "status": "completed",
+            "report_format": result.get("format", "markdown"),
+        }
         if result.get("format") == "html":
             delta["report_html"] = result["content"]
         elif result.get("format") == "pdf":
@@ -292,7 +295,7 @@ async def publisher_node(
         # P1-Future-09: 报告持久化存储 (失败不阻断主流程)
         try:
             report_store = get_report_store()
-            await report_store.save_report(
+            report_id = await report_store.save_report(
                 session_id=state.get("session_id", ""),
                 user_id=state.get("user_id", ""),
                 agent_id=state.get("agent_id", ""),
@@ -302,6 +305,8 @@ async def publisher_node(
                 sources=state.get("curated_sources") or state.get("sources", []),
                 agent_role=state.get("agent_role_server"),
             )
+            if report_id:
+                delta["report_id"] = report_id
         except Exception:
             logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
         return delta

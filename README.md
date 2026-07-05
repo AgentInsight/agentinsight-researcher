@@ -13,12 +13,12 @@
 
 ## ⚠️ 重要:开始使用前请先完成以下步骤
 
-### 第 1 步:注册 AgentInsight 平台账户并创建 APIKey
+### 第 1 步:注册 AgentInsight 平台账户并创建 API Key
 
 本项目使用 [AgentInsight](https://agentinsight.goldebridge.com) 作为可观测性后端,**必须先注册账户并获取 APIKey 才能正常运行**。
 
 1. 访问 **[https://agentinsight.goldebridge.com/platform](https://agentinsight.goldebridge.com/platform)** 注册用户账户
-2. 登录后进入「平台 → APIKey 管理」页面,创建新的 APIKey
+2. 登录后进入「项目设置 → API Key 管理」页面,创建新的 APIKey
 3. 创建后会获得一对密钥:
    - **PublicKey**(以 `pk-` 开头)
    - **SecretKey**(以 `sk-` 开头,仅创建时显示一次,请妥善保存)
@@ -285,7 +285,7 @@ docker compose -p agentinsight down -v
 This project uses [AgentInsight](https://agentinsight.goldebridge.com) as the observability backend. **You must register an account and obtain an APIKey before the project can run.**
 
 1. Visit **[https://agentinsight.goldebridge.com/platform](https://agentinsight.goldebridge.com/platform)** to register a user account
-2. After logging in, go to "Platform → APIKey Management" page to create a new APIKey
+2. After logging in, go to "Project Settings → API Key Management" page to create a new APIKey
 3. You will receive a pair of keys:
    - **PublicKey** (starts with `pk-`)
    - **SecretKey** (starts with `sk-`, shown only once at creation, please save it securely)

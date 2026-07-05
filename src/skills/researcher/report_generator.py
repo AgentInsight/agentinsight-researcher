@@ -264,12 +264,22 @@ class ReportGenerator:
                 fallback=_SECTION_FAILURE_PLACEHOLDER,
             )
 
-            # 确保末尾有参考文献
-            if "## 参考文献" not in report_md and "## References" not in report_md:
-                report_md += f"\n\n## 参考文献\n\n{references}\n"
+            # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
+            report_md = self._normalize_markdown(report_md)
 
-            # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式)
-            report_md += self._format_sources(sources)
+            # 确保末尾有参考文献 (避免双重参考章节: 若 LLM 已生成参考文献, 不再追加 _format_sources)
+            has_references_section = (
+                "## 参考文献" in report_md
+                or "## References" in report_md
+                or "## 参考来源" in report_md
+            )
+            if not has_references_section:
+                # LLM 未生成参考文献章节, 追加完整来源列表 (含章节标题 + 编号列表)
+                report_md += self._format_sources(sources)
+            else:
+                # LLM 已生成参考文献章节, 仅补充来源 URL 列表 (无章节标题, 避免重复)
+                # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式)
+                pass  # 不再追加 _format_sources, 避免双重参考章节
 
             # P2-05: YAML frontmatter (enable_frontmatter=True 时在报告首部追加元信息块)
             # 对标 GPTR cli.py 的 YAML 输出, 便于下游解析/索引.
@@ -452,8 +462,7 @@ class ReportGenerator:
                 session_id=session_id,
             )
 
-            # 重新构建参考文献 (含子主题研究新增的源)
-            all_references = self._build_references(all_sources)
+            # 重新构建参考文献 (含子主题研究新增的源); _format_sources 已含 ## 参考来源 章节, 此处无需重复
             current_date = datetime.now().strftime("%Y年%m月%d日")
 
             body = "\n\n".join(sections) if sections else "_(无子主题章节内容)_"
@@ -464,11 +473,14 @@ class ReportGenerator:
                 f"{introduction}\n\n"
                 f"{body}\n\n"
                 f"{conclusion}\n\n"
-                f"## 参考文献\n\n{all_references}\n"
             )
 
             # V4-P2-02: 追加引用来源列表 (对标 GPTR APA 格式, 含子主题研究新增源)
+            # 避免双重参考章节: 仅追加一次 _format_sources (含 ## 参考来源 章节标题)
             full_report += self._format_sources(all_sources)
+
+            # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
+            full_report = self._normalize_markdown(full_report)
 
             # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
@@ -750,7 +762,7 @@ class ReportGenerator:
             fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
         content = content.strip()
-        if not content.startswith("## "):
+        if not (content.startswith("## ") or content.startswith("### ")):
             content = f"## {topic}\n\n" + content
         return content
 
@@ -959,13 +971,13 @@ class ReportGenerator:
         else:
             return report_md
 
-        image_md = f"\n![报告配图]({image_ref})\n"
+        image_md = f"\n\n![报告配图]({image_ref})\n\n"
 
         # 在第一个 H1 后插入
         lines = report_md.split("\n")
         for i, line in enumerate(lines):
             if line.startswith("# "):
-                return "\n".join(lines[: i + 1]) + image_md + "\n" + "\n".join(lines[i + 1 :])
+                return "\n".join(lines[: i + 1]) + image_md + "\n".join(lines[i + 1 :])
 
         # 无 H1, 在开头插入
         return image_md + "\n" + report_md
@@ -1021,6 +1033,108 @@ class ReportGenerator:
 
 ## 参考文献
 (APA 格式引用列表)"""
+
+    @staticmethod
+    def _normalize_markdown(md: str) -> str:
+        """规范化 Markdown 输出, 修复 LLM 常见格式问题.
+
+        解决格式密集问题:
+        - 末尾 rstrip 多余空行
+        - 标题前后补空行 (确保标题与正文不紧贴)
+        - 表格块前后补空行 (不在表格内部插入空行, 避免破坏渲染)
+        - 列表块前后补空行 (不在列表项之间插入空行)
+        - 连续 3+ 空行压缩为 2 个
+        - 引用紧贴修复: [1][2] → [1] [2]
+        - 引用块 (>) 前后补空行
+        """
+        import re
+
+        if not md or not md.strip():
+            return md
+
+        # 1. 末尾 rstrip (去除多余空行), 保留单个换行
+        md = md.rstrip() + "\n"
+
+        # 2. 标题前后补空行 (确保标题前后有空行)
+        # 匹配非空行后紧跟标题的情况
+        md = re.sub(r"([^\n])\n(#{1,6}\s)", r"\1\n\n\2", md)
+        # 匹配标题后紧跟非空行的情况
+        md = re.sub(r"(#{1,6}[^\n]*)\n([^\n#])", r"\1\n\n\2", md)
+
+        # 3. 表格块前后补空行 (关键: 不在表格内部插入空行)
+        # 表格块定义: 连续 2+ 行 | 开头 (含 |---| 分隔行)
+        # 前补空行: 非 | 行后紧跟 | 行, 且后面还有 | 行 (表明是表格块开头)
+        md = re.sub(
+            r"([^\n|])\n(\|[^\n]*\n\|)",
+            r"\1\n\n\2",
+            md,
+        )
+        # 后补空行: | 行 (且前一行也是 | 行) 后紧跟非 | 行 (表明是表格块结尾)
+        md = re.sub(
+            r"(\|[^\n]*\n\|[^\n]*)\n([^\n|])",
+            r"\1\n\n\2",
+            md,
+        )
+
+        # 4. 列表块前后补空行 (关键: 不在列表项之间插入空行)
+        # 用回调函数判断前后行是否是列表项, 只在非列表项行相邻时补空行
+        def _is_list_item(line: str) -> bool:
+            """判断一行是否是列表项 (以 - / * / + / 数字. 开头)"""
+            return bool(re.match(r"(?:[-*+]\s|\d+\.\s)", line))
+
+        # 列表前补空行: 非列表项行 + \n + 列表项 + \n + 列表项
+        def _list_prefix_pad(match: re.Match[str]) -> str:
+            prefix_line = match.group(1)  # 前一行
+            list_part = match.group(2)  # 列表项开头
+            if _is_list_item(prefix_line):
+                # 前一行也是列表项, 不补空行 (列表项之间)
+                return match.group(0)
+            return prefix_line + "\n\n" + list_part
+
+        md = re.sub(
+            r"([^\n]+)\n((?:[-*+]\s|\d+\.\s)[^\n]*\n(?:[-*+]\s|\d+\.\s))",
+            _list_prefix_pad,
+            md,
+        )
+
+        # 列表后补空行: 列表项 + \n + 列表项 + \n + 非列表项行
+        def _list_suffix_pad(match: re.Match[str]) -> str:
+            list_part = match.group(1)  # 列表项部分
+            suffix_line = match.group(2)  # 后一行
+            if _is_list_item(suffix_line):
+                return match.group(0)
+            return list_part + "\n\n" + suffix_line
+
+        md = re.sub(
+            r"((?:[-*+]\s|\d+\.\s)[^\n]*\n(?:[-*+]\s|\d+\.\s)[^\n]*)\n([^\n]+)",
+            _list_suffix_pad,
+            md,
+        )
+
+        # 列表项之间清理多余空行 (避免松散列表)
+        # [-*] 行 + \n\n + [-*] 行 → [-*] 行 + \n + [-*] 行
+        md = re.sub(
+            r"((?:[-*+]\s)[^\n]*)\n\n((?:[-*+]\s))",
+            r"\1\n\2",
+            md,
+        )
+        md = re.sub(
+            r"((?:\d+\.\s)[^\n]*)\n\n((?:\d+\.\s))",
+            r"\1\n\2",
+            md,
+        )
+
+        # 5. 引用块 (>) 前后补空行
+        md = re.sub(r"([^\n])\n(>\s)", r"\1\n\n\2", md)
+        md = re.sub(r"(>[^\n]*)\n([^\n>])", r"\1\n\n\2", md)
+
+        # 6. 连续 3+ 空行压缩为 2 个
+        md = re.sub(r"\n{3,}", "\n\n", md)
+
+        # 7. 引用紧贴修复: [1][2] → [1] [2]
+        md = re.sub(r"(\[\d+\])(\[\d+\])", r"\1 \2", md)
+
+        return md
 
     @staticmethod
     def _build_references(sources: list[dict[str, Any]]) -> str:
@@ -1084,7 +1198,7 @@ class ReportGenerator:
                 if url:
                     ref += f" Retrieved from {url}"
             refs.append(ref)
-        return "\n".join(refs)
+        return "\n\n".join(refs)
 
     def _format_sources(self, sources: list[dict[str, Any]]) -> str:
         """格式化引用来源列表 (P1-02: 支持 APA/MLA/Chicago/GB7714 风格).
@@ -1110,7 +1224,7 @@ class ReportGenerator:
         # 章节标题 (中文报告用"参考来源", 英文报告用"References")
         lang = getattr(settings, "report_language", "zh") or "zh"
         section_title = "## 参考来源" if lang == "zh" else "## References"
-        lines = [f"\n\n{section_title}\n"]
+        lines = [f"\n\n{section_title}\n\n"]
         for i, src in enumerate(sources, 1):
             title = src.get("title", "未知标题")
             url = src.get("url", src.get("href", ""))

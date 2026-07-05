@@ -67,10 +67,17 @@ docker-build.offline.sh
 *.bak
 .DS_Store
 Thumbs.db
+ruff_*.txt
+*_output.txt
+*_out.txt
 
 # 数据
 data/
 sessions/
 /docs
 /.env.qa
-/test_results
+
+# 测试产物 (手动脚本 / 临时验证输出, 不入仓)
+test_results/
+tests/manual/
+/temp

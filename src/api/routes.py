@@ -27,7 +27,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
@@ -160,6 +160,16 @@ class ChatCompletionRequest(BaseModel):
         None,
         description="P1-Future-02: 域名过滤白名单, 仅检索这些域名的结果",
     )
+    # SELF_HOST=False 时点数校验/扣除所需参数 (对标 AgentInsightService)
+    # 优先级: org_id > project_id (二者至少传一个才会触发校验/扣除)
+    org_id: str | None = Field(
+        None,
+        description="组织 ID (用于点数校验, 优先于 project_id, SELF_HOST=False 时启用)",
+    )
+    project_id: str | None = Field(
+        None,
+        description="项目 ID (org_id 为空时使用, SELF_HOST=False 时启用)",
+    )
 
 
 class ChatCompletionResponse(BaseModel):
@@ -175,6 +185,13 @@ class ChatCompletionResponse(BaseModel):
     # P0-01: 显式返回 sources 结构化列表 (对标 GPTR add_references)
     # 含 title/url/snippet/score 字段, 测试页面与下游消费者可直接渲染
     sources: list[dict[str, Any]] = []
+    # 报告输出格式 (markdown/html/pdf/docx/json), 客户端据此选择渲染/下载策略
+    report_format: str | None = None
+    # PDF 等二进制格式生成的文件路径, 客户端可通过 /v1/reports/{report_id}/download 获取
+    file_path: str | None = None
+    # 报告主键 UUID (P1-Future-09 重构: 一个 session 可生成多个报告, 下载基于 report_id)
+    # 客户端可用此值构造 /v1/reports/{report_id}/download 链接获取多格式输出
+    report_id: str | None = None
 
 
 # ========== 端点实现 ==========
@@ -275,12 +292,44 @@ async def chat_completions(
             return await _run_chat(chat_state, chat_config, request, session_id)
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
+    # SELF_HOST=False 时, 进入研究前校验 Agent 点数 (对标 AgentInsightService)
+    # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图校验/扣除
+    if not settings.self_host and (request.org_id or request.project_id):
+        from src.api.agentinsight_client import get_agentinsight_client
+
+        # 提取 token (从 Authorization Bearer 头)
+        token = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="缺少 Authorization Bearer Token (SELF_HOST=False 模式必需)",
+            )
+
+        client = get_agentinsight_client()
+        exceeded, _err = await client.validate_agent_usage(
+            token, org_id=request.org_id, project_id=request.project_id
+        )
+        if exceeded:
+            raise HTTPException(
+                status_code=429,
+                detail="本月 Agent 调用次数已达上限, 请联系管理员升级套餐",
+            )
+
     # 报告配置 (新研究模式)
     report_type = request.report_type or settings.default_report_type
     report_format = request.report_format or settings.default_report_format
     tone = request.tone or "objective"
     # P0-01: report_type == "deep_research" 时启用递归深度研究
-    research_mode = "deep" if report_type == "deep_research" else "basic"
+    # V7-修复: summary 和 subtopics 正确映射到对应 research_mode, 避免被降级为 basic
+    if report_type == "deep_research":
+        research_mode = "deep"
+    elif report_type in ("summary", "subtopics"):
+        research_mode = report_type  # 让 ResearchConductor 走 _conduct_summary / _conduct_subtopics
+    else:
+        research_mode = "basic"
 
     # 加载已上传文件上下文 (用户需求 8)
     uploaded_files_context: list[str] = []
@@ -328,7 +377,7 @@ async def chat_completions(
 
     if request.stream:
         return StreamingResponse(
-            _stream_research(initial_state, graph_config, request, session_id),
+            _stream_research(initial_state, graph_config, request, session_id, authorization),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -338,7 +387,7 @@ async def chat_completions(
         )
     else:
         # 非流式: 完整执行后返回
-        return await _run_research(initial_state, graph_config, request, session_id)
+        return await _run_research(initial_state, graph_config, request, session_id, authorization)
 
 
 async def _stream_research(
@@ -346,6 +395,7 @@ async def _stream_research(
     graph_config: dict[str, Any],
     request: ChatCompletionRequest,
     session_id: str,
+    authorization: str | None = None,
 ) -> Any:
     """流式 SSE 响应生成器.
 
@@ -432,7 +482,34 @@ async def _stream_research(
                         if delta.get("curated_sources"):
                             progress += f"已策展 {len(delta['curated_sources'])} 来源\n"
                     elif node_name == "report_generator" and delta.get("report_md"):
-                        # 报告生成完成, 流式输出报告正文
+                        # SELF_HOST=False 时, 报告生成成功后异步扣除点数 (不阻塞流式响应)
+                        # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图扣除
+                        settings_priv = get_settings()
+                        if not settings_priv.self_host and (request.org_id or request.project_id):
+                            from src.api.agentinsight_client import get_agentinsight_client
+
+                            token = (
+                                authorization[7:].strip()
+                                if authorization and authorization.lower().startswith("bearer ")
+                                else ""
+                            )
+                            if token:
+                                asyncio.create_task(
+                                    get_agentinsight_client().deduct_agent_usage(
+                                        token,
+                                        org_id=request.org_id,
+                                        project_id=request.project_id,
+                                    )
+                                )
+                        # 非 markdown 格式: 跳过逐段推送 (publisher 节点会推送最终格式)
+                        fmt = request.report_format or "markdown"
+                        if fmt != "markdown":
+                            # 仅推送进度提示, 不推送 markdown 内容
+                            progress += f"报告生成完成 ({fmt} 格式转换中...)\n"
+                            yield _sse_chunk({"progress": progress})
+                            progress = ""
+                            continue
+                        # markdown 格式: 维持逐段流式推送
                         report_md = delta["report_md"]
                         # 分块输出报告 (按段落)
                         paragraphs = report_md.split("\n\n")
@@ -444,15 +521,40 @@ async def _stream_research(
                     elif node_name == "publisher":
                         fmt = delta.get("report_format", "markdown")
                         progress += f"已发布 ({fmt})\n"
+                        # 推送 report_id (前端用于构造 /v1/reports/{report_id}/download 链接)
+                        if delta.get("report_id"):
+                            yield _sse_chunk({"report_id": delta["report_id"]})
+                        # 流式推送最终格式的报告内容
+                        if delta.get("report_html"):
+                            yield _sse_chunk({"content": delta["report_html"]})
+                        elif delta.get("report_json"):
+                            yield _sse_chunk({"content": delta["report_json"]})
+                        elif delta.get("report_pdf_path"):
+                            yield _sse_chunk(
+                                {"file_path": delta["report_pdf_path"], "report_format": "pdf"}
+                            )
+                        # docx 二进制不适合 SSE, 跳过 (客户端可走非流式或下载端点)
+                        continue
 
                     yield _sse_chunk({"content": progress})
                     # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                     await asyncio.sleep(0)
 
             # 输出最终报告元信息
-            final_md = final_state.get("report_md", "")
-            if not final_md:
+            fmt = request.report_format or "markdown"
+            final_content = (
+                final_state.get("report_html")
+                or final_state.get("report_json")
+                or final_state.get("report_md")
+                or ""
+            )
+            if not final_content:
                 yield _sse_chunk({"content": "\n\n*未生成报告内容 (可能上下文为空)*"})
+            # 如果是 PDF, 推送 file_path
+            if fmt == "pdf" and final_state.get("report_pdf_path"):
+                yield _sse_chunk(
+                    {"file_path": final_state["report_pdf_path"], "report_format": "pdf"}
+                )
 
             # P0-01: 流式推送 sources 元信息帧 (在 finish 之前)
             # 客户端可通过 delta.sources 获取结构化来源列表
@@ -485,6 +587,7 @@ async def _run_research(
     graph_config: dict[str, Any],
     request: ChatCompletionRequest,
     session_id: str,
+    authorization: str | None = None,
 ) -> ChatCompletionResponse:
     """非流式研究执行.
 
@@ -505,12 +608,30 @@ async def _run_research(
         session_id=session_id,
         user_id=initial_state.get("user_id"),
     ):
+        file_path: str | None = None
+        report_id: str | None = None
         try:
             graph = await _get_graph(multi_agent=request.multi_agent)
             final_state = await graph.ainvoke(initial_state, config=graph_config)
-            content = final_state.get("report_md", "")
+            fmt = request.report_format or "markdown"
+            if fmt == "html" and final_state.get("report_html"):
+                content = final_state["report_html"]
+            elif fmt == "json" and final_state.get("report_json"):
+                content = final_state["report_json"]
+            elif fmt == "pdf" and final_state.get("report_pdf_path"):
+                # PDF 返回路径信息, 客户端可通过下载端点获取
+                content = final_state["report_pdf_path"]
+                file_path = final_state["report_pdf_path"]
+            elif fmt == "docx" and final_state.get("report_docx"):
+                # DOCX 二进制无法直接放入 OpenAI 兼容响应, 返回提示信息
+                content = "[DOCX 报告已生成, 请通过下载端点获取]"
+            else:
+                content = final_state.get("report_md", "")
             if not content:
                 content = "未生成报告内容 (可能上下文为空)"
+            # P1-Future-09 重构: 提取 publisher 节点写入的 report_id
+            # 客户端用此值构造 /v1/reports/{report_id}/download 链接
+            report_id = final_state.get("report_id") or None
 
             # P0-01: sources 作为结构化字段返回 (优先 curated_sources, 回退 sources)
             sources = final_state.get("curated_sources") or final_state.get("sources", [])
@@ -566,6 +687,32 @@ async def _run_research(
                 "total_tokens": (len(initial_state["query"]) + len(content)) // 4,
             }
 
+    # SELF_HOST=False 时, 报告生成成功后同步扣除点数 (不阻断响应)
+    # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图扣除
+    settings_priv = get_settings()
+    if (
+        not settings_priv.self_host
+        and (request.org_id or request.project_id)
+        and content
+        and "研究执行失败" not in content
+    ):
+        try:
+            from src.api.agentinsight_client import get_agentinsight_client
+
+            token = (
+                authorization[7:].strip()
+                if authorization and authorization.lower().startswith("bearer ")
+                else ""
+            )
+            if token:
+                await get_agentinsight_client().deduct_agent_usage(
+                    token,
+                    org_id=request.org_id,
+                    project_id=request.project_id,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("扣除点数失败 (不阻断响应): %s", e)
+
     return ChatCompletionResponse(
         id=completion_id,
         created=created,
@@ -579,6 +726,9 @@ async def _run_research(
         ],
         usage=usage,
         sources=normalized_sources,
+        report_format=request.report_format or "markdown",
+        file_path=file_path,
+        report_id=report_id,
     )
 
 
@@ -1101,3 +1251,170 @@ async def submit_feedback(request: FeedbackRequest) -> Any:
             "submitted_at": int(time.time()),
         },
     )
+
+
+# ========== 报告下载端点 (多格式输出支持) ==========
+
+
+@router.get("/reports/session/{session_id}")
+async def list_session_reports(
+    session_id: str,
+    authorization: str | None = Header(None),
+) -> list[dict[str, Any]]:
+    """列出指定 session 的所有报告.
+
+    一个 session 可以生成多个报告, 返回按 created_at DESC 排序的列表.
+    每项含: report_id, session_id, query, report_format, created_at, updated_at.
+
+    AGENTS.md 第 7 章: 数据按 agent_id + user_id 隔离, 此处复用请求上下文 user_id.
+    """
+    from src.memory.report_store import get_report_store
+
+    user_id = get_request_user_id() or "anonymous"
+    store = get_report_store()
+    reports = await store.list_reports(
+        session_id=session_id,
+        user_id=user_id,
+        limit=50,
+    )
+    # 仅返回列表展示需要的字段 (不含 report_md 全文, 减少传输)
+    return [
+        {
+            "report_id": r.get("report_id"),
+            "session_id": r.get("session_id"),
+            "query": (r.get("query", "") or "")[:200],
+            "report_format": r.get("report_format", "markdown"),
+            "agent_role": r.get("agent_role"),
+            "created_at": r.get("created_at"),
+            "updated_at": r.get("updated_at"),
+        }
+        for r in reports
+    ]
+
+
+@router.get("/reports/{report_id}/download")
+async def download_report(
+    report_id: str,
+    format: str = "markdown",
+    authorization: str | None = Header(None),
+) -> Response:
+    """下载研究报告文件 (按 report_id, 支持多格式实时转换).
+
+    支持 format: markdown / html / pdf / docx / json
+    AGENTS.md 第 7 章: 数据按 agent_id + user_id 隔离.
+
+    向后兼容: 若 report_id 未匹配到记录, 尝试将其作为 session_id 查询最新报告
+    (deprecated, 响应头 X-Deprecated 提示调用方迁移到 report_id).
+    """
+    import aiofiles
+    import aiofiles.os
+
+    from src.memory.report_store import get_report_store
+    from src.skills.researcher.publisher import Publisher
+
+    user_id = get_request_user_id() or "anonymous"
+    store = get_report_store()
+    report = await store.get_report(report_id)
+
+    deprecated_fallback = False
+    if not report:
+        # 向后兼容: 调用方仍传 session_id (旧逻辑), 取该 session 最新报告下载
+        reports = await store.list_reports(
+            session_id=report_id,
+            user_id=user_id,
+            limit=1,
+        )
+        if reports:
+            report = reports[0]
+            deprecated_fallback = True
+            logger.warning(
+                "下载端点收到 session_id=%s (deprecated), 应改用 report_id=%s",
+                report_id,
+                report.get("report_id"),
+            )
+
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    # 数据隔离校验: report.user_id 必须匹配当前 user_id (匿名用户跳过)
+    report_user_id = report.get("user_id")
+    if report_user_id and report_user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权访问该报告")
+
+    actual_report_id = report.get("report_id") or report_id
+    content = report.get("report_md", "")
+    title = (report.get("query", "") or "研究报告")[:100]
+    sources = report.get("sources", []) if isinstance(report.get("sources"), list) else []
+    agent_role = report.get("agent_role", "") or ""
+
+    publisher = Publisher()
+    # 公共响应头: 含 deprecation 标记 (兼容旧 session_id 调用时)
+    extra_headers: dict[str, str] = {}
+    if deprecated_fallback:
+        extra_headers["X-Deprecated"] = (
+            "true - 使用 session_id 调用已弃用, 请改用 report_id (参考 /v1/reports/session/{session_id})"
+        )
+        extra_headers["Link"] = (
+            f'</v1/reports/{actual_report_id}/download>; rel="successor-version"'
+        )
+
+    if format == "markdown":
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f"attachment; filename=report_{actual_report_id}.md",
+                **extra_headers,
+            },
+        )
+    elif format == "html":
+        html = publisher._md_to_html(content)
+        return Response(
+            content=html.encode("utf-8"),
+            media_type="text/html",
+            headers={
+                "Content-Disposition": f"attachment; filename=report_{actual_report_id}.html",
+                **extra_headers,
+            },
+        )
+    elif format == "pdf":
+        pdf_path = await publisher._md_to_pdf(content, actual_report_id)
+        if await aiofiles.os.path.exists(pdf_path):
+            async with aiofiles.open(pdf_path, "rb") as f:
+                pdf_content = await f.read()
+            return Response(
+                content=pdf_content,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=report_{actual_report_id}.pdf",
+                    **extra_headers,
+                },
+            )
+        raise HTTPException(status_code=404, detail="PDF 生成失败")
+    elif format == "docx":
+        docx_bytes = publisher._to_docx(content, title=title)
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename=report_{actual_report_id}.docx",
+                **extra_headers,
+            },
+        )
+    elif format == "json":
+        json_str = publisher._to_json(
+            content,
+            title=title,
+            sources=sources,
+            agent_role_server=agent_role,
+        )
+        return Response(
+            content=json_str.encode("utf-8"),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=report_{actual_report_id}.json",
+                **extra_headers,
+            },
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的格式: {format}")

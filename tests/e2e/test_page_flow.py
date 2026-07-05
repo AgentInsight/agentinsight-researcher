@@ -43,8 +43,14 @@ def _log(msg: str) -> None:
 
 
 def _open_config_panel(page: Page) -> None:
-    """展开顶部配置栏 (默认折叠)."""
-    toggle = page.get_by_role("button", name="配置")
+    """展开顶部配置栏 (默认折叠).
+
+    注意: 不能用 get_by_role("button", name="配置"), 因为页面有两个按钮文本含"配置":
+      - #toggleConfig (title="折叠/展开配置"): ⚙ 配置
+      - #mcpToggle    (title="MCP 配置管理"): 🔌 MCP 配置
+    直接用 id 定位最精确, 避免 strict mode violation.
+    """
+    toggle = page.locator("#toggleConfig")
     config_body = page.locator("#configBody")
     if not config_body.is_visible():
         toggle.click()

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.agent_discovery import router as discovery_router
+from src.api.mcp_routes import router as mcp_router
 from src.api.middleware import JWTAuthMiddleware, SecurityHeadersMiddleware
 from src.api.routes import router as api_router
 from src.config.settings import get_settings
@@ -123,6 +124,9 @@ def create_app() -> FastAPI:
 
     # OpenAI 兼容端点 (AGENTS.md 第 14 章)
     app.include_router(api_router)
+
+    # MCP 配置管理端点 (任务7: 前端 MCP 配置 + Postgres 持久化)
+    app.include_router(mcp_router)
 
     # Agent Discovery Protocol 公开发现端点 (P1-Future-03, 无需鉴权)
     app.include_router(discovery_router)

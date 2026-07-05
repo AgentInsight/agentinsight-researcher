@@ -20,7 +20,7 @@ import logging
 from typing import Any, cast
 
 from src.config.settings import Settings, get_settings
-from src.rag.embeddings import EmbeddingsClient
+from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class EmbeddingsFilter:
         embeddings: EmbeddingsClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embeddings = embeddings or EmbeddingsClient(self.settings)
+        self._embeddings = embeddings or get_embeddings_client()
 
     async def filter(
         self,

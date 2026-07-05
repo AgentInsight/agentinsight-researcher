@@ -59,6 +59,43 @@ def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> st
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, Any]]:
+    """从 postgres 获取用户的启用 MCP 配置 (任务7).
+
+    AGENTS.md 第 7 章: 数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
+    Agent 初始化时调用, 合并到 MCP_SERVERS (对标 GPT Researcher 动态工具注册).
+
+    Args:
+        user_id: 用户 ID (从请求上下文注入).
+        agent_id: Agent ID (即 agent_name).
+
+    Returns:
+        启用的 MCP 配置列表 (dict 含 name/server_url/transport_type/command/args/env_vars).
+        查询失败时返回空列表 (降级, 不阻断研究流程).
+    """
+    try:
+        from src.memory.db_initializer import get_pool
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name, server_url, transport_type, command, args, env_vars "
+                "FROM mcp_configs WHERE agent_id=$1 AND user_id=$2 AND enabled=TRUE",
+                agent_id,
+                user_id,
+            )
+        # 兼容 MCPCoordinator._execute_mcp 期望的 url 字段: 同时保留 server_url 与 url 别名
+        configs: list[dict[str, Any]] = []
+        for row in rows:
+            cfg = dict(row)
+            cfg["url"] = cfg.get("server_url", "")
+            configs.append(cfg)
+        return configs
+    except Exception as e:  # noqa: BLE001
+        logger.warning("获取用户 MCP 配置失败 (降级为空列表): %s", e)
+        return []
+
+
 class MCPCoordinator:
     """MCP 协调器.
 

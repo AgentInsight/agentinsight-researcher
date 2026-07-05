@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_retriever
-from src.rag.embeddings import EmbeddingsClient
+from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 from src.rag.qdrant_manager import QdrantManager
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class HybridRetriever:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._embeddings = EmbeddingsClient(self.settings)
+        self._embeddings = get_embeddings_client()
         self._qdrant = QdrantManager(self.settings)
         # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章): rerank 服务端开启 API_KEY 时,
         # 客户端必须携带 Authorization: Bearer <key> 请求头

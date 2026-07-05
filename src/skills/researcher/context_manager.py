@@ -18,7 +18,7 @@ from typing import Any, cast
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_chain
-from src.rag.embeddings import EmbeddingsClient
+from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class ContextManager:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._embeddings = EmbeddingsClient(self.settings)
+        self._embeddings = get_embeddings_client()
         self._llm = LLMClient(self.settings)
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
@@ -447,7 +447,7 @@ class WrittenContentCompressor:
         similarity_threshold: float | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embeddings = EmbeddingsClient(self.settings)
+        self._embeddings = get_embeddings_client()
         # V2-P1: 阈值走 settings (优先级: 参数 > settings > 默认 0.5)
         self.threshold = (
             similarity_threshold

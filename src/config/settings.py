@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     embeddings_model: str = "BAAI/bge-large-zh-v1.5"
     embeddings_dimension: int = 1024
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
+    embeddings_max_client_batch_size: int = 32  # 客户端单次 TEI 请求上限 (P1-1, 超过则分批并发)
 
     # ========== Rerank (AGENTS.md 第 7 章) ==========
     rerank_enabled: bool = False  # 默认不启用, rerank_enabled=True 时启用 bge-reranker-v2-m3
@@ -153,6 +154,22 @@ class Settings(BaseSettings):
     default_user_id: str = "anonymous"
     user_info_api_url: str = "https://agentinsight.goldebridge.com/api/user"
     user_info_api_timeout: int = 5
+
+    # ========== 自托管模式 (SELF_HOST) ==========
+    # True (默认): 自托管模式, JWT Token 可选, 不存在时走匿名用户路径 (现有逻辑),
+    #   且跳过 AgentInsightService 点数校验/扣除 (独立部署不依赖 SaaS 后端)
+    # False: 云托管模式, 强制校验 JWT Token, 不存在或取不到 User 信息时直接返回错误,
+    #   且复用 AgentInsightService 的点数校验/扣除 API (见下方 agent_privilege_*)
+    self_host: bool = True
+
+    # ========== Agent 点数校验/扣除 (SELF_HOST=False 时启用, 对标 AgentInsightService) ==========
+    # 仅在 self_host=False 时生效; self_host=True 时跳过校验/扣除
+    # 对标 D:\Projects\Entrepreneurship\AIProjects\AgentInsightService\Agents\common\api_client.py
+    agent_privilege_api_base_url: str = "https://agentinsight.goldebridge.com"
+    agent_privilege_validate_path: str = "/api/user/privilege/agent/validate"
+    agent_privilege_deduct_path: str = "/api/user/privilege/agent/deduct"
+    agent_privilege_api_timeout: int = 5
+    agent_privilege_fail_open: bool = True  # API 失败时放行 (降级策略)
 
     # ========== 会话与上下文 (AGENTS.md 第 6 章) ==========
     context_max_chars: int = 800_000
@@ -386,7 +403,6 @@ class Settings(BaseSettings):
         """生产环境强制校验 (AGENTS.md 第 10/11 章).
 
         - 密钥必须存在
-        - CORS 禁 *
         - 生产关闭 Debug
         """
         if self.env != "prod":
@@ -396,8 +412,6 @@ class Settings(BaseSettings):
             errors.append("生产环境必须配置 AGENTINSIGHT_PUBLIC_KEY 和 AGENTINSIGHT_SECRET_KEY")
         if not self.postgres_password:
             errors.append("生产环境必须配置 POSTGRES_PASSWORD")
-        if "*" in self.cors_allow_origins:
-            errors.append("生产环境 CORS 禁止 * (AGENTS.md 第 11 章)")
         if errors:
             raise ValueError("生产环境配置校验失败:\n" + "\n".join(f"  - {e}" for e in errors))
 

@@ -120,9 +120,9 @@ class QdrantManager:
         """
         from qdrant_client.http.models import PointStruct
 
-        from src.rag.embeddings import EmbeddingsClient
+        from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 
-        embeddings_client = EmbeddingsClient(self.settings)
+        embeddings_client = get_embeddings_client()
 
         # 批量嵌入
         texts = [p["content"] for p in points]
@@ -201,9 +201,14 @@ class QdrantManager:
 
         threshold = score_threshold or self.settings.score_threshold
 
-        results = await self._client.search(
+        # qdrant-client ≥1.18: AsyncQdrantClient.search 已移除, 改用 query_points
+        # - 参数 query_vector → query
+        # - 返回结构: 旧 search 直接返回 list[ScoredPoint]; 新 query_points 返回
+        #   QueryResponse, 实际命中列表在 .points 字段, 每个 point.payload/point.score
+        #   结构与旧 hit 一致
+        results = await self._client.query_points(
             collection_name=self.settings.qdrant_collection,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=query_filter,
             limit=limit,
             score_threshold=threshold,
@@ -211,12 +216,12 @@ class QdrantManager:
 
         return [
             {
-                "content": hit.payload.get("content", ""),
-                "metadata": hit.payload.get("metadata", {}),
-                "namespace": hit.payload.get("namespace", ""),
-                "score": hit.score,
+                "content": point.payload.get("content", ""),
+                "metadata": point.payload.get("metadata", {}),
+                "namespace": point.payload.get("namespace", ""),
+                "score": point.score,
             }
-            for hit in results
+            for point in results.points
         ]
 
     async def close(self) -> None:

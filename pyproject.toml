@@ -31,7 +31,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short --ignore=tests/manual"
 markers = [
     "unit: 单元测试 (构建期, 不依赖外部服务)",
     "functional: 功能测试 (部署后容器栈)",

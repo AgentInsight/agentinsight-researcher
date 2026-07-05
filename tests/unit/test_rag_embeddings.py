@@ -146,7 +146,8 @@ async def test_embed_texts_main_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert output_updates[0]["output"] == {"vector_count": 2}
     usage_updates = [u for u in captured if "usage_details" in u]
     assert len(usage_updates) == 1
-    assert usage_updates[0]["usage_details"]["token_count"] == 2  # 7 // 3 = 2
+    # usage_details 字段名对齐 AgentInsightService: token_count → total_tokens
+    assert usage_updates[0]["usage_details"]["total_tokens"] == 2  # 7 // 3 = 2
 
 
 @pytest.mark.asyncio
