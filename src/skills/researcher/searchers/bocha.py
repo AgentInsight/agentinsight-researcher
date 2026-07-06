@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -15,6 +16,7 @@ import httpx
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
+from src.skills.researcher.searchers.exceptions import QuotaExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,8 @@ class BochaSearcher(BaseSearcher):
 
     name = "bocha"
     region = SearchRegion.CN
+    cost_tier = "paid"  # v1.1 新增
+    quality_score = 70.0  # v1.1 新增
 
     _api_url: str = "https://api.bochaai.com/v1/web-search"
 
@@ -69,6 +73,13 @@ class BochaSearcher(BaseSearcher):
                     headers=headers,
                     json=payload,
                 )
+                if response.status_code == 429:
+                    reset_at = self._calc_quota_reset(response)
+                    raise QuotaExceededError(
+                        engine="bocha",
+                        reset_at=reset_at,
+                        message="博查搜索额度已满",
+                    )
                 response.raise_for_status()
                 data = response.json()
 
@@ -90,10 +101,21 @@ class BochaSearcher(BaseSearcher):
                     metadata={"tool_name": "bocha", "success": True},
                 )
                 return results
+            except QuotaExceededError:
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.error("博查搜索失败 (query=%s): %s", query[:100], e, exc_info=True)
                 span.update(metadata={"tool_name": "bocha", "success": False, "error": str(e)})
                 return []
+
+    def _calc_quota_reset(self, resp: httpx.Response) -> datetime:
+        """博查额度重置时间: 优先 Retry-After 头, 默认次日 00:00 UTC (按日配额)."""
+        retry_after = resp.headers.get("Retry-After")
+        if retry_after and retry_after.isdigit():
+            return datetime.now(UTC) + timedelta(seconds=int(retry_after))
+        # Bocha 按日配额: 默认次日 00:00 UTC
+        now = datetime.now(UTC)
+        return now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
 
     async def close(self) -> None:
         await self._client.aclose()

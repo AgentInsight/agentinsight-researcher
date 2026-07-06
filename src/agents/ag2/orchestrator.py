@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 _AG2_AVAILABLE: bool = False
 
 try:
-    from autogen import (  # type: ignore[import-not-found]
+    from autogen import (
         ConversableAgent,
         GroupChat,
         GroupChatManager,
@@ -53,7 +53,7 @@ try:
     _AG2_AVAILABLE = True
 except ImportError:
     try:
-        from ag2 import (  # type: ignore[import-not-found]
+        from ag2 import (
             ConversableAgent,
             GroupChat,
             GroupChatManager,
@@ -62,9 +62,9 @@ except ImportError:
         _AG2_AVAILABLE = True
     except ImportError:
         # 均未安装: 设为 None 以便模块可导入, 运行时检查 _AG2_AVAILABLE
-        ConversableAgent = None  # type: ignore[assignment,misc]
-        GroupChat = None  # type: ignore[assignment,misc]
-        GroupChatManager = None  # type: ignore[assignment,misc]
+        ConversableAgent = None
+        GroupChat = None
+        GroupChatManager = None
 
 
 class AG2Orchestrator:
@@ -420,7 +420,7 @@ class AG2Orchestrator:
                     "agent_role": self._state.get("agent_role") or "",
                 }
                 result = await self._reviewer.review(
-                    state,  # type: ignore[arg-type] (TypedDict total=False, dict 兼容)
+                    state,  # type: ignore[arg-type]
                     user_id=self._state.get("user_id"),
                     session_id=self._state.get("session_id"),
                 )

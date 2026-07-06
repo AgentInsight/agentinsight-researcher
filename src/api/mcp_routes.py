@@ -27,7 +27,7 @@ import logging
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
 from src.api.middleware import get_request_agent_id, get_request_user_id
@@ -61,7 +61,7 @@ class MCPConfig(BaseModel):
     description: str | None = Field(None, description="描述")
 
     @model_validator(mode="after")
-    def validate_transport_fields(self) -> "MCPConfig":
+    def validate_transport_fields(self) -> MCPConfig:
         """根据传输类型校验必填字段.
 
         - stdio (本地模式): command 必填, server_url 可选
@@ -73,9 +73,7 @@ class MCPConfig(BaseModel):
         else:
             # sse / streamable_http 远程模式
             if not self.server_url:
-                raise ValueError(
-                    f"{self.transport_type} 传输模式 (远程模式) 必须提供 server_url"
-                )
+                raise ValueError(f"{self.transport_type} 传输模式 (远程模式) 必须提供 server_url")
         return self
 
 
@@ -111,6 +109,10 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
         {
             "success": bool,
             "message": str,            # 成功/失败原因 (中文, 可直接展示给用户)
+            "error_type": str | None,  # 错误类型: package_not_found/connection_refused/
+                                        # timeout/handshake_failed/command_not_found/
+                                        # placeholder_env/missing_command/missing_url/
+                                        # dependency_missing/unknown (成功时为 None)
             "tools_count": int,        # 发现的工具数
             "tools": list[str],        # 工具名列表 (前 10 个)
             "latency_ms": int,         # 测试耗时 (毫秒)
@@ -120,12 +122,37 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
     transport_type = config.get("transport_type", "stdio")
     start = time.time()
 
+    # 检测 env_vars 占位符 (系统 MCP 含 <your-token> 等占位符时直接返回)
+    env_vars_raw = config.get("env_vars")
+    if isinstance(env_vars_raw, str):
+        try:
+            env_vars_parsed = json.loads(env_vars_raw) if env_vars_raw else {}
+        except (json.JSONDecodeError, TypeError):
+            env_vars_parsed = {}
+    elif isinstance(env_vars_raw, dict):
+        env_vars_parsed = env_vars_raw
+    else:
+        env_vars_parsed = {}
+
+    placeholder_pattern = "<"
+    for k, v in env_vars_parsed.items():
+        if isinstance(v, str) and placeholder_pattern in v and ">" in v:
+            return {
+                "success": False,
+                "message": f"环境变量 {k} 含占位符 {v}, 请先克隆并填写真实值",
+                "error_type": "placeholder_env",
+                "tools_count": 0,
+                "tools": [],
+                "latency_ms": int((time.time() - start) * 1000),
+            }
+
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
     except ImportError:
         return {
             "success": False,
             "message": "langchain-mcp-adapters 未安装, 无法测试",
+            "error_type": "dependency_missing",
             "tools_count": 0,
             "tools": [],
             "latency_ms": int((time.time() - start) * 1000),
@@ -141,6 +168,7 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
             return {
                 "success": False,
                 "message": "stdio 模式缺少 command",
+                "error_type": "missing_command",
                 "tools_count": 0,
                 "tools": [],
                 "latency_ms": int((time.time() - start) * 1000),
@@ -170,6 +198,7 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
             return {
                 "success": False,
                 "message": f"{transport_type} 模式缺少 server_url",
+                "error_type": "missing_url",
                 "tools_count": 0,
                 "tools": [],
                 "latency_ms": int((time.time() - start) * 1000),
@@ -182,25 +211,38 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
     # 测试连接 + 列工具 (30s 超时)
     try:
         client = MultiServerMCPClient(server_configs)
-        tools = await asyncio.wait_for(client.get_tools(), timeout=_MCP_TEST_TIMEOUT)
+        try:
+            tools = await asyncio.wait_for(client.get_tools(), timeout=_MCP_TEST_TIMEOUT)
+        except TimeoutError:
+            # 超时后清理子进程
+            try:
+                # MultiServerMCPClient 可能有 close/aclose 方法
+                close_fn = getattr(client, "aclose", None) or getattr(client, "close", None)
+                if close_fn:
+                    result = close_fn()
+                    if hasattr(result, "__await__"):
+                        await result
+            except Exception as cleanup_err:  # noqa: BLE001
+                logger.debug("MCP client cleanup after timeout failed: %s", cleanup_err)
+            return {
+                "success": False,
+                "message": f"测试超时 ({_MCP_TEST_TIMEOUT}s), MCP 服务未响应",
+                "error_type": "timeout",
+                "tools_count": 0,
+                "tools": [],
+                "latency_ms": int((time.time() - start) * 1000),
+            }
         tool_names = [getattr(t, "name", "") for t in tools[:10]]
         latency_ms = int((time.time() - start) * 1000)
         return {
             "success": True,
             "message": f"连接成功, 发现 {len(tools)} 个工具",
+            "error_type": None,
             "tools_count": len(tools),
             "tools": tool_names,
             "latency_ms": latency_ms,
         }
-    except asyncio.TimeoutError:
-        return {
-            "success": False,
-            "message": f"测试超时 ({_MCP_TEST_TIMEOUT}s), MCP 服务未响应",
-            "tools_count": 0,
-            "tools": [],
-            "latency_ms": int((time.time() - start) * 1000),
-        }
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         # npx/uvx 命令不存在 (容器内未安装 Node.js 等)
         cmd = config.get("command", "")
         hint = ""
@@ -208,21 +250,37 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
             hint = " (容器未安装 Node.js, npx 类 MCP 不可用)"
         elif cmd in ("uvx",):
             hint = " (容器未安装 uvx, 请改用其他启动方式)"
+        logger.warning("MCP 测试失败 (name=%s): 启动命令不存在 %s", name, cmd)
         return {
             "success": False,
             "message": f"启动命令不存在: {cmd}{hint}",
+            "error_type": "command_not_found",
             "tools_count": 0,
             "tools": [],
             "latency_ms": int((time.time() - start) * 1000),
         }
     except Exception as e:  # noqa: BLE001
         err_msg = str(e)
-        # 截断过长错误信息
-        if len(err_msg) > 200:
-            err_msg = err_msg[:200] + "..."
+        err_type = type(e).__name__
+        # 完整错误写入日志
+        logger.warning("MCP 测试失败 (name=%s, type=%s): %s", name, err_type, err_msg)
+        # 错误类型识别
+        error_type = "unknown"
+        err_lower = err_msg.lower()
+        if "e404" in err_lower or "not found" in err_lower or "404" in err_lower:
+            error_type = "package_not_found"
+        elif "econnrefused" in err_lower or "connection refused" in err_lower:
+            error_type = "connection_refused"
+        elif "etimedout" in err_lower or "timeout" in err_lower or "timed out" in err_lower:
+            error_type = "timeout"
+        elif "handshake" in err_lower or "protocol" in err_lower:
+            error_type = "handshake_failed"
+        # 返回给前端的 message 截断为 500 字符
+        display_msg = err_msg[:500] + "..." if len(err_msg) > 500 else err_msg
         return {
             "success": False,
-            "message": f"连接失败: {err_msg}",
+            "message": f"连接失败: {display_msg}",
+            "error_type": error_type,
             "tools_count": 0,
             "tools": [],
             "latency_ms": int((time.time() - start) * 1000),
@@ -259,7 +317,8 @@ async def test_mcp_config_by_id(config_id: int) -> dict[str, Any]:
     Returns:
         测试结果 {success, message, tools_count, tools, latency_ms}
     """
-    user_id = get_request_user_id() or "anonymous"
+    # user_id 仅用于请求上下文 (不参与系统 MCP 查询)
+    _user_id = get_request_user_id() or "anonymous"
     agent_id = get_request_agent_id() or "agentinsight-researcher"
 
     pool = await get_pool()
@@ -359,7 +418,8 @@ async def clone_system_mcp_config(config_id: int) -> dict[str, Any]:
             """INSERT INTO mcp_configs
             (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, description)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, FALSE, $9)
-            RETURNING """ + _SELECT_COLUMNS,
+            RETURNING """
+            + _SELECT_COLUMNS,
             agent_id,
             user_id,
             src["name"],
@@ -417,7 +477,8 @@ async def create_mcp_config(config: MCPConfig) -> dict[str, Any]:
             """INSERT INTO mcp_configs
             (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, description)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
-            RETURNING """ + _SELECT_COLUMNS,
+            RETURNING """
+            + _SELECT_COLUMNS,
             agent_id,
             user_id,
             config.name,
@@ -448,7 +509,11 @@ async def create_mcp_config(config: MCPConfig) -> dict[str, Any]:
 
 
 @router.put("/{config_id}")
-async def update_mcp_config(config_id: int, config: MCPConfig) -> dict[str, Any]:
+async def update_mcp_config(
+    config_id: int,
+    config: MCPConfig,
+    skip_test: bool = Query(False, description="跳过可用性测试 (前端已测试时使用)"),
+) -> dict[str, Any]:
     """更新 MCP 配置 (仅用户私有配置, 系统 MCP 不可编辑).
 
     用户需求 3: 启用 MCP 服务时需验证是否可用, 只有可用的服务才能启用.
@@ -456,6 +521,7 @@ async def update_mcp_config(config_id: int, config: MCPConfig) -> dict[str, Any]
     流程:
     - 若 body.enabled=TRUE 且当前 DB 中 enabled=FALSE (从禁用切到启用):
       先测试配置, 失败则拒绝启用 (返回 400 + test_result), 通过则正常 UPDATE
+      (除非 skip_test=True, 此时跳过测试, 由前端自行测试后调用)
     - 其他情况 (enabled=FALSE 或 enabled 不变) → 直接 UPDATE
     """
     user_id = get_request_user_id() or "anonymous"
@@ -476,8 +542,8 @@ async def update_mcp_config(config_id: int, config: MCPConfig) -> dict[str, Any]
 
         current_enabled = current["enabled"]
 
-        # 2. 若要从禁用切到启用, 先测试可用性
-        if config.enabled and not current_enabled:
+        # 2. 若要从禁用切到启用, 先测试可用性 (除非前端已测试 skip_test=True)
+        if config.enabled and not current_enabled and not skip_test:
             test_result = await _test_mcp_config(config.model_dump())
             if not test_result["success"]:
                 # 拒绝启用, 保持 enabled=FALSE

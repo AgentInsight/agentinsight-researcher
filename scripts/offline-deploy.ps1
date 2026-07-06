@@ -22,7 +22,7 @@ if (-not $SkipLoadImages) {
     Write-Host "[1/4] 加载 Docker 镜像 tarball..." -ForegroundColor Yellow
     $images = @(
         "packages/images/postgres-16-alpine.tar",
-        "packages/images/redis-7-alpine.tar",
+        "packages/images/redis-8.tar",
         "packages/images/qdrant-v1.18.0.tar",
         "packages/images/text-embeddings-inference-cpu-1.5.tar"
     )

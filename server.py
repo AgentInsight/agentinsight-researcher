@@ -47,25 +47,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
     # 阶段 3: 可预热图
 
-    # 启动时预热短查询种子向量到 Qdrant (P0-Future-05/06)
-    # 后台异步执行, 不阻塞启动; 失败降级为仅规则层 (AGENTS.md 第 7 章)
-    # P1-Future-07: 同时预热离题/闲聊种子 (off_topic_patterns namespace)
-    async def _preheat_short_query_seeds() -> None:
+    # P2 清理: 启动时一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据
+    # QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 实施后, 第二层 Embeddings+Qdrant 语义匹配
+    # 已移除, 原种子数据不再使用; 启动时清理一次避免残留 (幂等, Qdrant 不可用仅告警)
+    async def _cleanup_legacy_chat_seeds() -> None:
         try:
-            from src.skills.researcher.query_classifier import (
-                get_query_intent_classifier,
-            )
+            from src.skills.researcher.query_classifier import cleanup_legacy_chat_seeds
 
-            classifier = get_query_intent_classifier()
-            # 并行预热短查询 + 离题种子 (两者独立, 互不阻断)
-            await asyncio.gather(
-                classifier._ensure_seed_patterns(),
-                classifier._ensure_off_topic_seed_patterns(),
-            )
+            await cleanup_legacy_chat_seeds()
         except Exception as e:  # noqa: BLE001
-            logger.warning("种子预热失败 (降级为仅规则层): %s", e)
+            logger.warning("Qdrant 旧种子清理失败 (不阻断启动): %s", e)
 
-    asyncio.create_task(_preheat_short_query_seeds())
+    asyncio.create_task(_cleanup_legacy_chat_seeds())
 
     # P0-03: Embeddings 批量预热 (后台执行, 不阻塞启动)
     # 触发 TEI 模型加载, 避免首次真实调用冷启动; 失败不阻断启动

@@ -203,8 +203,7 @@ class EmbeddingsClient:
                     if e.response.status_code == 429 and attempt < max_retries:
                         delay = base_delay * (2**attempt)
                         logger.warning(
-                            "Embedding 429 限流, 第 %d/%d 次重试 (延迟 %.2fs): "
-                            "text_count=%d",
+                            "Embedding 429 限流, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
                             attempt + 1,
                             max_retries,
                             delay,

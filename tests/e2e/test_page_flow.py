@@ -22,6 +22,9 @@ from urllib.parse import urlparse
 import pytest
 from playwright.sync_api import ElementHandle, Page, expect
 
+# AGENTS.md 第 13 章: e2e 测试标记 (需容器栈 service_healthy 后执行)
+pytestmark = pytest.mark.e2e
+
 # AGENTS.md 第 13 章: 测试目标地址从 AGENT_URL 注入, 禁止硬编码
 # 默认 http://agent:8066 (容器内网络); 宿主机直跑用 127.0.0.1:8066
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")

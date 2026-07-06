@@ -210,7 +210,7 @@ class ReportStore:
                 report_id,
             )
             # asyncpg execute 返回 "DELETE N" 格式
-            deleted = result.endswith(" 1")
+            deleted = bool(result.endswith(" 1"))
             if deleted:
                 logger.info("报告已删除: report_id=%s", report_id)
             return deleted

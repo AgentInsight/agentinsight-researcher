@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -127,7 +127,9 @@ class BaseScraper:
 _SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {}
 
 
-def register_scraper(name: str):
+def register_scraper(
+    name: str,
+) -> Callable[[type[BaseScraper]], type[BaseScraper]]:
     """抓取器注册装饰器 (对称 register_searcher, P0-01).
 
     Args:

@@ -24,6 +24,8 @@ class BraveSearcher(BaseSearcher):
 
     name = "brave"
     region = SearchRegion.GLOBAL
+    cost_tier = "paid"  # v1.1 新增
+    quality_score = 76.1  # v1.1 新增
 
     _api_url: str = "https://api.search.brave.com/res/v1/web/search"
 

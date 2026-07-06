@@ -19,7 +19,7 @@
 | 工具协议 | MCP | 2026 事实标准，复用生态 | 自定义委派协议（不推荐，重复造轮） |
 | 向量库 | Qdrant ≥1.18 | API 优雅、过滤强、部署简单 | Pinecone（不推荐，闭源）/Milvus（运维重） |
 | 关系库 | PostgreSQL ≥16 | Checkpointer+业务元数据，分布式共享 | MySQL（不推荐，分布式弱） |
-| 缓存 | Redis ≥7.0 | 热点缓存+限流+短期会话 | Memcached（不推荐，无持久化） |
+| 缓存 | Redis ≥8.0 | 热点缓存+限流+短期会话 | Memcached（不推荐，无持久化） |
 | Embeddings | bge-large-zh-v1.5 | 中文最强开源嵌入，本地零成本 | OpenAI embedding（不推荐，数据出境） |
 | Rerank | bge-reranker-v2-m3 | 中文 Rerank SOTA，本地部署 | Cohere Rerank（不推荐，闭源收费） |
 | BM25 | rank-bm25+jieba | 中文分词+IDF，混合检索必备 | 字符 2-gram（降级兜底，非首选） |
@@ -255,7 +255,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 | `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8088 | `GET /health` |
 | `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8089 | `GET /health` |
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
-| `redis` | `redis:≥7` | 6379 | `redis-cli ping` |
+| `redis` | `redis:≥8` | 6379 | `redis-cli ping` |
 | `postgres`（生产联网模式 + QA 模式） | `postgres:≥17`（业务表由 Agent 启动时执行 `scripts/init.sql` 创建） | 5432 | `pg_isready -U <user>` |
 
 **APIKey 鉴权（核心约定，优先选择；密钥硬编码属第 11 章硬约束）**：

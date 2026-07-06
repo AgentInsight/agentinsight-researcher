@@ -1,18 +1,15 @@
-"""查询意图分类器 (P0-Future-05/06, P1-Future-07).
+"""查询意图分类器 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 已实施 P0/P1/P2).
 
 AGENTS.md 第 5 章: 节点纯函数, 无副作用.
 AGENTS.md 第 9 章: LLM 调用经 llm/ 的 LLMClient (LiteLLM), 禁厂商 SDK 直连.
 AGENTS.md 第 10 章: 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器).
-AGENTS.md 第 7 章: Embeddings 经 rag/embeddings.py, Qdrant 经 rag/qdrant_manager.py, 禁直连.
+AGENTS.md 第 3 章: skills/ 不应依赖 rag/ (已解除 embeddings/qdrant 依赖).
 
-三层分类逻辑 (P1-Future-07 升级为四分类, 对标 Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail):
+两层分类逻辑 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配, 改用 FAST_LLM + Redis 缓存):
 - 第一层(规则): 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
-- 第二层(Embeddings 语义): Qdrant short_query_patterns / off_topic_patterns namespace 语义匹配
-  - SHORT_QUERY 命中阈值 0.85 (短句精确匹配)
-  - OFF_TOPIC 命中阈值 0.75 (闲聊句子语义距离更大, 阈值放宽)
-- 第三层(LLM FAST 层): 仅当前两层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
-- LLM 调用失败默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程)
-- 语义层失败降级到 LLM 层 (不阻断主流程)
+- 第二层(LLM FAST 层): 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
+  - 命中结果写入 Redis 缓存 (TTL 24h), 高频重复 query 零 LLM 调用
+  - LLM 调用失败默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程)
 
 短查询(如"你好"/"1"/"天气")与离题闲聊(如"今天怎么样"/"讲个笑话"/"你多大了")直接返回
 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph, 零 LLM 成本.
@@ -20,7 +17,7 @@ settings.short_query_reply / settings.off_topic_reply, 不走任何 graph, 零 L
 
 from __future__ import annotations
 
-import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -28,11 +25,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+import redis.asyncio as aioredis
+
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier
 from src.observability.tracing import trace_chain
-from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
-from src.rag.qdrant_manager import QdrantManager, get_qdrant_manager
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +43,7 @@ _REPEAT_PATTERN_RE = re.compile(r"^(.)\1+$")
 _SINGLE_WORD_RE = re.compile(r"^[a-zA-Z\u4e00-\u9fa5]+$")
 
 # 常见短查询短语 (精确匹配, 英文小写; 匹配时 query.lower() 比对)
-# 用于在规则层快速拦截高频短查询, 避免落入 Embeddings 语义层误判
+# 用于在规则层快速拦截高频短查询
 _COMMON_SHORT_PHRASES: frozenset[str] = frozenset(
     {
         # 中文常见短语
@@ -110,205 +107,9 @@ _COMMON_SHORT_PHRASES: frozenset[str] = frozenset(
     }
 )
 
-# 短查询种子模式 (懒初始化时预填充到 Qdrant short_query_patterns namespace)
-# 涵盖问候/告别/确认/数字/测试等常见短查询, 用 Embeddings 语义匹配替代硬编码字符串匹配
-# 基于网络常见短查询模式整理, 按分类组织 (178 个不重复种子)
-_SHORT_QUERY_SEED: list[str] = [
-    # 问候类 (30)
-    "你好",
-    "您好",
-    "嗨",
-    "哈喽",
-    "hi",
-    "hello",
-    "hey",
-    "早上好",
-    "下午好",
-    "晚上好",
-    "晚安",
-    "hey there",
-    "hi there",
-    "hello there",
-    "大家好",
-    "哈喽啊",
-    "嗨嗨",
-    "喂",
-    "耶",
-    "wow",
-    "sup",
-    "yo",
-    "hola",
-    "bonjour",
-    "你好啊",
-    "你好呀",
-    "哈喽哈喽",
-    "嗨呀",
-    "哎呀",
-    "诶",
-    # 确认/回应类 (26)
-    "好的",
-    "ok",
-    "嗯",
-    "哦",
-    "yes",
-    "no",
-    "是",
-    "否",
-    "对",
-    "不对",
-    "收到",
-    "明白",
-    "嗯嗯",
-    "嗯哼",
-    "ok啦",
-    "okay",
-    "okey",
-    "sure",
-    "of course",
-    "没问题",
-    "行",
-    "行吧",
-    "好",
-    "好的呀",
-    "好滴",
-    "好嘞",
-    # 感谢类 (17)
-    "谢谢",
-    "感谢",
-    "thanks",
-    "thank you",
-    "多谢",
-    "辛苦了",
-    "谢啦",
-    "3q",
-    "thx",
-    "ty",
-    "thankss",
-    "多谢啦",
-    "感谢感谢",
-    "谢了",
-    "辛苦",
-    "劳烦了",
-    "麻烦你了",
-    # 告别类 (19)
-    "再见",
-    "bye",
-    "goodbye",
-    "拜拜",
-    "88",
-    "下次见",
-    "回头见",
-    "see you",
-    "byebye",
-    "byeee",
-    "see ya",
-    "later",
-    "cya",
-    "peace",
-    "拜",
-    "拜啦",
-    "回见",
-    "明天见",
-    "下次聊",
-    # 测试/无意义类 (20)
-    "测试",
-    "test",
-    "试试",
-    "试一下",
-    "1",
-    "2",
-    "3",
-    "123",
-    "aaa",
-    "bbb",
-    "111",
-    "222",
-    "333",
-    "aaa111",
-    "asdf",
-    "qwerty",
-    "foo",
-    "bar",
-    "baz",
-    "测试中",
-    # 询问 bot 能力类 (25)
-    "你是谁",
-    "你叫什么",
-    "你能做什么",
-    "帮助",
-    "help",
-    "菜单",
-    "menu",
-    "功能",
-    "你是ai吗",
-    "你是机器人吗",
-    "怎么用",
-    "使用说明",
-    "介绍",
-    "intro",
-    "about",
-    "你能帮我什么",
-    "你能干啥",
-    "你有啥功能",
-    "如何使用",
-    "怎么用你",
-    "你是什么",
-    "what is this",
-    "你是ai",
-    "你是机器人",
-    "你是啥",
-    # 闲聊/情绪类 (22)
-    "在吗",
-    "在不在",
-    "有人吗",
-    "天气",
-    "今天天气",
-    "时间",
-    "几点了",
-    "日期",
-    "今天几号",
-    "星期几",
-    "无聊",
-    "聊天",
-    "在吗在吗",
-    "在不",
-    "有人",
-    "陪我聊天",
-    "聊聊天",
-    "无聊啊",
-    "好无聊",
-    "开心",
-    "难过",
-    "累",
-    # 英文短查询补充 (19)
-    "weather",
-    "time",
-    "date",
-    "help me",
-    "can you",
-    "who are you",
-    "what can you do",
-    "good morning",
-    "good night",
-    "how are you",
-    "hey man",
-    "good evening",
-    "good afternoon",
-    "howdy",
-    "greetings",
-    "what's up",
-    "sup man",
-    "how's it going",
-    "long time",
-]
-
-# 短查询种子版本号, 用于增量更新 Qdrant (版本变化时触发重新写入)
-_SHORT_QUERY_SEED_VERSION: str = "v6.0"
-
 # 离题/闲聊正则模式 (P1-Future-07)
-# 用于在规则层快速拦截高频闲聊句式, 避免落入 Embeddings 语义层误判
-# 命中即返回 OFF_TOPIC (零 LLM 成本, 直接返回 off_topic_reply)
-# 设计原则: 仅匹配明显与研究/分析无关的句式, 模糊语义留给 Embeddings/LLM 层
+# 用于在规则层快速拦截高频闲聊句式, 命中即返回 OFF_TOPIC (零 LLM 成本)
+# 设计原则: 仅匹配明显与研究/分析无关的句式, 模糊语义留给 LLM 层
 _CHITCHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
     # 询问 bot 身份/属性
     re.compile(r"^(?:你叫什么|你叫啥|你的名字|你叫什么名字|你叫啥名字)[？?]?"),
@@ -355,146 +156,6 @@ _CHITCHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^(?:你聪明吗|你有意识吗|你有感情吗|你会思考吗)[？?]?"),
 )
 
-# 离题/闲聊种子模式 (P1-Future-07, 懒初始化时预填充到 Qdrant off_topic_patterns namespace)
-# 涵盖问候/身份/娱乐/常识/情感/天气/时间等闲聊, 用 Embeddings 语义匹配
-# 按分类组织 (118 个不重复种子, 与 _SHORT_QUERY_SEED 互补:
-#   - SHORT_QUERY_SEED 覆盖短词/短语 (长度通常 ≤6)
-#   - _OFF_TOPIC_SEED 覆盖句子/完整问句 (语义匹配闲聊意图))
-_OFF_TOPIC_SEED: list[str] = [
-    # 询问 bot 身份/属性 (12)
-    "你叫什么名字",
-    "你叫啥",
-    "你多大了",
-    "你几岁了",
-    "你是男是女",
-    "你有女朋友吗",
-    "你有男朋友吗",
-    "你结婚了吗",
-    "你在哪里",
-    "你住哪里",
-    "你是真人吗",
-    "你有兄弟姐妹吗",
-    # 询问 bot 心情/状态 (10)
-    "今天怎么样",
-    "你今天过得好吗",
-    "你最近怎么样",
-    "你开心吗",
-    "你累吗",
-    "你忙吗",
-    "你心情怎么样",
-    "你怎么了",
-    "你在干嘛",
-    "你在做什么",
-    # 娱乐/创作请求 (12)
-    "讲个笑话",
-    "说个笑话",
-    "讲个故事",
-    "说个故事",
-    "写首诗",
-    "写首歌",
-    "唱首歌",
-    "出个谜语",
-    "说个绕口令",
-    "陪我玩个游戏",
-    "给我讲个段子",
-    "来个脑筋急转弯",
-    # 常识/算术问题 (10)
-    "1加1等于几",
-    "1+1等于几",
-    "2+2等于几",
-    "天空为什么是蓝的",
-    "太阳从哪边升起",
-    "水为什么会沸腾",
-    "地球是圆的吗",
-    "地球有多大",
-    "光速是多少",
-    "人为什么要睡觉",
-    # 时间/日期/天气 (10)
-    "现在几点",
-    "今天星期几",
-    "今天天气怎么样",
-    "明天天气如何",
-    "今天会下雨吗",
-    "今天冷吗",
-    "今天热吗",
-    "现在什么时间",
-    "你家有几口人",
-    "你会做饭吗",
-    # 情绪/陪伴 (15)
-    "我好开心",
-    "我好难过",
-    "我好累",
-    "我好无聊",
-    "我好孤独",
-    "我心情不好",
-    "我不开心",
-    "我很难过",
-    "我很郁闷",
-    "我烦死了",
-    "和我聊天",
-    "陪我聊聊",
-    "和我说说话",
-    "我讨厌我自己",
-    "我太开心了",
-    # 评价/情感表达 (10)
-    "你真聪明",
-    "你真棒",
-    "你真厉害",
-    "你真笨",
-    "你真傻",
-    "我喜欢你",
-    "我爱你",
-    "我讨厌你",
-    "我恨你",
-    "你真可爱",
-    # 转移话题/拒绝 (8)
-    "我不想研究",
-    "我不想用了",
-    "算了",
-    "不研究了",
-    "不用了",
-    "不需要了",
-    "换个别的话题",
-    "聊点别的",
-    # 测试 bot 智能 (8)
-    "你聪明吗",
-    "你有意识吗",
-    "你有感情吗",
-    "你会思考吗",
-    "你能听懂我说话吗",
-    "你能理解我吗",
-    "你明白我在说什么吗",
-    "你是人工智能吗",
-    # 英文闲聊补充 (13)
-    "how are you today",
-    "what's your name",
-    "how old are you",
-    "are you a robot",
-    "are you human",
-    "tell me a joke",
-    "sing me a song",
-    "what time is it",
-    "what's the weather",
-    "do you have feelings",
-    "are you conscious",
-    "i love you",
-    "i'm bored",
-    # 其他闲聊补充 (10, 替换与 _SHORT_QUERY_SEED 重复的项)
-    "你最喜欢什么颜色",
-    "你能记住我吗",
-    "你有什么爱好",
-    "你平时做什么",
-    "你会唱歌吗",
-    "你喜欢什么音乐",
-    "你看过什么电影",
-    "你有什么特长",
-    "你喜欢读书吗",
-    "你会做什么菜",
-]
-
-# 离题种子版本号, 用于增量更新 Qdrant (版本变化时触发重新写入)
-_OFF_TOPIC_SEED_VERSION: str = "v1.0"
-
 
 class QueryIntent(StrEnum):
     """查询意图类型."""
@@ -514,77 +175,79 @@ class _RuleResult:
 
 
 class QueryIntentClassifier:
-    """查询意图分类器 (P0-Future-05/06).
+    """查询意图分类器 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 已实施 P0/P1/P2).
 
-    三层分类:
-    1. 规则层: 长度<min_length / 纯数字 / 纯标点 → SHORT_QUERY
-    2. Embeddings 语义层: Qdrant short_query_patterns namespace 语义匹配 → SHORT_QUERY
-    3. LLM FAST 层: 仅当前两层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT
-       失败时默认 RESEARCH (宁可走研究流程也不误判)
+    两层分类 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配):
+    1. 规则层: 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
+    2. LLM FAST 层: 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
+       - 命中结果写入 Redis 缓存 (TTL 24h, P1)
+       - 失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径)
 
-    语义层失败时降级到 LLM 层 (不阻断主流程).
+    设计原则 (对标 FrugalGPT Cascade):
+    - FAST_LLM 优先 (glm-4-flash, 免费层)
+    - Redis 缓存高频 query (24h TTL, 零 LLM 调用)
+    - 不依赖 Embeddings/Qdrant (符合 AGENTS.md 第 3 章 skills/ 不依赖 rag/ 边界)
     """
 
     settings: Settings
     _llm: LLMClient
-    _embeddings: EmbeddingsClient
-    _qdrant: QdrantManager
-    _seed_lock: asyncio.Lock
-    _seed_initialized: bool
-    # 种子数据存在性缓存 (None=未知, True=有数据, False=无数据)
-    # 避免每次 _semantic_match 都调用 embeddings (P1-04: embeddings 429 优化)
-    _seed_has_data: bool | None
-    _off_topic_seed_has_data: bool | None
+    _redis: aioredis.Redis | None
+    _redis_initialized: bool
 
     def __init__(
         self,
         settings: Settings | None = None,
         llm: LLMClient | None = None,
-        embeddings: EmbeddingsClient | None = None,
-        qdrant: QdrantManager | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._llm = llm or LLMClient(self.settings)
-        self._embeddings = embeddings or get_embeddings_client()
-        self._qdrant = qdrant or get_qdrant_manager()
-        self._seed_lock = asyncio.Lock()
-        self._seed_initialized = False
-        # P1-Future-07: 离题种子独立初始化状态 (与短查询种子分离, 互不阻断)
-        self._off_topic_seed_initialized = False
-        # P1-04: 种子数据存在性缓存 (避免无数据时调用 embeddings)
-        self._seed_has_data = None
-        self._off_topic_seed_has_data = None
+        self._redis = None
+        self._redis_initialized = False
 
-    @property
-    def _short_query_namespace(self) -> str:
-        """短查询种子模式的 Qdrant namespace.
+    async def _get_redis(self) -> aioredis.Redis | None:
+        """惰性初始化 Redis 连接 (P1 缓存层).
 
-        CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md: 拆分为 chat/data 两个 namespace 池.
-        短查询种子归入 chat namespace: {agent_id}-chat:short_query.
-        种子模式为全局通用问候/告别等, 不含 user_id (非用户私有数据).
+        Redis 不可用时降级为不缓存 (每次走 LLM), 不阻断主流程.
+        遵循 AGENTS.md 第 7 章 Redis 约定: key 加 {agent_id} 前缀.
         """
-        return f"{self._qdrant.build_chat_namespace()}:short_query"
+        if not self.settings.query_classify_cache_enabled:
+            return None
+        if self._redis_initialized:
+            return self._redis
+        try:
+            self._redis = aioredis.from_url(
+                self.settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                password=self.settings.redis_auth or None,
+            )
+            await self._redis.ping()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("QueryClassifier Redis 连接失败, 降级为不缓存: %s", e)
+            self._redis = None
+        self._redis_initialized = True
+        return self._redis
 
-    @property
-    def _off_topic_namespace(self) -> str:
-        """离题/闲聊种子模式的 Qdrant namespace (P1-Future-07).
+    def _cache_key(self, query: str, has_report: bool) -> str:
+        """生成分类结果缓存 key.
 
-        CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md: 拆分为 chat/data 两个 namespace 池.
-        离题种子归入 chat namespace: {agent_id}-chat:off_topic.
-        种子模式为全局通用闲聊模式, 不含 user_id (非用户私有数据).
+        AGENTS.md 第 7 章 Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
+        此处为全局级分类缓存 (不区分用户), 使用 _global 占位.
+        key 含 has_report 维度 (同一 query 在有/无报告上下文下分类可能不同).
         """
-        return f"{self._qdrant.build_chat_namespace()}:off_topic"
+        query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+        return f"{self.settings.agent_name}:_global:query_classify:intent:{has_report}:{query_hash}"
 
     def _rule_classify(self, query: str) -> _RuleResult | None:
         """第一层规则分类 (快速).
 
         Returns:
             命中规则时返回 _RuleResult(SHORT_QUERY 或 OFF_TOPIC, reason);
-            未命中返回 None (需进入第二层语义分类).
+            未命中返回 None (需进入第二层 LLM 分类).
         """
         q = query.strip()
 
-        # P1-Future-07: 离题/闲聊正则优先匹配 (在短查询规则之前)
+        # 离题/闲聊正则优先匹配 (在短查询规则之前)
         # 仅当 off_topic_enabled 时启用, 避免与短查询保护冲突
         if self.settings.off_topic_enabled:
             for pattern in _CHITCHAT_PATTERNS:
@@ -615,8 +278,7 @@ class QueryIntentClassifier:
             return _RuleResult(QueryIntent.SHORT_QUERY, "repeated_pattern")
 
         # 6. 纯字母/中文单单词且长度≤query_classify_single_word_max_chars (如 "Hello"/"Hi"/"test"/"ok"/"你好")
-        #    不含空格/数字/标点; 中文 2-6 字短词亦拦截 (避免 "你好" 落入语义层误判)
-        #    P2: 配置化 (原硬编码 6, 现 settings.query_classify_single_word_max_chars)
+        #    不含空格/数字/标点; 中文 2-6 字短词亦拦截
         if len(q) <= self.settings.query_classify_single_word_max_chars and _SINGLE_WORD_RE.match(
             q
         ):
@@ -628,266 +290,10 @@ class QueryIntentClassifier:
 
         return None
 
-    async def _ensure_seed_patterns(self) -> None:
-        """懒初始化种子模式到 Qdrant (带版本校验, 支持增量更新).
-
-        使用双重检查锁定避免并发重复写入.
-        通过 _SHORT_QUERY_SEED_VERSION 做 payload 版本校验:
-        - 版本匹配 → 跳过写入
-        - 版本不匹配或不存在 → 删除旧数据, 重新写入全部种子
-        预填充失败不阻断, 后续语义匹配会降级到 LLM 层.
-        """
-        if self._seed_initialized:
-            return
-
-        async with self._seed_lock:
-            if self._seed_initialized:
-                return
-            try:
-                await self._qdrant.ensure_collection()
-
-                # 用首条种子向量检索, 检查是否已存在当前版本
-                probe_vector = await self._embeddings.embed_query(_SHORT_QUERY_SEED[0])
-                existing = await self._qdrant.search(
-                    query_vector=probe_vector,
-                    namespaces=[self._short_query_namespace],
-                    limit=1,
-                )
-                if existing:
-                    top_meta = existing[0].get("metadata", {}) or {}
-                    if top_meta.get("seed_version") == _SHORT_QUERY_SEED_VERSION:
-                        self._seed_initialized = True
-                        logger.debug(
-                            "短查询种子已存在 (version=%s), 跳过写入",
-                            _SHORT_QUERY_SEED_VERSION,
-                        )
-                        return
-
-                # 版本不匹配或不存在, 重新写入
-                await self._write_seed_patterns()
-                self._seed_initialized = True
-            except Exception as e:  # noqa: BLE001
-                # 预填充失败不阻断, 标记已尝试避免反复失败重试
-                logger.warning("短查询种子初始化失败 (降级为仅规则层): %s", e)
-                self._seed_initialized = True
-
-    async def _write_seed_patterns(self) -> None:
-        """写入/更新短查询种子到 Qdrant (版本变化时先删后写).
-
-        AGENTS.md 第 7 章: payload 必须含 content+metadata+namespace;
-        种子版本号写入 metadata.seed_version 做增量更新校验.
-        """
-        # 版本变化时先清理旧数据 (避免残留旧版本种子)
-        await self._qdrant.delete_by_namespace(self._short_query_namespace)
-
-        points: list[dict[str, Any]] = [
-            {
-                "content": pattern,
-                "metadata": {
-                    "type": "short_query_seed",
-                    "category": "chat",
-                    "seed_version": _SHORT_QUERY_SEED_VERSION,
-                },
-            }
-            for pattern in _SHORT_QUERY_SEED
-        ]
-        await self._qdrant.upsert_points(
-            namespace=self._short_query_namespace,
-            points=points,
-        )
-        logger.info(
-            "短查询种子已写入 Qdrant (namespace=%s, version=%s, count=%d)",
-            self._short_query_namespace,
-            _SHORT_QUERY_SEED_VERSION,
-            len(points),
-        )
-
-    async def _semantic_match(self, query: str) -> bool:
-        """第二层 Embeddings 语义匹配短查询.
-
-        1. 将 query 用 EmbeddingsClient 向量化
-        2. 在 Qdrant short_query_patterns namespace 搜索
-        3. top-1 score > short_query_similarity_threshold → SHORT_QUERY
-
-        任何异常都降级为 False (不阻断主流程, 进入 LLM 层).
-        """
-        try:
-            await self._ensure_seed_patterns()
-
-            # P1-04: 种子数据存在性检查 (避免无数据时调用 embeddings, 减少 429)
-            # 缓存结果, 避免每次都调用 Qdrant count
-            if self._seed_has_data is None:
-                self._seed_has_data = await self._qdrant.namespace_has_data(
-                    self._short_query_namespace
-                )
-                if not self._seed_has_data:
-                    logger.warning(
-                        "短查询种子 namespace 无数据, 语义层降级到 LLM 层 "
-                        "(避免无意义 embeddings 调用)"
-                    )
-            if not self._seed_has_data:
-                return False
-
-            query_vector = await self._embeddings.embed_query(query)
-            if not query_vector:
-                logger.warning("Embedding 返回空向量, 语义层降级")
-                return False
-
-            results = await self._qdrant.search(
-                query_vector=query_vector,
-                namespaces=[self._short_query_namespace],
-                limit=1,
-            )
-
-            if not results:
-                return False
-
-            top_score = float(results[0].get("score") or 0.0)
-            matched = top_score > self.settings.short_query_similarity_threshold
-            if matched:
-                logger.debug(
-                    "语义匹配命中短查询: query=%r top_score=%.4f threshold=%.2f",
-                    query[:50],
-                    top_score,
-                    self.settings.short_query_similarity_threshold,
-                )
-            return matched
-        except Exception as e:  # noqa: BLE001
-            logger.warning("语义匹配失败, 降级到 LLM 层: %s", e)
-            return False
-
-    async def _ensure_off_topic_seed_patterns(self) -> None:
-        """懒初始化离题种子模式到 Qdrant (P1-Future-07, 带版本校验, 支持增量更新).
-
-        使用双重检查锁定避免并发重复写入.
-        通过 _OFF_TOPIC_SEED_VERSION 做 payload 版本校验:
-        - 版本匹配 → 跳过写入
-        - 版本不匹配或不存在 → 删除旧数据, 重新写入全部种子
-        预填充失败不阻断, 后续语义匹配会降级到 LLM 层.
-        """
-        if self._off_topic_seed_initialized:
-            return
-
-        async with self._seed_lock:
-            if self._off_topic_seed_initialized:
-                return
-            try:
-                await self._qdrant.ensure_collection()
-
-                # 用首条种子向量检索, 检查是否已存在当前版本
-                probe_vector = await self._embeddings.embed_query(_OFF_TOPIC_SEED[0])
-                existing = await self._qdrant.search(
-                    query_vector=probe_vector,
-                    namespaces=[self._off_topic_namespace],
-                    limit=1,
-                )
-                if existing:
-                    top_meta = existing[0].get("metadata", {}) or {}
-                    if top_meta.get("seed_version") == _OFF_TOPIC_SEED_VERSION:
-                        self._off_topic_seed_initialized = True
-                        logger.debug(
-                            "离题种子已存在 (version=%s), 跳过写入",
-                            _OFF_TOPIC_SEED_VERSION,
-                        )
-                        return
-
-                # 版本不匹配或不存在, 重新写入
-                await self._write_off_topic_seed_patterns()
-                self._off_topic_seed_initialized = True
-            except Exception as e:  # noqa: BLE001
-                # 预填充失败不阻断, 标记已尝试避免反复失败重试
-                logger.warning("离题种子初始化失败 (降级为仅规则+LLM 层): %s", e)
-                self._off_topic_seed_initialized = True
-
-    async def _write_off_topic_seed_patterns(self) -> None:
-        """写入/更新离题种子到 Qdrant (P1-Future-07, 版本变化时先删后写).
-
-        AGENTS.md 第 7 章: payload 必须含 content+metadata+namespace;
-        种子版本号写入 metadata.seed_version 做增量更新校验.
-        """
-        # 版本变化时先清理旧数据 (避免残留旧版本种子)
-        await self._qdrant.delete_by_namespace(self._off_topic_namespace)
-
-        points: list[dict[str, Any]] = [
-            {
-                "content": pattern,
-                "metadata": {
-                    "type": "off_topic_seed",
-                    "category": "chat",
-                    "seed_version": _OFF_TOPIC_SEED_VERSION,
-                },
-            }
-            for pattern in _OFF_TOPIC_SEED
-        ]
-        await self._qdrant.upsert_points(
-            namespace=self._off_topic_namespace,
-            points=points,
-        )
-        logger.info(
-            "离题种子已写入 Qdrant (namespace=%s, version=%s, count=%d)",
-            self._off_topic_namespace,
-            _OFF_TOPIC_SEED_VERSION,
-            len(points),
-        )
-
-    async def _semantic_match_off_topic(self, query: str) -> bool:
-        """第二层 Embeddings 语义匹配离题/闲聊 (P1-Future-07).
-
-        1. 将 query 用 EmbeddingsClient 向量化
-        2. 在 Qdrant off_topic_patterns namespace 搜索
-        3. top-1 score > off_topic_similarity_threshold → OFF_TOPIC
-
-        任何异常都降级为 False (不阻断主流程, 进入 LLM 层).
-        """
-        try:
-            await self._ensure_off_topic_seed_patterns()
-
-            # P1-04: 种子数据存在性检查 (避免无数据时调用 embeddings, 减少 429)
-            # 缓存结果, 避免每次都调用 Qdrant count
-            if self._off_topic_seed_has_data is None:
-                self._off_topic_seed_has_data = await self._qdrant.namespace_has_data(
-                    self._off_topic_namespace
-                )
-                if not self._off_topic_seed_has_data:
-                    logger.warning(
-                        "离题种子 namespace 无数据, 离题语义层降级到 LLM 层 "
-                        "(避免无意义 embeddings 调用)"
-                    )
-            if not self._off_topic_seed_has_data:
-                return False
-
-            query_vector = await self._embeddings.embed_query(query)
-            if not query_vector:
-                logger.warning("Embedding 返回空向量, 离题语义层降级")
-                return False
-
-            results = await self._qdrant.search(
-                query_vector=query_vector,
-                namespaces=[self._off_topic_namespace],
-                limit=1,
-            )
-
-            if not results:
-                return False
-
-            top_score = float(results[0].get("score") or 0.0)
-            matched = top_score > self.settings.off_topic_similarity_threshold
-            if matched:
-                logger.debug(
-                    "语义匹配命中离题: query=%r top_score=%.4f threshold=%.2f",
-                    query[:50],
-                    top_score,
-                    self.settings.off_topic_similarity_threshold,
-                )
-            return matched
-        except Exception as e:  # noqa: BLE001
-            logger.warning("离题语义匹配失败, 降级到 LLM 层: %s", e)
-            return False
-
     async def _llm_classify(self, query: str, has_report: bool) -> QueryIntent:
-        """第三层 LLM FAST 分类 (P1-Future-07 升级为三分类).
+        """第二层 LLM FAST 分类 (P2 强化 prompt + few-shot 例子).
 
-        用 LLMTier.FAST (deepseek-chat, temperature=0.0) 分类 RESEARCH / CHAT / OFF_TOPIC.
+        用 LLMTier.FAST (glm-4-flash, temperature=0.0) 分类 RESEARCH / CHAT / OFF_TOPIC.
         失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径).
 
         Args:
@@ -903,6 +309,7 @@ class QueryIntentClassifier:
             else "注意: 用户当前会话无研究报告, 闲聊/问候/常识问题倾向判定为 off_topic."
         )
 
+        # P2 强化 prompt: 增加分类定义细节 + few-shot 例子 (覆盖复合意图/方言/多语言)
         system_prompt = (
             "你是查询意图分类器. 根据用户查询判断意图类别, 仅返回 JSON.\n\n"
             "类别定义:\n"
@@ -911,7 +318,19 @@ class QueryIntentClassifier:
             '- "chat": 针对已有研究报告的追问/澄清/讨论 '
             '(如"这个数据来源是什么"|"展开讲讲第二点"|"总结一下")\n'
             '- "off_topic": 与研究/分析无关的闲聊/问候/身份询问/娱乐/常识/私人问题 '
-            '(如"你好"|"今天怎么样"|"讲个笑话"|"你多大了"|"1+1等于几"|"天气如何")\n\n'
+            '(如"你好"|"今天怎么样"|"讲个笑话"|"你多大了"|"1+1等于几"|"天气如何"|"今儿天气咋样")\n\n'
+            "few-shot 例子 (用于校准复合意图与边界用例):\n"
+            'query: "你好" → {"intent": "off_topic"}\n'
+            'query: "你能做什么" → {"intent": "off_topic"}\n'
+            'query: "1+1等于几" → {"intent": "off_topic"}\n'
+            'query: "帮我研究一下量子计算" → {"intent": "research"}\n'
+            'query: "上面报告里提到的第三个风险能详细说说吗" → {"intent": "chat"}\n'
+            'query: "你好, 我想研究量子计算" → {"intent": "research"} '
+            "(复合意图以研究为主, 不要被问候诱导为 off_topic)\n"
+            'query: "hi there" → {"intent": "off_topic"}\n'
+            'query: "今儿天气咋样" → {"intent": "off_topic"} (方言应识别为闲聊)\n'
+            'query: "分析 Apple 2024 财报" → {"intent": "research"}\n'
+            'query: "继续聊吧" → {"intent": "off_topic"}\n\n'
             f"{hint}\n\n"
             '返回 JSON: {"intent": "research" | "chat" | "off_topic"}, '
             "仅返回 JSON, 不要其他内容."
@@ -954,7 +373,7 @@ class QueryIntentClassifier:
             )
             return self._fallback_intent()
         except Exception as e:  # noqa: BLE001
-            # P1-Future-07: 业界标准 - LLM 失败走最轻路径 (默认 OFF_TOPIC, 避免误导向研究)
+            # 业界标准 - LLM 失败走最轻路径 (默认 OFF_TOPIC, 避免误导向研究)
             logger.warning(
                 "LLM 意图分类失败, 走 llm_classify_fallback=%s (业界默认最轻路径): %s",
                 self.settings.llm_classify_fallback,
@@ -963,7 +382,7 @@ class QueryIntentClassifier:
             return self._fallback_intent()
 
     def _fallback_intent(self) -> QueryIntent:
-        """返回配置的 LLM 失败兜底意图 (P1-Future-07).
+        """返回配置的 LLM 失败兜底意图.
 
         默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程).
         可通过 settings.llm_classify_fallback 配置为 "research" 覆盖.
@@ -972,13 +391,48 @@ class QueryIntentClassifier:
             return QueryIntent.RESEARCH
         return QueryIntent.OFF_TOPIC
 
-    async def classify(self, query: str, has_report: bool) -> QueryIntent:
-        """分类查询意图 (P1-Future-07 升级为四分类).
+    async def _classify_with_cache(self, query: str, has_report: bool) -> tuple[QueryIntent, str]:
+        """带 Redis 缓存的 LLM 分类 (P1).
 
-        三层分类:
-        1. 规则层优先 (短查询保护 + 闲聊正则)
-        2. Embeddings 语义层 (短查询 namespace + 离题 namespace, 规则层未命中时)
-        3. LLM FAST 层 (前两层未命中时, 三分类 RESEARCH/CHAT/OFF_TOPIC)
+        Returns:
+            (intent, source) 元组; source ∈ {"cache_hit", "llm", "llm_fallback"}.
+        """
+        # 缓存命中检查
+        r = await self._get_redis()
+        if r is not None:
+            try:
+                cached = await r.get(self._cache_key(query, has_report))
+                if cached is not None:
+                    cached_str = str(cached).lower().strip()
+                    for intent in QueryIntent:
+                        if intent.value == cached_str:
+                            return intent, "cache_hit"
+            except Exception as e:  # noqa: BLE001
+                logger.warning("QueryClassifier 缓存读取失败, 走 LLM: %s", e)
+
+        # 缓存未命中或不可用 → 调 LLM
+        intent = await self._llm_classify(query, has_report)
+        source = "llm_fallback" if intent == self._fallback_intent() else "llm"
+
+        # 写入缓存 (仅缓存 LLM 真实分类结果, 不缓存 fallback, 避免缓存污染)
+        if r is not None and source == "llm":
+            try:
+                await r.setex(
+                    self._cache_key(query, has_report),
+                    self.settings.query_classify_cache_ttl,
+                    intent.value,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("QueryClassifier 缓存写入失败 (不阻断): %s", e)
+
+        return intent, source
+
+    async def classify(self, query: str, has_report: bool) -> QueryIntent:
+        """分类查询意图 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配).
+
+        两层分类:
+        1. 规则层 (短查询保护 + 闲聊正则) → SHORT_QUERY / OFF_TOPIC
+        2. LLM FAST 层 + Redis 缓存 → RESEARCH / CHAT / OFF_TOPIC
 
         Args:
             query: 用户原始查询
@@ -990,7 +444,7 @@ class QueryIntentClassifier:
         async with trace_chain(
             name="query-intent-classifier",
             input={
-                "query": query[:200],
+                "query": query[: self.settings.query_classify_trace_input_truncate],
                 "has_report": has_report,
             },
         ) as span:
@@ -1006,44 +460,14 @@ class QueryIntentClassifier:
                 )
                 return rule_result.intent
 
-            # 第二层: Embeddings 语义匹配 (并行查询短查询 + 离题两个 namespace)
-            # 并行执行避免串行延迟; 两个语义层独立, 任一命中即返回
-            short_match, off_topic_match = await asyncio.gather(
-                self._semantic_match(query),
-                self._semantic_match_off_topic(query),
-            )
-
-            if short_match:
-                span.update(
-                    output={
-                        "intent": QueryIntent.SHORT_QUERY.value,
-                        "layer": "semantic",
-                    },
-                    metadata={
-                        "threshold": self.settings.short_query_similarity_threshold,
-                        "namespace": "short_query_patterns",
-                    },
-                )
-                return QueryIntent.SHORT_QUERY
-
-            if off_topic_match:
-                span.update(
-                    output={
-                        "intent": QueryIntent.OFF_TOPIC.value,
-                        "layer": "semantic",
-                    },
-                    metadata={
-                        "threshold": self.settings.off_topic_similarity_threshold,
-                        "namespace": "off_topic_patterns",
-                    },
-                )
-                return QueryIntent.OFF_TOPIC
-
-            # 第三层: LLM FAST 分类 (三分类, 失败兜底 OFF_TOPIC)
-            intent = await self._llm_classify(query, has_report)
+            # 第二层: LLM FAST 分类 (带 Redis 缓存, P1)
+            intent, source = await self._classify_with_cache(query, has_report)
             span.update(
                 output={"intent": intent.value, "layer": "llm"},
-                metadata={"has_report": has_report},
+                metadata={
+                    "has_report": has_report,
+                    "source": source,  # cache_hit / llm / llm_fallback
+                },
             )
             return intent
 
@@ -1058,3 +482,30 @@ def get_query_intent_classifier() -> QueryIntentClassifier:
     if _classifier is None:
         _classifier = QueryIntentClassifier()
     return _classifier
+
+
+async def cleanup_legacy_chat_seeds() -> None:
+    """一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据 (P2 清理).
+
+    QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 实施后, 第二层 Embeddings+Qdrant 语义匹配
+    已移除, 原种子数据 (short_query/off_topic namespace) 不再使用, 启动时清理一次避免残留.
+
+    幂等: 多次调用安全; Qdrant 不可用时仅告警不阻断启动.
+    """
+    try:
+        from src.rag.qdrant_manager import get_qdrant_manager
+
+        mgr = get_qdrant_manager()
+        await mgr.ensure_collection()
+        # 旧版 namespace: {agent_id}-chat:short_query / {agent_id}-chat:off_topic
+        chat_ns = f"{mgr.settings.agent_name}-chat"
+        legacy_namespaces = [f"{chat_ns}:short_query", f"{chat_ns}:off_topic"]
+        for ns in legacy_namespaces:
+            count = await mgr.count_points_in_namespace(ns)
+            if count > 0:
+                await mgr.delete_by_namespace(ns)
+                logger.info("P2 清理: 已删除 Qdrant 旧种子 namespace=%s (count=%d)", ns, count)
+            else:
+                logger.debug("P2 清理: namespace=%s 无数据, 跳过", ns)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("P2 清理 Qdrant 旧种子失败 (不阻断启动): %s", e)

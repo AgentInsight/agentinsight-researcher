@@ -70,9 +70,7 @@ def test_cors_config() -> None:
         )
     # CORS 中间件应返回 Access-Control-Allow-Origin 头 (* 或具体 Origin)
     allow_origin = r.headers.get("access-control-allow-origin", "")
-    assert allow_origin, (
-        f"CORS 未返回 Access-Control-Allow-Origin 头: status={r.status_code}"
-    )
+    assert allow_origin, f"CORS 未返回 Access-Control-Allow-Origin 头: status={r.status_code}"
 
 
 @pytest.mark.api

@@ -27,7 +27,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from src.config.settings import Settings, get_settings
@@ -275,7 +275,7 @@ class LocalDocumentLoader(DocumentLoader):
         with open(path, encoding="utf-8", errors="ignore") as f:
             html = f.read()
         soup = BeautifulSoup(html, "html.parser")
-        return soup.get_text(separator="\n", strip=True)
+        return cast("str", soup.get_text(separator="\n", strip=True))
 
 
 # ========== AzureBlobLoader (可选) ==========
@@ -295,7 +295,7 @@ class AzureBlobLoader(DocumentLoader):
     async def load(self, source: str) -> list[Document]:
         """从 Azure Blob 下载并加载文档."""
         try:
-            from azure.storage.blob import BlobServiceClient  # type: ignore[import-not-found]
+            from azure.storage.blob import BlobServiceClient
         except ImportError:
             logger.warning(
                 "azure-storage-blob 未安装, AzureBlobLoader 不可用; "
@@ -321,7 +321,7 @@ class AzureBlobLoader(DocumentLoader):
             # 同步下载 (用 to_thread 包装避免阻塞事件循环)
             def _download() -> bytes:
                 stream = blob_client.download_blob()
-                return stream.readall()
+                return cast("bytes", stream.readall())
 
             data = await asyncio.to_thread(_download)
         except Exception as e:  # noqa: BLE001

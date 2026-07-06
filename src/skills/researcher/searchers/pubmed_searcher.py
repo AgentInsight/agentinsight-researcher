@@ -25,6 +25,8 @@ class PubMedSearcher(BaseSearcher):
 
     name = "pubmed"
     region = SearchRegion.ACADEMIC
+    cost_tier = "free"  # v1.1 新增
+    quality_score = 90.0  # v1.1 新增
 
     _esearch_url: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
     _esummary_url: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"

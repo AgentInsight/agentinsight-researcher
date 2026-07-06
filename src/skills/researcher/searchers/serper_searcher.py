@@ -8,6 +8,7 @@ Serper.dev Google Search API, 适用于全球场景.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -15,6 +16,7 @@ import httpx
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
+from src.skills.researcher.searchers.exceptions import QuotaExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,8 @@ class SerperSearcher(BaseSearcher):
 
     name = "serper"
     region = SearchRegion.GLOBAL
+    cost_tier = "paid"  # v1.1 新增
+    quality_score = 82.2  # v1.1 新增
 
     _api_url: str = "https://google.serper.dev/search"
 
@@ -60,6 +64,13 @@ class SerperSearcher(BaseSearcher):
                 payload = {"q": query, "num": max_results}
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     response = await client.post(self._api_url, headers=headers, json=payload)
+                    if response.status_code == 429:
+                        reset_at = self._calc_quota_reset(response)
+                        raise QuotaExceededError(
+                            engine="serper",
+                            reset_at=reset_at,
+                            message="Serper 额度已满",
+                        )
                     response.raise_for_status()
                     data = response.json()
 
@@ -80,7 +91,16 @@ class SerperSearcher(BaseSearcher):
                     metadata={"tool_name": "serper", "success": True},
                 )
                 return results
+            except QuotaExceededError:
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.warning("Serper 搜索失败: %s", e)
                 span.update(metadata={"tool_name": "serper", "success": False, "error": str(e)})
                 return []
+
+    def _calc_quota_reset(self, resp: httpx.Response) -> datetime:
+        """Serper 额度重置时间: 优先 Retry-After 头, 默认 24 小时后."""
+        retry_after = resp.headers.get("Retry-After")
+        if retry_after and retry_after.isdigit():
+            return datetime.now(UTC) + timedelta(seconds=int(retry_after))
+        return datetime.now(UTC) + timedelta(hours=24)

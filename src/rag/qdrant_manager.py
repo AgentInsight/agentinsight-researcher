@@ -32,13 +32,30 @@ class QdrantManager:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         # 延迟导入, 避免模块加载时强依赖
+        # P1-04: 抑制 qdrant_client 在 http+api_key 场景的 UserWarning
+        # (测试环境用 http+api_key, qdrant_client 会警告 "Api key is used with an insecure connection")
+        # 同时跳过服务器版本检查 (测试环境可能无法连接服务器, 避免警告)
+        import warnings
+
         from qdrant_client import AsyncQdrantClient
 
-        self._client = AsyncQdrantClient(
-            url=self.settings.qdrant_url,
-            api_key=self.settings.qdrant_api_key,
-            timeout=30,
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Api key is used with an insecure connection",
+                category=UserWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message="Failed to obtain server version",
+                category=UserWarning,
+            )
+            self._client = AsyncQdrantClient(
+                url=self.settings.qdrant_url,
+                api_key=self.settings.qdrant_api_key,
+                timeout=30,
+                check_compatibility=False,
+            )
 
     async def ensure_collection(self) -> None:
         """确保集合存在 (不存在则创建, 含 HNSW 参数调优 P0-03).
@@ -110,18 +127,11 @@ class QdrantManager:
         """
         return f"{self.settings.agent_name}:{user_id}"
 
-    # ========== 新版 namespace API (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN, 用户需求: 拆分 chat/data) ==========
-    # 两个 namespace 池:
-    # - agentinsight-researcher-chat: 闲聊/短查询种子搜索 (不含 user_id, 全局共享)
+    # ========== 新版 namespace API (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN, 用户需求: 拆分 data 池) ==========
+    # 数据 namespace 池:
     # - agentinsight-researcher-data: 用户私有数据搜索 (按 user_id 隔离)
-    def build_chat_namespace(self) -> str:
-        """闲聊/短查询搜索 namespace = {agent_id}-chat.
-
-        用户需求: 闲聊/短查询种子独立 namespace, 与用户私有数据隔离.
-        用于 QueryIntentClassifier 的 short_query_patterns + off_topic_patterns.
-        """
-        return f"{self.settings.agent_name}-chat"
-
+    # 注: 原 chat namespace 池 (短查询/离题种子) 已在 QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md
+    #     P2 阶段移除 (改用 FAST_LLM + Redis 缓存), build_chat_namespace 方法已删除.
     def build_data_shared_namespace(self) -> str:
         """共享研究数据 namespace = {agent_id}-data (新命名, 替代旧 build_shared_namespace).
 

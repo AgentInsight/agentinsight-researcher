@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 from src.config.settings import get_settings
 from src.skills.researcher.scrapers import BaseScraper
@@ -68,7 +68,7 @@ class NodriverScraper(BaseScraper):
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
 
         try:
-            import nodriver  # type: ignore[import-not-found]
+            import nodriver
         except ImportError:
             logger.warning(
                 "nodriver 未安装, NodriverScraper 不可用; 请 pip install nodriver 并预装 Chrome"
@@ -140,16 +140,22 @@ class NodriverScraper(BaseScraper):
         """提取页面正文文本."""
         try:
             # nodriver tab.evaluate 返回 JS Promise 的 resolved 值
-            return await tab.evaluate(
-                "document.body.innerText",
-                return_by_value=True,
+            return cast(
+                "str",
+                await tab.evaluate(
+                    "document.body.innerText",
+                    return_by_value=True,
+                ),
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("nodriver 提取 innerText 失败, 尝试 textContent: %s", e)
             try:
-                return await tab.evaluate(
-                    "document.body.textContent",
-                    return_by_value=True,
+                return cast(
+                    "str",
+                    await tab.evaluate(
+                        "document.body.textContent",
+                        return_by_value=True,
+                    ),
                 )
             except Exception as e2:  # noqa: BLE001
                 logger.warning("nodriver 提取文本完全失败: %s", e2)
@@ -158,9 +164,12 @@ class NodriverScraper(BaseScraper):
     async def _extract_title(self, tab: Any) -> str:
         """提取页面标题."""
         try:
-            return await tab.evaluate(
-                "document.title",
-                return_by_value=True,
+            return cast(
+                "str",
+                await tab.evaluate(
+                    "document.title",
+                    return_by_value=True,
+                ),
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("nodriver 提取 title 失败: %s", e)

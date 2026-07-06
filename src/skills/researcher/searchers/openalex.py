@@ -24,6 +24,8 @@ class OpenAlexSearcher(BaseSearcher):
 
     name = "openalex"
     region = SearchRegion.ACADEMIC
+    cost_tier = "free"  # v1.1 新增
+    quality_score = 78.0  # v1.1 新增
 
     _api_url: str = "https://api.openalex.org/works"
 

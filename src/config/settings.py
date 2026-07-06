@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     embeddings_model: str = "BAAI/bge-large-zh-v1.5"
     embeddings_dimension: int = 1024
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
-    embeddings_max_client_batch_size: int = 32  # 客户端单次 TEI 请求上限 (P1-1, 超过则分批并发)
+    embeddings_max_client_batch_size: int = 16  # 客户端单次 TEI 请求上限 (P1-1, 超过则分批并发; P1-04: 32→16, 减少单次推理时间避免 ReadTimeout)
     # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
     # 注意: TEI CPU 后端强制 max_batch_requests=4, 客户端并发应略低于此值
     # 过高 (如 10) 会导致请求在 TEI 队列排队 30+s, 触发客户端 ReadTimeout
@@ -172,6 +172,8 @@ class Settings(BaseSettings):
     # ========== Agent 点数校验/扣除 (SELF_HOST=False 时启用, 对标 AgentInsightService) ==========
     # 仅在 self_host=False 时生效; self_host=True 时跳过校验/扣除
     # 对标 D:\Projects\Entrepreneurship\AIProjects\AgentInsightService\Agents\common\api_client.py
+    # AgentType 枚举: 1=Assistant (MonthlyAgentRate), 2=Research (MonthlyResearchRate)
+    # 本项目为研究型 Agent, 默认 type=2, 服务端从 JWT token 解析 OrgId
     agent_privilege_api_base_url: str = "https://agentinsight.goldebridge.com"
     agent_privilege_validate_path: str = "/api/user/privilege/agent/validate"
     agent_privilege_deduct_path: str = "/api/user/privilege/agent/deduct"
@@ -208,6 +210,15 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str | None = None  # Semantic Scholar Graph API (可选 Key)
     # 新增 5 个搜索引擎 (P2-Future-04, 对标 GPTR retrievers/)
     exa_api_key: str | None = None  # Exa 搜索 (全球, Bearer token)
+    # v1.1 新增: 秘塔 AI 搜索 (国内 AI 搜索主力, freemium)
+    metaso_api_key: str | None = None  # 秘塔 AI 搜索 API Key (访问 https://metaso.cn/api 获取)
+    # v1.1 新增: GitHub 代码搜索 (可选 Token 提高配额)
+    github_token: str | None = (
+        None  # GitHub Personal Access Token (https://github.com/settings/tokens)
+    )
+    # v1.1 新增: 学术搜索引擎邮箱配置 (polite pool)
+    crossref_mailto: str = ""  # CrossRef polite pool 邮箱 (可选, 50 req/s)
+    unpaywall_email: str = ""  # Unpaywall 真实邮箱 (必填, 否则 HTTP 422 拒绝)
     searchapi_api_key: str | None = None  # SearchAPI.io (全球, query param)
     searx_url: str = "http://localhost:8080"  # SearXNG 自托管实例 URL (无需 Key)
     openalex_email: str = ""  # OpenAlex polite pool 邮箱 (可选, 无需 Key)
@@ -272,20 +283,17 @@ class Settings(BaseSettings):
     short_query_enabled: bool = True  # 短查询保护开关
     short_query_min_length: int = 2  # 最小有效查询长度(字符)
     short_query_reply: str = "您好！我是研究助手，请提供您想研究的主题，我将为您生成详细的研究报告。"  # 短查询回复语(用户可配置)
-    # 语义匹配相似度阈值 (Embeddings + Qdrant 检测短查询, top-1 score > 阈值 → SHORT_QUERY)
-    short_query_similarity_threshold: float = 0.85
 
     # ========== 闲聊/离题保护 (P1-Future-07, 对标 Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail) ==========
     # 非研究/分析类输入 (闲聊/问候/身份询问/娱乐/常识/私人问题) 统一导向固定回复, 零 LLM 成本.
-    # 三层分类器 (规则→Embeddings 语义→LLM) 命中 OFF_TOPIC 即返回 off_topic_reply, 不走任何 graph.
+    # 两层分类器 (规则→LLM) 命中 OFF_TOPIC 即返回 off_topic_reply, 不走任何 graph.
+    # (P2 已移除原第二层 Embeddings+Qdrant 语义匹配, 详见 QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md)
     off_topic_enabled: bool = True  # 闲聊/离题保护开关
     off_topic_reply: str = (
         "您好！我是研究助手，专注于深度研究和分析。"
         "请提供您想研究的主题（例如'分析新能源汽车市场'），"
         "我将为您生成详细的研究报告。"
     )  # 离题回复语 (用户可配置)
-    # 离题语义匹配阈值 (略低于短查询阈值, 因为闲聊句子更长, 语义距离更大)
-    off_topic_similarity_threshold: float = 0.75
     # LLM 分类失败时的兜底意图 (业界标准: 走最轻路径, 避免误导向高成本研究流程)
     llm_classify_fallback: Literal["research", "off_topic"] = "off_topic"
     # CHAT 意图首轮保护: 无已有报告时降级 OFF_TOPIC (避免首轮闲聊消耗 SMART LLM)
@@ -322,6 +330,10 @@ class Settings(BaseSettings):
     query_classify_llm_query_truncate: int = 1000  # 替换 LLM 分类 query 截断长度
     query_classify_single_word_max_chars: int = 6  # 替换单单词长度上限
     query_classify_trace_input_truncate: int = 200  # trace span input 截断长度
+    # P1: 分类结果 Redis 缓存 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md)
+    # 启用后高频重复 query 直接命中缓存, 零 LLM 调用; Redis 不可用时降级为不缓存.
+    query_classify_cache_enabled: bool = True  # 默认启用
+    query_classify_cache_ttl: int = 86400  # 缓存 TTL (秒), 默认 24h
 
     # FAST LLM 场景化 max_tokens (原散落硬编码, P2 收敛到 Settings)
     fast_classify_max_tokens: int = 200  # 复杂度评估/MCP 工具选择

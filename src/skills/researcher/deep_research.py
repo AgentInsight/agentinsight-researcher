@@ -20,7 +20,6 @@ from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
     BaseSearcher,
     detect_region,
-    get_searchers,
 )
 
 logger = logging.getLogger(__name__)
@@ -294,27 +293,58 @@ class DeepResearcher:
         session_id: str | None = None,
         query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
-        """单个子查询: 搜索 + 抓取 + 压缩."""
+        """单个子查询: 搜索 + 抓取 + 压缩.
+
+        v1.1 改造:
+        - 串行 → 并行 (asyncio.gather)
+        - 接入 QuotaCache 额度缓存 (捕获 QuotaExceededError 写入缓存)
+        """
         try:
             # 搜索
             region = detect_region(sub_query)
-            searchers = get_searchers(region, self.settings)
-            urls: list[str] = []
-            sources: list[dict[str, Any]] = []
-            for searcher in searchers:
-                results = await searcher.search(
+
+            # v1.1: 优先使用异步版本 (带额度缓存检查)
+            from src.skills.researcher.searchers import get_searchers_async
+            from src.skills.researcher.searchers.exceptions import QuotaExceededError
+            from src.skills.researcher.searchers.quota_cache import QuotaCache
+
+            quota_cache = QuotaCache(self.settings)
+            searchers = await get_searchers_async(region, self.settings, quota_cache)
+
+            # v1.1: 并行调用多个搜索引擎
+            search_tasks = [
+                s.search(
                     sub_query,
                     max_results=self.settings.max_search_results_per_query,
                     query_domains=query_domains,
                 )
+                for s in searchers
+            ]
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+            urls: list[str] = []
+            sources: list[dict[str, Any]] = []
+            for searcher, r in zip(searchers, search_results, strict=True):
+                # v1.1: 捕获额度已满异常, 写入 QuotaCache
+                if isinstance(r, QuotaExceededError):
+                    await quota_cache.mark_exceeded(
+                        engine=r.engine,
+                        reset_at=r.reset_at,
+                        reason="quota_exceeded",
+                    )
+                    logger.warning(f"{searcher.name} 额度已满: {r.message}")
+                    continue
+                if isinstance(r, BaseException):
+                    logger.warning(f"{searcher.name} 调用失败: {r}")
+                    continue
                 # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
                 if query_domains:
-                    results = BaseSearcher._filter_by_domains(results, query_domains)
-                for r in results:
-                    if r.get("url") and r["url"] not in self._visited_urls:
-                        urls.append(r["url"])
-                        self._visited_urls.add(r["url"])
-                        sources.append(r)
+                    r = BaseSearcher._filter_by_domains(r, query_domains)
+                for item in r:
+                    if item.get("url") and item["url"] not in self._visited_urls:
+                        urls.append(item["url"])
+                        self._visited_urls.add(item["url"])
+                        sources.append(item)
 
             # 抓取
             docs = await scrape_urls(

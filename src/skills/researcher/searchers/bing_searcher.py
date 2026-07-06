@@ -24,6 +24,8 @@ class BingSearcher(BaseSearcher):
 
     name = "bing"
     region = SearchRegion.GLOBAL
+    cost_tier = "paid"  # v1.1 新增
+    quality_score = 50.0  # v1.1 新增
 
     _api_url: str = "https://api.bing.microsoft.com/v7.0/search"
 

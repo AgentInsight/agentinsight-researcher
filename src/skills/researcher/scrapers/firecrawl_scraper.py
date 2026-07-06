@@ -62,7 +62,7 @@ class FirecrawlScraper(BaseScraper):
 
     async def _scrape_with_sdk(self) -> dict[str, Any]:
         """使用 firecrawl-py SDK 抓取 (异步)."""
-        from firecrawl import FirecrawlApp  # type: ignore[import-not-found]
+        from firecrawl import FirecrawlApp
 
         app = FirecrawlApp(api_key=self.api_key, api_url=self.api_url)
 

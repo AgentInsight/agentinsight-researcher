@@ -39,3 +39,17 @@ markers = [
     "api: API 测试 (OpenAI 兼容端点)",
     "e2e: 端到端测试 (完整链路)",
 ]
+# P1-04: 抑制第三方库不可控的警告 (业务代码已修复的除外)
+# 格式: action:message:category:module:lineno (category 为空则匹配任意类别)
+# 注意: message 是正则前缀匹配, category 必须在第 3 字段 (两个冒号之间不能为空)
+filterwarnings = [
+    # fastapi testclient 内部依赖 httpx 已弃用, 需等 fastapi 升级到 httpx2
+    # 注意: StarletteDeprecationWarning 继承自 UserWarning (非 DeprecationWarning)
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
+    # duckduckgo_search 弃用警告 (旧包仍可用, requirements.txt 已迁移到 ddgs)
+    "ignore:This package `duckduckgo_search` has been renamed to `ddgs`:RuntimeWarning",
+    # httpx/asyncio 内部 transport 未完全关闭 (TestClient 限制, 业务代码无法消除)
+    "ignore:unclosed transport <_ProactorSocketTransport:ResourceWarning",
+    "ignore:unclosed transport <asyncio._SSLProtocolTransport:ResourceWarning",
+    "ignore:Enable tracemalloc to get traceback:ResourceWarning",
+]

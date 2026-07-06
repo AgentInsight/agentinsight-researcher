@@ -276,9 +276,7 @@ class ChitchatResponder:
             return self._stream_off_topic(
                 query, category=category, session_id=session_id, user_id=user_id
             )
-        return self._run_off_topic(
-            query, category=category, session_id=session_id, user_id=user_id
-        )
+        return self._run_off_topic(query, category=category, session_id=session_id, user_id=user_id)
 
     async def _run_off_topic(
         self,

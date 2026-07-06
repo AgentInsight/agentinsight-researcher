@@ -24,6 +24,8 @@ class GoogleSearcher(BaseSearcher):
 
     name = "google"
     region = SearchRegion.GLOBAL
+    cost_tier = "paid"  # v1.1 新增
+    quality_score = 82.2  # v1.1 新增
 
     _api_url: str = "https://serpapi.com/search"
 

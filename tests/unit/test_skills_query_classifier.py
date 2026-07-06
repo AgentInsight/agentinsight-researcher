@@ -1,24 +1,29 @@
-"""单元测试: QueryIntentClassifier 规则层分类.
+"""单元测试: QueryIntentClassifier 规则层分类 + Redis 缓存层.
 
-验证 _rule_classify (长度/纯数字/纯标点) 与 QueryIntent 枚举,
-以及 _SHORT_QUERY_SEED (178 个种子) + _SHORT_QUERY_SEED_VERSION.
-P1-Future-07: 新增 OFF_TOPIC 意图 + _CHITCHAT_PATTERNS + _OFF_TOPIC_SEED (108 个种子).
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+验证 _rule_classify (长度/纯数字/纯标点/闲聊正则) 与 QueryIntent 枚举,
+以及 P1 Redis 缓存层 (_classify_with_cache) 与 P2 LLM prompt 强化.
+
+QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md P0/P1/P2 已实施:
+- P0: 移除原第二层 Embeddings+Qdrant 语义匹配
+- P1: 引入 Redis 分类结果缓存 (TTL 24h)
+- P2: 强化 LLM prompt few-shot + 删除种子数据
+
+AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务 (Redis/Qdrant/LLM 全部 mock).
 """
 
 from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.config.settings import Settings
 from src.skills.researcher.query_classifier import (
     _CHITCHAT_PATTERNS,
-    _OFF_TOPIC_SEED,
-    _OFF_TOPIC_SEED_VERSION,
-    _SHORT_QUERY_SEED,
-    _SHORT_QUERY_SEED_VERSION,
+    _COMMON_SHORT_PHRASES,
     QueryIntent,
     QueryIntentClassifier,
+    cleanup_legacy_chat_seeds,
 )
 
 pytestmark = pytest.mark.unit
@@ -26,10 +31,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture()
 def classifier() -> QueryIntentClassifier:
-    """构造 Classifier 实例 (跳过 LLM/Embeddings/Qdrant 依赖).
+    """构造 Classifier 实例 (跳过 LLM 初始化, 仅测试规则层).
 
     _rule_classify 是纯函数, 仅访问 settings.short_query_enabled / short_query_min_length,
-    不调用 LLM/Embeddings/Qdrant. 通过 __new__ 跳过 __init__ 避免外部依赖初始化.
+    不调用 LLM/Redis. 通过 __new__ 跳过 __init__ 避免外部依赖初始化.
     """
     obj = QueryIntentClassifier.__new__(QueryIntentClassifier)
     obj.settings = Settings(_env_file=None)
@@ -69,41 +74,26 @@ def test_query_intent_has_four_members() -> None:
     assert QueryIntent.OFF_TOPIC in members
 
 
-# ========== _SHORT_QUERY_SEED ==========
+# ========== _COMMON_SHORT_PHRASES ==========
 
 
-def test_short_query_seed_has_90_entries() -> None:
-    """测试 _SHORT_QUERY_SEED 含 178 个不重复种子 (V6 短查询优化扩展)."""
-    assert len(_SHORT_QUERY_SEED) == 178
+def test_common_short_phrases_non_empty() -> None:
+    """测试 _COMMON_SHORT_PHRASES 非空."""
+    assert len(_COMMON_SHORT_PHRASES) > 0
 
 
-def test_short_query_seed_unique() -> None:
-    """测试所有种子不重复."""
-    assert len(set(_SHORT_QUERY_SEED)) == len(_SHORT_QUERY_SEED)
+def test_common_short_phrases_contains_greetings() -> None:
+    """测试常见短语含问候 ('你好' / 'hello')."""
+    assert "你好" in _COMMON_SHORT_PHRASES
+    assert "hello" in _COMMON_SHORT_PHRASES
 
 
-def test_short_query_seed_all_non_empty_strings() -> None:
-    """测试所有种子为非空字符串."""
-    for seed in _SHORT_QUERY_SEED:
-        assert isinstance(seed, str)
-        assert len(seed) > 0
-
-
-def test_short_query_seed_version() -> None:
-    """测试 _SHORT_QUERY_SEED_VERSION == 'v6.0' (V6 短查询优化升级版本)."""
-    assert _SHORT_QUERY_SEED_VERSION == "v6.0"
-
-
-def test_short_query_seed_contains_greetings() -> None:
-    """测试种子含问候类 ('你好' / 'hello')."""
-    assert "你好" in _SHORT_QUERY_SEED
-    assert "hello" in _SHORT_QUERY_SEED
-
-
-def test_short_query_seed_contains_digits() -> None:
-    """测试种子含纯数字 ('1' / '123')."""
-    assert "1" in _SHORT_QUERY_SEED
-    assert "123" in _SHORT_QUERY_SEED
+def test_common_short_phrases_all_lowercase_for_english() -> None:
+    """测试英文短语全部小写 (匹配时 query.lower())."""
+    for phrase in _COMMON_SHORT_PHRASES:
+        if any(c.isalpha() and ord(c) < 128 for c in phrase):
+            # 含英文字母的短语应为小写
+            assert phrase == phrase.lower(), f"英文短语未小写: {phrase}"
 
 
 # ========== _rule_classify 长查询 ==========
@@ -219,51 +209,6 @@ def test_rule_classify_whitespace_only_short(classifier: QueryIntentClassifier) 
     assert result.intent == QueryIntent.SHORT_QUERY
 
 
-# ========== _OFF_TOPIC_SEED (P1-Future-07) ==========
-
-
-def test_off_topic_seed_has_108_entries() -> None:
-    """测试 _OFF_TOPIC_SEED 含 118 个不重复种子 (P1-Future-07, V1 含 10 项其他闲聊补充)."""
-    assert len(_OFF_TOPIC_SEED) == 118
-
-
-def test_off_topic_seed_unique() -> None:
-    """测试所有离题种子不重复."""
-    assert len(set(_OFF_TOPIC_SEED)) == len(_OFF_TOPIC_SEED)
-
-
-def test_off_topic_seed_all_non_empty_strings() -> None:
-    """测试所有离题种子为非空字符串."""
-    for seed in _OFF_TOPIC_SEED:
-        assert isinstance(seed, str)
-        assert len(seed) > 0
-
-
-def test_off_topic_seed_version() -> None:
-    """测试 _OFF_TOPIC_SEED_VERSION == 'v1.0'."""
-    assert _OFF_TOPIC_SEED_VERSION == "v1.0"
-
-
-def test_off_topic_seed_contains_identity_queries() -> None:
-    """测试离题种子含身份询问 ('你叫什么名字' / 'how old are you')."""
-    assert "你叫什么名字" in _OFF_TOPIC_SEED
-    assert "how old are you" in _OFF_TOPIC_SEED
-
-
-def test_off_topic_seed_contains_emotional_queries() -> None:
-    """测试离题种子含情绪表达 ('我好开心' / 'i'm bored')."""
-    assert "我好开心" in _OFF_TOPIC_SEED
-    assert "i'm bored" in _OFF_TOPIC_SEED
-
-
-def test_off_topic_seed_no_overlap_with_short_query_seed() -> None:
-    """测试离题种子与短查询种子无重复 (互补设计)."""
-    short_set = set(_SHORT_QUERY_SEED)
-    off_topic_set = set(_OFF_TOPIC_SEED)
-    overlap = short_set & off_topic_set
-    assert overlap == set(), f"种子重复: {overlap}"
-
-
 # ========== _CHITCHAT_PATTERNS (P1-Future-07) ==========
 
 
@@ -367,3 +312,262 @@ def test_rule_classify_tech_query_not_off_topic(classifier: QueryIntentClassifie
     """测试技术查询不被误判为 OFF_TOPIC."""
     result = classifier._rule_classify("比较 React 和 Vue 的性能差异")
     assert result is None
+
+
+# ========== _cache_key (P1) ==========
+
+
+def test_cache_key_contains_agent_id(classifier: QueryIntentClassifier) -> None:
+    """测试缓存 key 含 agent_id 前缀 (AGENTS.md 第 7 章 Redis 约定)."""
+    key = classifier._cache_key("你好", has_report=False)
+    assert classifier.settings.agent_name in key
+
+
+def test_cache_key_contains_has_report_dimension(classifier: QueryIntentClassifier) -> None:
+    """测试缓存 key 含 has_report 维度 (同一 query 在有/无报告上下文下分类可能不同)."""
+    key_no_report = classifier._cache_key("分析量子计算", has_report=False)
+    key_with_report = classifier._cache_key("分析量子计算", has_report=True)
+    assert key_no_report != key_with_report
+
+
+def test_cache_key_idempotent_for_same_input(classifier: QueryIntentClassifier) -> None:
+    """测试相同输入生成相同缓存 key (幂等)."""
+    key1 = classifier._cache_key("你好", has_report=False)
+    key2 = classifier._cache_key("你好", has_report=False)
+    assert key1 == key2
+
+
+def test_cache_key_differs_by_query(classifier: QueryIntentClassifier) -> None:
+    """测试不同 query 生成不同缓存 key."""
+    key1 = classifier._cache_key("你好", has_report=False)
+    key2 = classifier._cache_key("再见", has_report=False)
+    assert key1 != key2
+
+
+# ========== _classify_with_cache (P1, mock Redis + LLM) ==========
+
+
+@pytest.fixture()
+def classifier_with_mock_deps() -> QueryIntentClassifier:
+    """构造带 mock LLM 的 Classifier (用于缓存层测试)."""
+    settings = Settings(_env_file=None, query_classify_cache_enabled=True)
+    llm = MagicMock()
+    obj = QueryIntentClassifier(settings=settings, llm=llm)  # type: ignore[arg-type]
+    return obj
+
+
+@pytest.mark.asyncio
+async def test_classify_with_cache_hit_returns_cached_intent(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试缓存命中时直接返回缓存结果, 不调 LLM (P1)."""
+    # Mock Redis: 返回缓存的 "research"
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value="research")
+    classifier_with_mock_deps._redis = mock_redis
+    classifier_with_mock_deps._redis_initialized = True
+
+    # Mock LLM (不应被调用)
+    classifier_with_mock_deps._llm.achat = AsyncMock()
+
+    intent, source = await classifier_with_mock_deps._classify_with_cache(
+        "分析量子计算", has_report=False
+    )
+
+    assert intent == QueryIntent.RESEARCH
+    assert source == "cache_hit"
+    # LLM 不应被调用
+    classifier_with_mock_deps._llm.achat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_classify_with_cache_miss_calls_llm_and_writes_cache(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试缓存未命中时调 LLM 并写回缓存 (P1)."""
+    # Mock Redis: 缓存未命中
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock()
+    classifier_with_mock_deps._redis = mock_redis
+    classifier_with_mock_deps._redis_initialized = True
+
+    # Mock LLM 返回 "research"
+    mock_response = MagicMock()
+    mock_response.content = '{"intent": "research"}'
+    classifier_with_mock_deps._llm.achat = AsyncMock(return_value=mock_response)
+
+    intent, source = await classifier_with_mock_deps._classify_with_cache(
+        "分析量子计算", has_report=False
+    )
+
+    assert intent == QueryIntent.RESEARCH
+    assert source == "llm"
+    # LLM 应被调用一次
+    classifier_with_mock_deps._llm.achat.assert_called_once()
+    # 缓存应被写入
+    mock_redis.setex.assert_called_once()
+    # 检查写入的 TTL 与 value
+    call_args = mock_redis.setex.call_args
+    assert call_args.args[1] == classifier_with_mock_deps.settings.query_classify_cache_ttl
+    assert call_args.args[2] == "research"
+
+
+@pytest.mark.asyncio
+async def test_classify_with_cache_disabled_skips_redis(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试 query_classify_cache_enabled=False 时跳过 Redis, 直接走 LLM (P1).
+
+    用 "research" 意图避免与默认 fallback (OFF_TOPIC) 混淆, 才能正确断言 source="llm".
+    """
+    classifier_with_mock_deps.settings = Settings(
+        _env_file=None, query_classify_cache_enabled=False
+    )
+
+    # Mock LLM 返回 "research" (非默认 fallback, 才能断言 source="llm")
+    mock_response = MagicMock()
+    mock_response.content = '{"intent": "research"}'
+    classifier_with_mock_deps._llm.achat = AsyncMock(return_value=mock_response)
+
+    intent, source = await classifier_with_mock_deps._classify_with_cache(
+        "分析量子计算", has_report=False
+    )
+
+    assert intent == QueryIntent.RESEARCH
+    assert source == "llm"
+
+
+@pytest.mark.asyncio
+async def test_classify_with_cache_llm_failure_returns_fallback_no_cache_write(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试 LLM 失败时返回兜底意图但不写入缓存 (避免缓存污染, P1)."""
+    # Mock Redis
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock()
+    classifier_with_mock_deps._redis = mock_redis
+    classifier_with_mock_deps._redis_initialized = True
+
+    # Mock LLM 抛异常
+    classifier_with_mock_deps._llm.achat = AsyncMock(side_effect=Exception("LLM 不可用"))
+
+    intent, source = await classifier_with_mock_deps._classify_with_cache(
+        "随便一个查询", has_report=False
+    )
+
+    # 默认兜底 OFF_TOPIC
+    assert intent == QueryIntent.OFF_TOPIC
+    assert source == "llm_fallback"
+    # 缓存不应被写入 (避免缓存 fallback 结果)
+    mock_redis.setex.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_classify_with_cache_redis_failure_degrades_to_llm(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试 Redis 不可用时降级为直接走 LLM (不阻断主流程, P1)."""
+    # Mock Redis: ping 抛异常 (连接失败)
+    with patch("src.skills.researcher.query_classifier.aioredis.from_url") as mock_from_url:
+        mock_redis = AsyncMock()
+        mock_redis.ping = AsyncMock(side_effect=Exception("Redis 连接失败"))
+        mock_from_url.return_value = mock_redis
+
+        # Mock LLM 返回 "research"
+        mock_response = MagicMock()
+        mock_response.content = '{"intent": "research"}'
+        classifier_with_mock_deps._llm.achat = AsyncMock(return_value=mock_response)
+
+        intent, source = await classifier_with_mock_deps._classify_with_cache(
+            "分析量子计算", has_report=False
+        )
+
+        assert intent == QueryIntent.RESEARCH
+        assert source == "llm"
+
+
+# ========== classify (集成规则层 + LLM 层) ==========
+
+
+@pytest.mark.asyncio
+async def test_classify_rule_hit_skips_llm(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试规则层命中时跳过 LLM 调用 (零 LLM 成本)."""
+    classifier_with_mock_deps._llm.achat = AsyncMock()
+
+    # "你好" 应命中 _COMMON_SHORT_PHRASES
+    intent = await classifier_with_mock_deps.classify("你好", has_report=False)
+
+    assert intent == QueryIntent.SHORT_QUERY
+    # LLM 不应被调用
+    classifier_with_mock_deps._llm.achat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_classify_chitchat_pattern_hit_returns_off_topic(
+    classifier_with_mock_deps: QueryIntentClassifier,
+) -> None:
+    """测试闲聊正则命中时返回 OFF_TOPIC (零 LLM 成本)."""
+    classifier_with_mock_deps._llm.achat = AsyncMock()
+
+    # "你多大了" 应命中 _CHITCHAT_PATTERNS
+    intent = await classifier_with_mock_deps.classify("你多大了", has_report=False)
+
+    assert intent == QueryIntent.OFF_TOPIC
+    classifier_with_mock_deps._llm.achat.assert_not_called()
+
+
+# ========== cleanup_legacy_chat_seeds (P2 Qdrant 清理) ==========
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_chat_seeds_idempotent_no_data() -> None:
+    """测试 P2 清理函数幂等: namespace 无数据时跳过, 不抛异常."""
+    # 注意: cleanup_legacy_chat_seeds() 在函数体内 import get_qdrant_manager,
+    # 必须在源模块上 patch (而非 query_classifier 模块)
+    with patch("src.rag.qdrant_manager.get_qdrant_manager") as mock_get_mgr:
+        mock_mgr = AsyncMock()
+        mock_mgr.ensure_collection = AsyncMock()
+        mock_mgr.count_points_in_namespace = AsyncMock(return_value=0)
+        mock_mgr.delete_by_namespace = AsyncMock()
+        mock_mgr.settings = Settings(_env_file=None)
+        mock_get_mgr.return_value = mock_mgr
+
+        # 不应抛异常
+        await cleanup_legacy_chat_seeds()
+
+        # 应检查两个 namespace
+        assert mock_mgr.count_points_in_namespace.call_count == 2
+        # 无数据, 不应调用 delete
+        mock_mgr.delete_by_namespace.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_chat_seeds_deletes_when_data_exists() -> None:
+    """测试 P2 清理函数: namespace 有数据时调用 delete_by_namespace."""
+    with patch("src.rag.qdrant_manager.get_qdrant_manager") as mock_get_mgr:
+        mock_mgr = AsyncMock()
+        mock_mgr.ensure_collection = AsyncMock()
+        # 第一次调用返回 178 (short_query), 第二次返回 118 (off_topic)
+        mock_mgr.count_points_in_namespace = AsyncMock(side_effect=[178, 118])
+        mock_mgr.delete_by_namespace = AsyncMock()
+        mock_mgr.settings = Settings(_env_file=None)
+        mock_get_mgr.return_value = mock_mgr
+
+        await cleanup_legacy_chat_seeds()
+
+        # 应删除两个 namespace
+        assert mock_mgr.delete_by_namespace.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_chat_seeds_qdrant_unavailable_no_raise() -> None:
+    """测试 P2 清理函数: Qdrant 不可用时仅告警不抛异常 (不阻断启动)."""
+    with patch("src.rag.qdrant_manager.get_qdrant_manager") as mock_get_mgr:
+        mock_get_mgr.side_effect = Exception("Qdrant 不可用")
+
+        # 不应抛异常
+        await cleanup_legacy_chat_seeds()

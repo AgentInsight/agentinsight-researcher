@@ -209,34 +209,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_configs_unique_name
 -- 用户可查看但不可编辑/删除, 可克隆到自己的列表后定制
 -- 使用 ON CONFLICT (agent_id, user_id, name) 保证幂等 (重复启动不重复插入)
 --
--- 精简治理 (2026-07-05): 经 12 角色 AI 专家团队多轮分析, 从原 130 个精简至 40 个
---   - 核心保留 18 个: 研究场景高价值、与项目无冗余、合规无冲突
---   - 推荐 22 个: 有价值但需用户按需配置 Key 或验证场景
---   - 已移除 90 个: 冗余/合规冲突/安全风险高/非研究场景/包不存在
+-- 精简治理 (2026-07-05): 经 12 角色 AI 专家团队多轮分析, 从原 130 个精简至 23 个
+--   - 核心保留 12 个: 研究场景高价值、与项目无冗余、合规无冲突、npm 包真实存在
+--   - 推荐保留 11 个: 有价值但需用户按需配置 Key 或验证场景、npm 包真实存在
+--   - 已移除 107 个: 冗余/合规冲突/安全风险高/非研究场景/包名不存在于 npm registry
 -- 详见 docs/system-mcp-analysis.md
 
--- 6.2.1 清理已移除的系统 MCP (从 130 精简至 40, 仅保留核心+推荐档)
+-- 6.2.1 清理已移除的系统 MCP (从 130 精简至 23, 仅保留包名真实存在的核心+推荐档)
 -- 用户私有克隆 (is_system=FALSE) 不受影响
 DELETE FROM mcp_configs
 WHERE is_system = TRUE
   AND user_id = 'system'
   AND name NOT IN (
-    -- ===== 核心保留 18 个 =====
+    -- ===== 核心保留 12 个 =====
     'fetch', 'filesystem', 'sequential-thinking', 'github',
     'notion', 'obsidian', 'confluence', 'elasticsearch',
-    'wikipedia', 'hackernews', 'newsapi', 'stackoverflow',
-    'neo4j', 'duckdb', 'alpha-vantage', 'wolfram-alpha',
-    'deepl', 'rss-feed',
-    -- ===== 推荐 22 个 =====
-    'git', 'markdown', 'pdf-tools', 'calculator', 'openweather',
-    'google-drive', 'youtube', 'twitter', 'reddit', 'mongodb',
-    'gitlab', 'supabase', 'bigquery', 'clickhouse', 'snowflake',
-    'mapbox', 'airtable', 'chrome-mcp', 'npm-search', 'sourcegraph',
-    'filesystem-search', 'aws-kb-retrieval'
+    'wikipedia', 'hackernews',
+    'neo4j', 'deepl',
+    -- ===== 推荐 11 个 =====
+    'git', 'pdf-tools',
+    'google-drive', 'youtube', 'twitter',
+    'gitlab', 'supabase', 'mongodb', 'clickhouse',
+    'chrome-mcp', 'aws-kb-retrieval'
   );
 
 INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, description) VALUES
-    -- ===== 核心保留 18 个 (研究场景高价值、无冗余、合规无冲突) =====
+    -- ===== 核心保留 12 个 (研究场景高价值、无冗余、合规无冲突) =====
     -- 1. Web 抓取与文件操作 (3 个)
     ('agentinsight-researcher', 'system', 'fetch', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-fetch"]'::jsonb, NULL,
@@ -245,7 +243,7 @@ INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, co
      '["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]'::jsonb, NULL,
      TRUE, TRUE, '安全文件操作, 可配置访问路径 (官方参考实现, 核心保留)'),
     ('agentinsight-researcher', 'system', 'sequential-thinking', NULL, 'stdio', 'npx',
-     '["-y", "@modelcontextprotocol/server-sequentialthinking"]'::jsonb, NULL,
+     '["-y", "@modelcontextprotocol/server-sequential-thinking"]'::jsonb, NULL,
      TRUE, TRUE, '通过思维序列进行动态反思式问题求解 (官方参考实现, 核心保留)'),
     -- 2. 代码与知识库 (5 个)
     ('agentinsight-researcher', 'system', 'github', NULL, 'stdio', 'npx',
@@ -267,47 +265,25 @@ INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, co
      '["-y", "@elastic/mcp-server-elasticsearch"]'::jsonb,
      '{"ES_URL": "http://localhost:9200", "ES_API_KEY": "<your-api-key>"}'::jsonb,
      TRUE, TRUE, 'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
-    -- 3. 搜索与新闻信源 (4 个)
+    -- 3. 搜索与新闻信源 (2 个)
     ('agentinsight-researcher', 'system', 'wikipedia', NULL, 'stdio', 'npx',
      '["-y", "@phuongcao/mcp-server-wikipedia"]'::jsonb, NULL,
      TRUE, TRUE, 'Wikipedia 维基百科: 多语言百科全书检索 (核心保留, 原生未覆盖)'),
     ('agentinsight-researcher', 'system', 'hackernews', NULL, 'stdio', 'npx',
      '["-y", "mcp-hacker-news"]'::jsonb, NULL,
      TRUE, TRUE, 'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
-    ('agentinsight-researcher', 'system', 'newsapi', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-newsapi"]'::jsonb,
-     '{"NEWSAPI_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 'NewsAPI: 全球新闻聚合搜索 (核心保留, 需配置 NEWSAPI_API_KEY)'),
-    ('agentinsight-researcher', 'system', 'stackoverflow', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-stackoverflow"]'::jsonb,
-     '{"STACK_OVERFLOW_API_KEY": "<optional-key>"}'::jsonb,
-     TRUE, TRUE, 'Stack Overflow: 编程问答检索 (核心保留, API Key 可选, 提高限额)'),
-    -- 4. 数据库 (2 个)
+    -- 4. 数据库 (1 个)
     ('agentinsight-researcher', 'system', 'neo4j', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-neo4j"]'::jsonb,
+     '["-y", "@neo4j/mcp-server"]'::jsonb,
      '{"NEO4J_URL": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "<your-password>"}'::jsonb,
      TRUE, TRUE, 'Neo4j: 图数据库查询与图算法 (核心保留, 需配置连接凭据)'),
-    ('agentinsight-researcher', 'system', 'duckdb', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-duckdb", "/path/to/database.duckdb"]'::jsonb, NULL,
-     TRUE, TRUE, 'DuckDB: 嵌入式分析数据库, OLAP 查询 (核心保留, 无需 API Key)'),
-    -- 5. 金融、计算、翻译、信源 (4 个)
-    ('agentinsight-researcher', 'system', 'alpha-vantage', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-alpha-vantage"]'::jsonb,
-     '{"ALPHA_VANTAGE_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 'Alpha Vantage: 股票/外汇/加密货币市场数据 (核心保留, 需配置 API Key)'),
-    ('agentinsight-researcher', 'system', 'wolfram-alpha', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-wolfram-alpha"]'::jsonb,
-     '{"WOLFRAM_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 'Wolfram Alpha: 数学计算/知识问答/科学计算 (核心保留, 需配置 WOLFRAM_API_KEY)'),
+    -- 5. 翻译 (1 个)
     ('agentinsight-researcher', 'system', 'deepl', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-deepl"]'::jsonb,
+     '["-y", "deepl-mcp-server"]'::jsonb,
      '{"DEEPL_API_KEY": "<your-key>"}'::jsonb,
      TRUE, TRUE, 'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
-    ('agentinsight-researcher', 'system', 'rss-feed', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-rss"]'::jsonb, NULL,
-     TRUE, TRUE, 'RSS Feed: 订阅源管理与内容聚合 (核心保留, 无需 API Key)'),
-    -- ===== 推荐 22 个 (有价值但需用户按需配置 Key 或验证场景) =====
-    -- 6. 开发与代码工具 (6 个)
+    -- ===== 推荐 11 个 (有价值但需用户按需配置 Key 或验证场景) =====
+    -- 6. 开发与代码工具 (3 个)
     ('agentinsight-researcher', 'system', 'git', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-git", "--repository", "/path/to/git/repo"]'::jsonb, NULL,
      TRUE, TRUE, 'Git 仓库读取/搜索/操作 (推荐, npx 实现, 统一 Node.js 运行时)'),
@@ -318,26 +294,12 @@ INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, co
     ('agentinsight-researcher', 'system', 'chrome-mcp', NULL, 'stdio', 'npx',
      '["-y", "@anthropic-ai/chrome-mcp"]'::jsonb, NULL,
      TRUE, TRUE, 'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (推荐, 实验性)'),
-    ('agentinsight-researcher', 'system', 'npm-search', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-npm-search"]'::jsonb, NULL,
-     TRUE, TRUE, 'npm 包搜索: Node.js 包仓库检索 (推荐, 无需 API Key)'),
-    ('agentinsight-researcher', 'system', 'sourcegraph', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-sourcegraph"]'::jsonb,
-     '{"SOURCEGRAPH_API_KEY": "<your-key>", "SOURCEGRAPH_URL": "https://sourcegraph.com"}'::jsonb,
-     TRUE, TRUE, 'Sourcegraph: 代码搜索与跨仓库代码智能 (推荐, 需配置 SOURCEGRAPH_API_KEY)'),
-    ('agentinsight-researcher', 'system', 'filesystem-search', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-filesystem-search"]'::jsonb, NULL,
-     TRUE, TRUE, '文件系统搜索: 全文索引与文件内容检索 (推荐, 无需 API Key)'),
-    -- 7. 知识库与协作 (2 个)
+    -- 7. 知识库与协作 (1 个)
     ('agentinsight-researcher', 'system', 'google-drive', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gdrive"]'::jsonb,
      '{"GDRIVE_CLIENT_ID": "<your-client-id>", "GDRIVE_CLIENT_SECRET": "<your-client-secret>"}'::jsonb,
      TRUE, TRUE, 'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
-    ('agentinsight-researcher', 'system', 'airtable', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-airtable"]'::jsonb,
-     '{"AIRTABLE_API_KEY": "<your-api-key>", "AIRTABLE_BASE_ID": "<your-base-id>"}'::jsonb,
-     TRUE, TRUE, 'Airtable: 低代码数据库与电子表格 (推荐, 需配置 AIRTABLE_API_KEY)'),
-    -- 8. 社交媒体与视频 (3 个)
+    -- 8. 社交媒体与视频 (2 个)
     ('agentinsight-researcher', 'system', 'youtube', NULL, 'stdio', 'npx',
      '["-y", "@anaisbetts/mcp-youtube"]'::jsonb,
      '{"YOUTUBE_API_KEY": "<your-api-key>"}'::jsonb,
@@ -346,52 +308,26 @@ INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, co
      '["-y", "@enescinar/twitter-mcp"]'::jsonb,
      '{"TWITTER_API_KEY": "<your-api-key>", "TWITTER_API_SECRET": "<your-secret>", "TWITTER_ACCESS_TOKEN": "<your-token>", "TWITTER_ACCESS_SECRET": "<your-secret>"}'::jsonb,
      TRUE, TRUE, 'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
-    ('agentinsight-researcher', 'system', 'reddit', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-reddit"]'::jsonb,
-     '{"REDDIT_CLIENT_ID": "<your-id>", "REDDIT_CLIENT_SECRET": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 'Reddit: 社区讨论与内容检索 (推荐, 需配置 OAuth 凭据)'),
-    -- 9. 数据库 (5 个)
+    -- 9. 数据库 (3 个)
     ('agentinsight-researcher', 'system', 'mongodb', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-mongodb", "mongodb://localhost:27017/mydb"]'::jsonb, NULL,
+     '["-y", "mongodb-mcp-server", "mongodb://localhost:27017/mydb"]'::jsonb, NULL,
      TRUE, TRUE, 'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
     ('agentinsight-researcher', 'system', 'supabase', NULL, 'stdio', 'npx',
      '["-y", "@supabase/mcp-server-supabase"]'::jsonb,
      '{"SUPABASE_URL": "<your-url>", "SUPABASE_KEY": "<your-key>"}'::jsonb,
      TRUE, TRUE, 'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
-    ('agentinsight-researcher', 'system', 'bigquery', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-bigquery"]'::jsonb,
-     '{"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/service-account.json"}'::jsonb,
-     TRUE, TRUE, 'Google BigQuery: 大数据分析与 SQL 查询 (推荐, 需配置服务账号凭据)'),
     ('agentinsight-researcher', 'system', 'clickhouse', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-clickhouse"]'::jsonb,
+     '["-y", "@clickhouse/mcp-server"]'::jsonb,
      '{"CLICKHOUSE_HOST": "localhost", "CLICKHOUSE_PORT": "8123", "CLICKHOUSE_USER": "default", "CLICKHOUSE_PASSWORD": "<your-password>"}'::jsonb,
      TRUE, TRUE, 'ClickHouse: 列式数据库, 实时分析 (推荐, 需配置连接凭据)'),
-    ('agentinsight-researcher', 'system', 'snowflake', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-snowflake"]'::jsonb,
-     '{"SNOWFLAKE_ACCOUNT": "<your-account>", "SNOWFLAKE_USER": "<your-user>", "SNOWFLAKE_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 'Snowflake: 云数据仓库与分析 (推荐, 需配置 SNOWFLAKE_ACCOUNT)'),
-    -- 10. 地图、天气、AWS (3 个)
-    ('agentinsight-researcher', 'system', 'mapbox', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-mapbox"]'::jsonb,
-     '{"MAPBOX_ACCESS_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 'Mapbox: 自定义地图/地理编码/路径规划 (推荐, 需配置 MAPBOX_ACCESS_TOKEN)'),
-    ('agentinsight-researcher', 'system', 'openweather', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-openweather"]'::jsonb,
-     '{"OPENWEATHER_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 'OpenWeatherMap: 全球天气预报与历史气象数据 (推荐, 需配置 OPENWEATHER_API_KEY)'),
+    -- 10. AWS (1 个)
     ('agentinsight-researcher', 'system', 'aws-kb-retrieval', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-aws-kb-retrieval"]'::jsonb,
      '{"AWS_REGION": "<your-region>", "AWS_ACCESS_KEY_ID": "<your-key>", "AWS_SECRET_ACCESS_KEY": "<your-secret>"}'::jsonb,
      TRUE, TRUE, 'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
-    -- 11. 计算与文档工具 (3 个)
-    ('agentinsight-researcher', 'system', 'calculator', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-calculator"]'::jsonb, NULL,
-     TRUE, TRUE, '计算器: 基础数学运算与表达式求值 (推荐, 无需 API Key)'),
-    ('agentinsight-researcher', 'system', 'markdown', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-markdown"]'::jsonb, NULL,
-     TRUE, TRUE, 'Markdown 工具: 解析/转换/格式化 Markdown 文档 (推荐, 无需 API Key)'),
+    -- 11. 文档工具 (1 个)
     ('agentinsight-researcher', 'system', 'pdf-tools', NULL, 'stdio', 'npx',
-     '["-y", "mcp-server-pdf-tools"]'::jsonb, NULL,
+     '["-y", "@modelcontextprotocol/server-pdf"]'::jsonb, NULL,
      TRUE, TRUE, 'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
 ON CONFLICT (agent_id, user_id, name) DO UPDATE SET
     server_url = EXCLUDED.server_url,

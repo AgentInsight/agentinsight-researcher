@@ -39,6 +39,8 @@ class CustomSearcher(BaseSearcher):
 
     name = "custom"
     region = SearchRegion.GLOBAL
+    cost_tier = "free"  # v1.1 新增
+    quality_score = 50.0  # v1.1 新增
 
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)

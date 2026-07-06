@@ -43,23 +43,20 @@ class PlaywrightScraper(BaseScraper):
             }
             # Playwright 浏览器目录 (离线模式预下载, 默认 ~/.cache/ms-playwright)
             if settings.playwright_browsers_path:
-                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = (
-                    settings.playwright_browsers_path
-                )
+                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = settings.playwright_browsers_path
             # 系统 chromium 路径 (方案 B 兼容)
             if settings.playwright_chromium_executable_path:
-                launch_kwargs["executable_path"] = (
-                    settings.playwright_chromium_executable_path
-                )
+                launch_kwargs["executable_path"] = settings.playwright_chromium_executable_path
             else:
                 # 方案 E: 自动检测已下载的完整 Chrome (而非 headless shell)
                 # Playwright 1.61+ 默认查找 chromium_headless_shell-*/chrome-headless-shell
                 # 但离线模式可能只下载了完整 Chrome (chromium-*/chrome-linux64/chrome)
-                browsers_path = os.environ.get(
-                    "PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"
-                )
+                browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
                 chrome_path = f"{browsers_path}/chromium-1228/chrome-linux64/chrome"
-                if os.path.exists(chrome_path):
+                # ASYNC240: 异步函数内不应使用阻塞的 os.path.exists
+                import asyncio
+
+                if await asyncio.to_thread(os.path.exists, chrome_path):
                     launch_kwargs["executable_path"] = chrome_path
                     logger.debug("使用完整 Chrome: %s", chrome_path)
 
