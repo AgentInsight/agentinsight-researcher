@@ -32,6 +32,7 @@ class GoogleSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.serpapi_key
+        self._client = httpx.AsyncClient(timeout=15.0)
 
     async def search(
         self,
@@ -61,10 +62,9 @@ class GoogleSearcher(BaseSearcher):
                     "q": query,
                     "num": max_results,
                 }
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.get(self._api_url, params=params)
-                    response.raise_for_status()
-                    data = response.json()
+                response = await self._client.get(self._api_url, params=params)
+                response.raise_for_status()
+                data = response.json()
 
                 results: list[dict[str, Any]] = []
                 # SerpApi 返回结构: {"organic_results": [...]}
@@ -87,3 +87,6 @@ class GoogleSearcher(BaseSearcher):
                 logger.warning("Google 搜索失败: %s", e)
                 span.update(metadata={"tool_name": "google", "success": False, "error": str(e)})
                 return []
+
+    async def close(self) -> None:
+        await self._client.aclose()

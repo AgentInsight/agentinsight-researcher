@@ -42,7 +42,7 @@ class ChitchatResponder:
     职责:
     1. SHORT_QUERY 响应: FAST_LLM 生成简短引导 + 三段式
     2. OFF_TOPIC 响应: 按子类 (greeting/identity/emotion/...) 路由 prompt
-    3. 兜底: multi-template 随机返回固定话术 (FAST 失败或 chitchat_use_fast_llm=False)
+    3. 兜底: multi-template 随机返回固定话术 (FAST 失败时降级)
 
     设计原则 (对标 FrugalGPT Cascade):
     - FAST_LLM 优先 (glm-4-flash, 免费层)
@@ -88,9 +88,8 @@ class ChitchatResponder:
         """短查询响应.
 
         策略:
-        1. chitchat_use_fast_llm=True → FAST_LLM 生成三段式回复
+        1. FAST_LLM 生成三段式回复
         2. FAST 失败 → multi-template 随机返回固定话术
-        3. chitchat_use_fast_llm=False → 直接走 multi-template
 
         Args:
             query: 用户输入
@@ -129,12 +128,6 @@ class ChitchatResponder:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 兜底路径: 不走 LLM
-            if not self._settings.chitchat_use_fast_llm:
-                reply = self._fallback_reply("short_query")
-                span.update(output={"reply_len": len(reply), "mode": "template"})
-                return reply
-
             # FAST_LLM 路径
             try:
                 template = self._config.render_prompt(
@@ -194,13 +187,6 @@ class ChitchatResponder:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 兜底路径: 一次性 yield
-            if not self._settings.chitchat_use_fast_llm:
-                reply = self._fallback_reply("short_query")
-                span.update(output={"reply_len": len(reply), "mode": "template"})
-                yield reply
-                return
-
             # FAST_LLM 流式路径
             try:
                 template = self._config.render_prompt(
@@ -293,14 +279,6 @@ class ChitchatResponder:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 兜底路径
-            if not self._settings.chitchat_use_fast_llm:
-                reply = self._fallback_reply("off_topic", category)
-                span.update(
-                    output={"reply_len": len(reply), "mode": "template", "category": category}
-                )
-                return reply
-
             # FAST_LLM 路径
             try:
                 template_name = self._off_topic_template_name(category)
@@ -359,15 +337,6 @@ class ChitchatResponder:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 兜底路径
-            if not self._settings.chitchat_use_fast_llm:
-                reply = self._fallback_reply("off_topic", category)
-                span.update(
-                    output={"reply_len": len(reply), "mode": "template", "category": category}
-                )
-                yield reply
-                return
-
             # FAST_LLM 流式路径
             try:
                 template_name = self._off_topic_template_name(category)

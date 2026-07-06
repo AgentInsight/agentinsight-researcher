@@ -2,16 +2,61 @@
 
 对标 GPT Researcher scraper/arxiv/arxiv.py.
 适用于 arxiv.org URL, 直接获取论文摘要与全文.
+
+P2-9 修复: httpx 流式下载 + 超时/重试 + tempfile 替代 /tmp.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import tempfile
 from typing import Any
+
+import httpx
 
 from src.skills.researcher.scrapers import BaseScraper
 
 logger = logging.getLogger(__name__)
+
+# 超时与重试默认值
+_DEFAULT_TIMEOUT = 30.0
+_DEFAULT_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # 指数退避基数(秒)
+
+
+async def _download_pdf_with_retry(
+    pdf_url: str,
+    dest_path: str,
+    *,
+    request_timeout: float = _DEFAULT_TIMEOUT,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+) -> None:
+    """流式下载 PDF 到指定路径 (httpx.AsyncClient + 指数退避重试)."""
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=True) as client:
+                async with client.stream("GET", pdf_url) as resp:
+                    resp.raise_for_status()
+                    with open(dest_path, "wb") as f:  # noqa: ASYNC230
+                        async for chunk in resp.aiter_bytes(chunk_size=65536):
+                            f.write(chunk)
+            return  # 下载成功
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                wait = _RETRY_BACKOFF_BASE * (2 ** (attempt - 1))
+                logger.debug(
+                    "PDF 下载第 %d 次失败, %0.1fs 后重试: %s",
+                    attempt,
+                    wait,
+                    exc,
+                )
+                await asyncio.sleep(wait)
+    # 全部重试耗尽, 抛出最后一次异常
+    raise last_exc  # type: ignore[misc]
 
 
 class ArxivScraper(BaseScraper):
@@ -22,8 +67,6 @@ class ArxivScraper(BaseScraper):
     async def scrape(self) -> dict[str, Any]:
         """抓取 Arxiv 论文."""
         try:
-            import asyncio
-
             import arxiv
 
             # 从 URL 提取论文 ID
@@ -32,47 +75,82 @@ class ArxivScraper(BaseScraper):
             if arxiv_id.endswith(".pdf"):
                 arxiv_id = arxiv_id[:-4]
 
-            def _sync_scrape() -> dict[str, Any]:
+            def _fetch_metadata() -> dict[str, Any] | None:
+                """同步获取论文元数据 (arxiv 库)."""
                 client = arxiv.Client()
                 search = arxiv.Search(id_list=[arxiv_id])
                 results = list(client.results(search))
                 if not results:
-                    return {"url": self.url, "content": "", "title": "", "image_urls": []}
-
-                paper = results[0]
-                # APA 风格格式化
-                content = (
-                    f"Title: {paper.title}\n\n"
-                    f"Authors: {', '.join(str(a) for a in paper.authors)}\n\n"
-                    f"Published: {paper.published.strftime('%Y-%m-%d')}\n\n"
-                    f"Summary: {paper.summary}\n\n"
-                )
-
-                # 尝试获取全文 (PDF 下载)
-                try:
-                    pdf_path = paper.download_pdf(dirpath="/tmp", filename=f"{arxiv_id}.pdf")
-                    # 用 PyMuPDF 提取全文
-                    import fitz
-
-                    doc = fitz.open(pdf_path)
-                    full_text = "\n\n".join(page.get_text() for page in doc)
-                    doc.close()
-                    content += f"Full Content:\n{full_text}"
-                except Exception:  # noqa: BLE001
-                    pass  # 全文获取失败仅用摘要
-
+                    return None
                 return {
-                    "url": self.url,
-                    "content": content,
-                    "title": paper.title,
-                    "image_urls": [],
-                    "content_type": "arxiv",
+                    "title": results[0].title,
+                    "authors": [str(a) for a in results[0].authors],
+                    "published": results[0].published.strftime("%Y-%m-%d"),
+                    "summary": results[0].summary,
+                    "pdf_url": results[0].pdf_url,
                 }
 
-            return await asyncio.to_thread(_sync_scrape)
+            # 元数据获取放 to_thread (arxiv 库是同步的)
+            paper_info = await asyncio.to_thread(_fetch_metadata)
+            if paper_info is None:
+                return {"url": self.url, "content": "", "title": "", "image_urls": []}
+
+            content = (
+                f"Title: {paper_info['title']}\n\n"
+                f"Authors: {', '.join(paper_info['authors'])}\n\n"
+                f"Published: {paper_info['published']}\n\n"
+                f"Summary: {paper_info['summary']}\n\n"
+            )
+
+            # 尝试获取全文 (PDF 流式下载 + PyMuPDF 提取)
+            try:
+                pdf_url = paper_info.get("pdf_url", "")
+                if not pdf_url:
+                    raise ValueError("无 PDF URL")
+
+                tmp_dir = tempfile.gettempdir()
+                pdf_path = os.path.join(tmp_dir, f"{arxiv_id}.pdf")
+
+                await _download_pdf_with_retry(pdf_url, pdf_path)
+                try:
+                    full_text = await asyncio.to_thread(self._extract_pdf_text, pdf_path)
+                    if full_text:
+                        content += f"Full Content:\n{full_text}"
+                finally:
+                    if await asyncio.to_thread(os.path.exists, pdf_path):
+                        await asyncio.to_thread(os.unlink, pdf_path)
+            except Exception:  # noqa: BLE001
+                pass  # 全文获取失败仅用摘要
+
+            return {
+                "url": self.url,
+                "content": content,
+                "title": paper_info["title"],
+                "image_urls": [],
+                "content_type": "arxiv",
+            }
         except ImportError:
             logger.warning("arxiv 库未安装, 跳过 Arxiv 抓取")
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
         except Exception as e:  # noqa: BLE001
             logger.warning("Arxiv 抓取失败 %s: %s", self.url, e)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
+
+    @staticmethod
+    def _extract_pdf_text(pdf_path: str) -> str:
+        """从 PDF 文件提取全文 (同步, 供 asyncio.to_thread 包裹)."""
+        try:
+            import fitz  # PyMuPDF
+
+            doc = fitz.open(pdf_path)
+            text_parts: list[str] = []
+            for page in doc:
+                text_parts.append(page.get_text())
+            doc.close()
+            return "\n\n".join(text_parts)
+        except ImportError:
+            logger.warning("PyMuPDF (fitz) 未安装, 无法提取 PDF 全文")
+            return ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning("PDF 全文提取失败 %s: %s", pdf_path, e)
+            return ""

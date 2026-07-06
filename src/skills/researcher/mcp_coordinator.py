@@ -22,19 +22,25 @@ import hashlib
 import json
 import logging
 import time
+from collections import OrderedDict
 from typing import Any
 
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_tool
 
 logger = logging.getLogger(__name__)
 
 # 模块级 TTL 缓存 (V4-P1-01): key -> (result, expire_time)
-_MCP_CACHE: dict[str, tuple[Any, float]] = {}
+# P2-8: 用 OrderedDict 实现 LRU 淘汰, max 256 项
+_MCP_CACHE: OrderedDict[str, tuple[Any, float]] = OrderedDict()
+_MCP_CACHE_MAX_SIZE = 256
 
 # P1-04: MCP 工具调用并发上限 (信号量)
 MCP_MAX_CONCURRENCY = 3
+
+# P1-5: 单个 MCP 工具调用超时上限 (秒)
+MCP_TOOL_TIMEOUT_SECONDS = 30.0
 
 
 def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> str:
@@ -56,7 +62,7 @@ def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> st
         # 含不可序列化对象时降级为 repr
         args_str = repr(tool_args)
     raw = f"{query}:{tool_name}:{args_str}"
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, Any]]:
@@ -109,6 +115,8 @@ class MCPCoordinator:
     _llm: LLMClient
     _cache: list[str] | None
     _cache_query: str | None
+    # P1-11: MultiServerMCPClient 缓存, key = hash(server_configs)
+    _client_cache: dict[str, Any]
 
     def __init__(
         self,
@@ -116,9 +124,39 @@ class MCPCoordinator:
         llm: LLMClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._cache = None
         self._cache_query = None
+        self._client_cache = {}
+
+    def _get_or_create_client(self, server_configs: dict[str, Any]) -> Any | None:
+        """缓存并复用 MultiServerMCPClient (P1-11).
+
+        避免每次 conduct_research 都重新构建客户端 (含连接初始化).
+        key = hash(server_configs JSON 序列化), 相同配置复用客户端.
+
+        Args:
+            server_configs: MCP Server 配置字典 (name -> config)
+
+        Returns:
+            MultiServerMCPClient 实例, langchain-mcp-adapters 未安装时返回 None.
+        """
+        try:
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+        except ImportError:
+            return None
+
+        try:
+            key = hashlib.sha256(
+                json.dumps(server_configs, sort_keys=True, default=str).encode()
+            ).hexdigest()
+        except (TypeError, ValueError):
+            # 序列化失败时直接构建 (无缓存)
+            return MultiServerMCPClient(server_configs)
+
+        if key not in self._client_cache:
+            self._client_cache[key] = MultiServerMCPClient(server_configs)
+        return self._client_cache[key]
 
     async def conduct_research(
         self,
@@ -190,8 +228,6 @@ class MCPCoordinator:
         - sse / streamable_http (远程模式): 通过 server_url 连接远程 HTTP 服务器
         """
         try:
-            from langchain_mcp_adapters.client import MultiServerMCPClient
-
             # 转换配置格式 (对标 GPT Researcher convert_configs_to_langchain_format)
             # 根据数据库 transport_type 字段构建配置 (不再从 URL 推断)
             server_configs = {}
@@ -243,7 +279,11 @@ class MCPCoordinator:
                 logger.warning("MCP 无可用配置 (所有配置均无效)")
                 return []
 
-            client = MultiServerMCPClient(server_configs)
+            # P1-11: 复用缓存的 MultiServerMCPClient (相同配置不重复构建)
+            client = self._get_or_create_client(server_configs)
+            if client is None:
+                logger.warning("langchain-mcp-adapters 未安装, MCP 数据源不可用")
+                return []
             tools = await client.get_tools()
 
             if not tools:
@@ -274,9 +314,6 @@ class MCPCoordinator:
             contexts: list[str] = [r for r in results if r is not None]
 
             return contexts
-        except ImportError:
-            logger.warning("langchain-mcp-adapters 未安装, MCP 数据源不可用")
-            return []
         except Exception as e:  # noqa: BLE001
             logger.warning("MCP 执行失败: %s", e)
             return []
@@ -312,20 +349,39 @@ class MCPCoordinator:
             if cache_key in _MCP_CACHE:
                 cached_result, expire = _MCP_CACHE[cache_key]
                 if time.time() < expire:
+                    # P2-8: 命中时移动到末尾 (LRU 最近使用)
+                    _MCP_CACHE.move_to_end(cache_key)
                     logger.debug("MCP 缓存命中: tool=%s", tool_name)
                     return str(cached_result)
+                else:
+                    # 过期: 删除
+                    _MCP_CACHE.pop(cache_key, None)
         # P1-04: 信号量限制并发
         async with sem:
             try:
-                result = await tool.ainvoke(tool_args)
+                # P1-5: 单工具调用超时 (30s), 避免长时间阻塞
+                result = await asyncio.wait_for(
+                    tool.ainvoke(tool_args),
+                    timeout=MCP_TOOL_TIMEOUT_SECONDS,
+                )
                 if result:
                     # V4-P1-01: 调用成功写入缓存
                     if cache_key is not None:
+                        # P2-8: LRU 淘汰, 超过 max_size 时弹出最旧项
                         _MCP_CACHE[cache_key] = (
                             result,
                             time.time() + self.settings.mcp_cache_ttl,
                         )
+                        _MCP_CACHE.move_to_end(cache_key)
+                        while len(_MCP_CACHE) > _MCP_CACHE_MAX_SIZE:
+                            _MCP_CACHE.popitem(last=False)
                     return str(result)
+            except TimeoutError:
+                logger.warning(
+                    "MCP 工具 %s 调用超时 (>%ss)",
+                    tool_name or "?",
+                    MCP_TOOL_TIMEOUT_SECONDS,
+                )
             except Exception as e:  # noqa: BLE001
                 logger.warning("MCP 工具 %s 调用失败: %s", tool_name or "?", e)
             return None

@@ -64,7 +64,7 @@ src/
 │   └── <agent_name>/  # 子智能体专属配置（如有子智能体，按名称建子目录）
 ├── skills/        # 技能定义
 │   └── <agent_name>/  # 子智能体专属技能（如有子智能体，按名称建子目录）
-├── tools/         # MCP Server 封装 + registry 注册中心
+├── tools/         # MCP Server 封装（registry 待多 Agent 落地后引入）
 ├── rag/           # 自研 RAG 层（retriever/reranker/embeddings/bm25）
 ├── llm/           # LiteLLM 网关封装
 ├── memory/        # Postgres Checkpointer 配置
@@ -192,7 +192,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 ## 9. 工具与模型网关规则
 
-**工具（MCP）**：外部工具优先通过 MCP Server 暴露；节点内不推荐定义 ad-hoc tool function。工具注册集中在 `tools/registry.py` 单一注册表，按智能体名分组授权。工具调用应经 AgentInsight `trace_tool` span 包裹（见第 10 章），参数与结果入 span。敏感工具（写文件/执行命令）应显式声明权限，由中间件校验。
+**工具（MCP）**：外部工具优先通过 MCP Server 暴露；节点内不推荐定义 ad-hoc tool function。MCP 工具配置存储在 PostgreSQL `mcp_configs` 表（按 `agent_id` + `user_id` 隔离，见第 7 章），运行时由 `src/skills/researcher/mcp_coordinator.py` 加载用户启用配置并经 LLM 智能选工具；多 Agent 落地后再引入 `tools/registry.py` 集中授权。工具调用应经 AgentInsight `trace_tool` span 包裹（见第 10 章），参数与结果入 span。敏感工具（写文件/执行命令）应显式声明权限，由中间件校验。
 
 **模型网关（LiteLLM）**：LLM 调用优先经 `llm/` 的 `LLMClient`（底层 LiteLLM ≥1.6）；不推荐直接 `openai`/`anthropic` 等 SDK（如需直连应说明理由并等待用户确认）。模型名以 LiteLLM 路由前缀声明（如 `deepseek/deepseek-chat`），由配置注入，不推荐硬编码。流式统一 `achat_stream`；同步 `chat` 仅用于非交互式批处理。
 
@@ -240,6 +240,8 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - **PII**：用户会话内容加密存储+日志脱敏；API 响应禁止返回密码/密钥原文；最小化收集，按用途设保留期
 - **Prompt Injection**：所有外部输入经 Pydantic 校验；工具调用权限隔离（`read`/`write`/`execute`/`network` 显式授权）；禁止 `eval`/`exec` 求值用户输入；LLM 输出经结构化校验后再入工具
 - **传输与边界**：生产强制 HTTPS；安全响应头中间件（nosniff/DENY/HSTS）不可绕过；生产关闭 Debug
+- **Agent 操作约束（文件修改硬约束）**：禁止 Agent 通过 PowerShell（含 `Set-Content`/`Add-Content`/`Out-File`/`echo >`/`>>` 重定向/`[System.IO.File]::WriteAllText` 等 PS 原生写文件命令）修改任何项目文件；文件读取/创建/编辑/删除统一使用专用工具（Read/Write/Edit/DeleteFile/Glob/Grep）。理由：(1) 专用工具走审计链路，可追溯可回滚；(2) PS 写文件绕过权限校验与编码约定（易引入 BOM/CRLF 问题）；(3) 与 Trae IDE 工具规范一致。违例即阻断合并并提 P0。仅允许在 RunCommand 中使用 PowerShell 执行与文件修改无关的命令（如 `git`/`docker`/`python -m pytest`/`docker compose` 等系统命令）。
+- **CORS（不推荐 `*`，但不禁；属架构偏好非硬约束）**：`CORS_ALLOW_ORIGINS=*` 不推荐用于生产（暴露面过大，违反最小权限原则），但并非第 11 章硬约束；生产推荐配置具体域名列表（如 `https://your-domain.com,http://localhost:8066`），开发/QA 环境可酌情放宽；如确需 `*`（如开源社区快速起栈），应说明理由并经用户确认
 
 ## 12. 部署规则
 
@@ -276,7 +278,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 依赖顺序：生产联网模式 `postgres` → `redis` → `qdrant` → `embeddings` → `agent`；QA 模式 `postgres` → `redis` → `qdrant` → `embeddings` → `agent`；生产离线模式 `redis` → `qdrant` → `embeddings` → `agent`（PostgreSQL 由外部托管，不在 `depends_on` 内）；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
 - 健康检查 `interval ≤ 30s` / `timeout ≤ 10s` / `retries ≥ 3` / `start_period ≥ 10s`。
 - 数据卷应用 `driver: local`，命名卷 `redis_data` / `qdrant_data` / `session_data` / `embeddings_models` / `rerank_models` / `uploads_data`（生产联网模式与 QA 模式额外含 `postgres_data`）。
-- 端口绑定：生产仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
+- 端口绑定：生产仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
 
 **Agent 容器核心约定（优先选择）**：
 - 基础镜像 `python:3.12-slim`，非 root 用户运行。
@@ -294,9 +296,9 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 | 生产模式（离线） | `Dockerfile.offline` | `docker-compose-offline.yaml` | `.env` | `docker-build.offline.sh` | 内网生产环境、离线部署 |
 
 - **QA 模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。适用于 QA 测试。所有端口绑定 `127.0.0.1`，仅本机访问。
-- **生产模式（联网）**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像（含 `postgres` 容器），无需预下载 `packages/`。适用于开源社区贡献者快速起栈。仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
-- **生产模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。镜像版本由 `packages/images/` 中的 tarball 决定，compose 文件中硬编码以确保匹配。适用于内网生产环境或离线部署。仅 `agent:8066` 对外暴露，其余绑定 `127.0.0.1`。
-- QA 模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.qa`、`docker-compose-qa.yaml`、`docker-build.qa.bat`、`scripts/build-offline.ps1`、`scripts/offline-deploy.ps1`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
+- **生产模式（联网）**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像（含 `postgres` 容器），无需预下载 `packages/`。适用于开源社区贡献者快速起栈。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
+- **生产模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。镜像版本由 `packages/images/` 中的 tarball 决定，compose 文件中硬编码以确保匹配。适用于内网生产环境或离线部署。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
+- QA 模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.qa`、`docker-compose-qa.yaml`、`docker-build.qa.bat`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
 - 生产离线模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.offline`、`docker-compose-offline.yaml`、`docker-build.offline.sh`。
 - "不推荐部署时联网拉镜像/装依赖/下模型" 约束适用于**QA 模式**和**生产离线模式**；生产联网模式允许构建时联网。
 

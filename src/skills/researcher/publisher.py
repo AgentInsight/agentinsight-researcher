@@ -6,6 +6,7 @@ AGENTS.md 用户需求 6: 输出报告格式需支持 Markdown/HTML/PDF, 默认 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -62,7 +63,7 @@ class Publisher:
                 return {"format": "markdown", "content": report_md, "path": None}
 
             if output_format == "html":
-                html = self._md_to_html(report_md)
+                html = await asyncio.to_thread(self._md_to_html, report_md)
                 span.update(output={"format": "html", "html_len": len(html)})
                 return {"format": "html", "content": html, "path": None}
 
@@ -72,7 +73,7 @@ class Publisher:
                 return {"format": "pdf", "content": None, "path": pdf_path}
 
             if output_format == "docx":
-                docx_bytes = self._to_docx(report_md, title=title)
+                docx_bytes = await asyncio.to_thread(self._to_docx, report_md, title=title)
                 span.update(output={"format": "docx", "size": len(docx_bytes)})
                 return {"format": "docx", "content": docx_bytes, "path": None}
 
@@ -88,12 +89,12 @@ class Publisher:
                 return {"format": "json", "content": json_str, "path": None}
 
             if output_format == "latex":
-                latex = self._to_latex(report_md)
+                latex = await asyncio.to_thread(self._to_latex, report_md)
                 span.update(output={"format": "latex", "len": len(latex)})
                 return {"format": "latex", "content": latex, "path": None}
 
             if output_format == "epub":
-                epub_bytes = self._to_epub(report_md, title=title)
+                epub_bytes = await asyncio.to_thread(self._to_epub, report_md, title=title)
                 span.update(output={"format": "epub", "size": len(epub_bytes)})
                 return {"format": "epub", "content": epub_bytes, "path": None}
 
@@ -434,11 +435,11 @@ th {{ background: #f8f9fa; font-weight: 600; }}
             if fmt_lower == "markdown":
                 results["markdown"] = report_md
             elif fmt_lower == "html":
-                results["html"] = self._md_to_html(report_md)
+                results["html"] = await asyncio.to_thread(self._md_to_html, report_md)
             elif fmt_lower == "pdf":
                 results["pdf_path"] = await self._md_to_pdf(report_md)
             elif fmt_lower == "docx":
-                results["docx"] = self._to_docx(report_md, title=title)
+                results["docx"] = await asyncio.to_thread(self._to_docx, report_md, title=title)
             elif fmt_lower == "json":
                 results["json"] = self._to_json(
                     report_md,
@@ -448,9 +449,9 @@ th {{ background: #f8f9fa; font-weight: 600; }}
                     research_mode=research_mode,
                 )
             elif fmt_lower == "latex":
-                results["latex"] = self._to_latex(report_md)
+                results["latex"] = await asyncio.to_thread(self._to_latex, report_md)
             elif fmt_lower == "epub":
-                results["epub"] = self._to_epub(report_md, title=title)
+                results["epub"] = await asyncio.to_thread(self._to_epub, report_md, title=title)
             else:
                 logger.warning("未知导出格式: %s (跳过)", fmt)
         return results

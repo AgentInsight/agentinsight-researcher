@@ -21,11 +21,15 @@ P1-Future-05 LLM 降级链 (strategic → smart → fast):
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar
+
+import litellm
+import orjson
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_generation
@@ -291,9 +295,6 @@ class LLMClient:
         # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
         model, kwargs = self._adapt_zhipu(model, kwargs)
 
-        # 延迟导入 litellm, 避免模块加载时强依赖
-        import litellm
-
         response = await litellm.acompletion(**kwargs)
 
         usage = getattr(response, "usage", None)
@@ -312,6 +313,119 @@ class LLMClient:
             cost_breakdown=breakdown,
             raw=response,
         )
+
+    # ========== P2-2: LLM 响应缓存 (Redis) ==========
+    # 用户硬约束: "出错了不要存缓存" — 仅缓存成功响应, 异常/错误响应绝不缓存.
+    # 仅缓存 temperature=0 的请求 (temperature>0 结果不确定, 不缓存).
+    # 流式响应 (achat_stream) 不缓存 (流式无法等价复用).
+    # Redis 不可用时降级为不缓存, 不阻断主流程; 缓存写入失败仅 warn 不抛出.
+
+    def _llm_cache_key(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        stop: list[str] | None,
+    ) -> str:
+        """构建 LLM 响应缓存键 (P2-2).
+
+        AGENTS.md 第 7 章 Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
+        LLM 响应缓存为全局级 (不区分用户/会话, 因 temp=0 时 LLM 输出确定性),
+        使用 _global 占位. 缓存维度: model + messages + temperature + max_tokens + stop.
+
+        Args:
+            messages: 消息列表.
+            model: 模型名.
+            temperature: 温度 (仅 0.0 时调用方才会缓存).
+            max_tokens: 最大输出 token 数.
+            stop: 停止序列 (影响输出, 必须纳入 key 保证正确性).
+
+        Returns:
+            Redis 缓存键字符串.
+        """
+        agent_id = self.settings.agent_name
+        # 序列化 messages 用于 hash (sort_keys 保证顺序稳定, default=str 兜底不可序列化)
+        try:
+            msgs_bytes = orjson.dumps(messages, option=orjson.OPT_SORT_KEYS, default=str)
+        except (TypeError, ValueError):
+            msgs_bytes = repr(messages).encode("utf-8")
+        stop_bytes = (
+            orjson.dumps(stop, option=orjson.OPT_SORT_KEYS, default=str) if stop else b"None"
+        )
+        payload = (
+            f"{model}\x1f{temperature}\x1f{max_tokens}\x1f".encode()
+            + msgs_bytes
+            + b"\x1f"
+            + stop_bytes
+        )
+        key_hash = hashlib.sha256(payload).hexdigest()
+        return f"{agent_id}:_global:llm:response:{key_hash}"
+
+    async def _get_llm_cache(self, key: str) -> LLMResponse | None:
+        """读取 LLM 响应缓存 (P2-2).
+
+        Redis 不可用或读取异常时降级返回 None, 不阻断主流程.
+        """
+        if not self.settings.llm_response_cache_enabled:
+            return None
+        try:
+            # 延迟导入避免循环依赖 (common/ 不依赖 llm/)
+            from src.common.redis_client import get_redis_client
+
+            r = await get_redis_client(self.settings)
+            if r is None:
+                return None
+            data = await r.get(key)
+            if data is None:
+                return None
+            cached = orjson.loads(data)
+            return LLMResponse(
+                content=cached["content"],
+                model=cached["model"],
+                input_tokens=cached.get("input_tokens", 0),
+                output_tokens=cached.get("output_tokens", 0),
+                cost_usd=cached.get("cost_usd", 0.0),
+                cost_breakdown=cached.get("cost_breakdown"),
+                raw=None,  # raw 不缓存 (可能含不可序列化对象, 缓存命中无需 raw)
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("LLM 响应缓存读取失败, 降级无缓存: %s", e)
+            return None
+
+    async def _set_llm_cache(self, key: str, response: LLMResponse) -> None:
+        """写入 LLM 响应缓存 (P2-2).
+
+        仅在 LLM 调用成功后由调用方触发 (用户硬约束: 出错了不要存缓存).
+        缓存写入失败仅 warn, 不抛出 (不影响主流程).
+        """
+        if not self.settings.llm_response_cache_enabled:
+            return
+        try:
+            from src.common.redis_client import get_redis_client
+
+            r = await get_redis_client(self.settings)
+            if r is None:
+                return
+            payload = orjson.dumps(
+                {
+                    "content": response.content,
+                    "model": response.model,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "cost_usd": response.cost_usd,
+                    "cost_breakdown": response.cost_breakdown,
+                },
+                default=str,
+            )
+            await r.setex(key, self.settings.llm_response_cache_ttl, payload)
+            logger.debug(
+                "LLM 响应缓存已写入: model=%s, ttl=%ds",
+                response.model,
+                self.settings.llm_response_cache_ttl,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("LLM 响应缓存写入失败 (不阻断): %s", e)
 
     async def achat(
         self,
@@ -332,6 +446,8 @@ class LLMClient:
         P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
         P1-Future-05: tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
         外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
+        P2-2: temperature=0 时接入 Redis 响应缓存, 命中直接返回 (跳过 LLM 调用);
+              仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
         """
         # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
         initial_model = self._get_model(tier)
@@ -342,6 +458,22 @@ class LLMClient:
             "max_tokens": initial_token_limit,
             "timeout": self.settings.llm_timeout,
         }
+
+        # P2-2: LLM 响应缓存 — 仅 temperature=0 时缓存 (温度>0 结果不确定, 不缓存)
+        # 缓存命中直接返回, 跳过 trace span (无 LLM 调用, 无需追踪 generation)
+        cache_key: str | None = None
+        if self.settings.llm_response_cache_enabled and initial_temp == 0.0:
+            cache_key = self._llm_cache_key(
+                messages, initial_model, initial_temp, initial_token_limit, stop
+            )
+            cached = await self._get_llm_cache(cache_key)
+            if cached is not None:
+                logger.debug(
+                    "LLM 响应缓存命中: model=%s, step=%s (跳过 LLM 调用)",
+                    initial_model,
+                    step,
+                )
+                return cached
 
         attempted_tiers: list[str] = []
         async with trace_generation(
@@ -414,6 +546,10 @@ class LLMClient:
                             "TokenBudgetAllocator 回写失败 (非阻断): %s",
                             budget_err,
                         )
+                    # P2-2: 写入 LLM 响应缓存 (仅成功响应)
+                    # 用户硬约束: "出错了不要存缓存" — 此处仅在成功路径, 异常路径不会到达
+                    if cache_key is not None:
+                        await self._set_llm_cache(cache_key, response)
                     return response
                 except Exception as e:  # noqa: BLE001
                     last_exc = e
@@ -522,8 +658,6 @@ class LLMClient:
                 try:
                     # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
                     used_model, kwargs = self._adapt_zhipu(used_model, kwargs)
-                    import litellm
-
                     stream = await litellm.acompletion(**kwargs)
                     break  # 流式连接建立成功
                 except Exception as e:  # noqa: BLE001

@@ -56,10 +56,32 @@ async def init_database(settings: Settings | None = None) -> bool:
         logger.warning("init.sql 不存在: %s, 跳过 DB 初始化", INIT_SQL_PATH)
         return False
 
-    sql = await asyncio.to_thread(_read_init_sql)
-
+    # 先连接到维护数据库 (postgres) 确保目标数据库存在, 不存在则创建
     # asyncpg 原生 DSN: postgresql:// (非 sqlalchemy 的 postgresql+asyncpg://)
-    dsn = settings.postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+    raw_dsn = settings.postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+    target_db = settings.postgres_db
+    maint_dsn = _replace_db_in_dsn(raw_dsn, "postgres")
+    try:
+        admin_conn = await asyncpg.connect(maint_dsn)
+        try:
+            exists = await admin_conn.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", target_db
+            )
+            if not exists:
+                # CREATE DATABASE 不支持参数绑定, 但 target_db 来自配置, 不接受用户输入
+                await admin_conn.execute(f'CREATE DATABASE "{target_db}"')
+                logger.info("PostgreSQL 数据库 %s 不存在, 已创建", target_db)
+        finally:
+            await admin_conn.close()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "PostgreSQL 数据库存在性检查/创建失败 (不阻断, 可能权限不足): type=%s msg=%s",
+            type(e).__name__,
+            e,
+        )
+
+    sql = await asyncio.to_thread(_read_init_sql)
+    dsn = raw_dsn
 
     try:
         conn = await asyncpg.connect(dsn)
@@ -77,6 +99,24 @@ async def init_database(settings: Settings | None = None) -> bool:
             e,
         )
         return False
+
+
+def _replace_db_in_dsn(dsn: str, new_db: str) -> str:
+    """替换 DSN 中的数据库名.
+
+    支持 postgresql://user:pass@host:port/dbname?params 格式.
+    """
+    # 用 urllib 解析再重组, 兼容 query 参数
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(dsn)
+    path = parts.path
+    # path 形如 "/dbname" 或 "" (无 path 时默认到 postgres)
+    new_path = f"/{new_db}" if not path or path == "/" else path
+    # 若原 path 已含 dbname, 替换; 否则追加
+    if path and path != "/":
+        new_path = f"/{new_db}"
+    return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
 
 
 __all__ = ["get_pool", "init_database"]

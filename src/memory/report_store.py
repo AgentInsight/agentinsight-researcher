@@ -3,7 +3,7 @@
 对标 GPT Researcher backend/server/report_store.py.
 AGENTS.md 第 6/7 章硬约束:
 - 业务表含 agent_id + user_id 双列复合索引
-- 用 asyncpg 直连 PostgreSQL (复用 settings.postgres_dsn)
+- 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复, 避免每次请求新建短连接)
 - save_report 失败不阻断主流程 (调用方 try/except)
 """
 
@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from typing import Any
 
 import asyncpg
 
 from src.config.settings import Settings, get_settings
+from src.memory.db_initializer import get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,8 @@ class ReportStore:
     """报告持久化存储 (P1-Future-09).
 
     对标 GPTR backend/server/report_store.py.
-    用 asyncpg 直连 PostgreSQL, 每次操作建立短连接 (复用 db_initializer 模式).
+    复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复),
+    每次 CRUD 操作通过 pool.acquire() 获取连接, 用完自动归还, 不再新建短连接.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -39,9 +42,18 @@ class ReportStore:
     def _dsn(self) -> str:
         """获取 asyncpg 原生 DSN (postgresql://).
 
+        .. deprecated:: P0-4
+            改为复用 ``db_initializer.get_pool()`` 连接池单例, 不再新建短连接.
+            此方法仅为兼容外部调用保留, 后续版本可能移除.
+
         settings.postgres_dsn 返回 postgresql+asyncpg:// 前缀 (sqlalchemy 风格),
         asyncpg 需要 postgresql:// 前缀, 故替换.
         """
+        warnings.warn(
+            "ReportStore._dsn() is deprecated since P0-4; use db_initializer.get_pool() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._settings.postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
 
     async def save_report(
@@ -70,10 +82,9 @@ class ReportStore:
         Returns:
             report_id (UUID 字符串)
         """
-        dsn = self._dsn()
         sources_json = json.dumps(sources, ensure_ascii=False)
-        conn = await asyncpg.connect(dsn)
-        try:
+        pool = await get_pool(self._settings)
+        async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO research_reports
@@ -100,8 +111,6 @@ class ReportStore:
                 user_id,
             )
             return report_id
-        finally:
-            await conn.close()
 
     async def get_report(self, report_id: str) -> dict[str, Any] | None:
         """按 report_id 获取报告.
@@ -112,9 +121,8 @@ class ReportStore:
         Returns:
             报告字典, 不存在返回 None
         """
-        dsn = self._dsn()
-        conn = await asyncpg.connect(dsn)
-        try:
+        pool = await get_pool(self._settings)
+        async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"SELECT {_SELECT_COLUMNS} FROM research_reports WHERE report_id = $1::uuid",
                 report_id,
@@ -122,8 +130,6 @@ class ReportStore:
             if not row:
                 return None
             return _row_to_dict(row)
-        finally:
-            await conn.close()
 
     async def list_reports(
         self,
@@ -143,9 +149,8 @@ class ReportStore:
         Returns:
             报告列表 (按 created_at DESC 排序)
         """
-        dsn = self._dsn()
-        conn = await asyncpg.connect(dsn)
-        try:
+        pool = await get_pool(self._settings)
+        async with pool.acquire() as conn:
             if session_id and user_id:
                 rows = await conn.fetch(
                     f"""
@@ -190,8 +195,6 @@ class ReportStore:
                     offset,
                 )
             return [_row_to_dict(r) for r in rows]
-        finally:
-            await conn.close()
 
     async def delete_report(self, report_id: str) -> bool:
         """删除报告.
@@ -202,9 +205,8 @@ class ReportStore:
         Returns:
             True 删除成功, False 报告不存在
         """
-        dsn = self._dsn()
-        conn = await asyncpg.connect(dsn)
-        try:
+        pool = await get_pool(self._settings)
+        async with pool.acquire() as conn:
             result = await conn.execute(
                 "DELETE FROM research_reports WHERE report_id = $1::uuid",
                 report_id,
@@ -214,8 +216,6 @@ class ReportStore:
             if deleted:
                 logger.info("报告已删除: report_id=%s", report_id)
             return deleted
-        finally:
-            await conn.close()
 
 
 def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:

@@ -30,7 +30,7 @@ from src.agents.ag2.agents import (
 )
 from src.agents.researcher.reviewer import Reviewer
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient
+from src.llm.client import LLMClient, get_llm_client
 from src.observability.tracing import trace_agent, trace_chain
 from src.skills.researcher.publisher import Publisher
 from src.skills.researcher.report_generator import ReportGenerator
@@ -110,7 +110,7 @@ class AG2Orchestrator:
             publisher: 报告发布器, 默认自动创建
         """
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._research_conductor = research_conductor or ResearchConductor(
             settings=self.settings, llm=self._llm
         )

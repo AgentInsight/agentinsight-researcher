@@ -24,6 +24,8 @@ class BeautifulSoupScraper(BaseScraper):
         try:
             from bs4 import BeautifulSoup
 
+            # DEPRECATED: _sync_scrape 未被调用 (下方仅调用 _async_scrape), 保留仅供历史参考.
+            # P1-10: 标记 deprecated, 后续版本可移除.
             def _sync_scrape() -> dict[str, Any]:
                 if self.session is None:
                     return {"url": self.url, "content": "", "title": "", "image_urls": []}
@@ -37,9 +39,19 @@ class BeautifulSoupScraper(BaseScraper):
                 if self.session is None:
                     return {"url": self.url, "content": "", "title": "", "image_urls": []}
 
-                response = await self.session.get(self.url, timeout=10.0)
+                response = await self.session.get(self.url, timeout=15.0)
                 response.raise_for_status()
                 html = response.text
+
+                # P1-10: HTML 大小上限检查 (5MB), 超过则截断并告警
+                max_html_size = 5 * 1024 * 1024  # 5MB
+                if len(html) > max_html_size:
+                    logger.warning(
+                        "HTML 内容过大 (%.2fMB), 截断至 5MB: %s",
+                        len(html) / (1024 * 1024),
+                        self.url,
+                    )
+                    html = html[:max_html_size]
 
                 soup = BeautifulSoup(html, "lxml", from_encoding=response.encoding)
 

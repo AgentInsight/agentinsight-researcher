@@ -12,21 +12,18 @@ AGENTS.md 第 7 章硬约束:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
 import logging
 import time
 from typing import Any, cast
 
 import httpx
 import jieba
+import orjson
 from rank_bm25 import BM25Okapi
 
-try:  # P2-04: redis 在 requirements.txt, 但运行环境缺失时降级无缓存 (AGENTS.md 降级策略)
-    import redis.asyncio as aioredis
-except ImportError:  # pragma: no cover
-    aioredis = None  # type: ignore[assignment,unused-ignore]
-
+from src.common.redis_client import get_redis_client
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_retriever
 from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
@@ -49,9 +46,15 @@ class HybridRetriever:
     _qdrant: QdrantManager
     _rerank_client: httpx.AsyncClient
     _redis: Any  # aioredis.Redis | None (Redis 客户端, 不可用时为 None)
+    _redis_initialized: bool  # P0-5: 惰性初始化标记, 避免每次检索都调用 get_redis_client
     _bm25_corpus: list[list[str]]  # BM25 语料 (jieba 分词后)
     _bm25_docs: list[dict[str, Any]]  # BM25 原始文档
     _bm25: BM25Okapi | None
+    # P1-6: BM25 分词结果缓存 (key=content sha256, value=tokens list)
+    # 避免重复语料更新时对同一 content 重复 jieba.cut
+    _token_cache: dict[str, list[str]]
+    # P1-4: singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复计算)
+    _inflight_locks: dict[str, asyncio.Lock]
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -67,22 +70,19 @@ class HybridRetriever:
             timeout=30.0,
             headers=headers,
         )
-        # P2-04: Redis 缓存客户端 (AGENTS.md 第 7 章: 键格式 {agent_id}:{user_id}:{module}:{type}:{id})
-        # Redis 不可用时降级为无缓存, 不阻断检索 (含 redis 库未安装场景)
+        # P0-5: Redis 缓存客户端改用统一工厂 get_redis_client() (AGENTS.md 第 7 章:
+        # 键格式 {agent_id}:{user_id}:{module}:{type}:{id}, 键前缀由本类管理).
+        # __init__ 是同步方法, 故惰性到首次 _get_cache/_set_cache 时初始化 (避免阻塞).
+        # Redis 不可用时降级为无缓存, 不阻断检索.
         self._redis: Any = None
-        if aioredis is not None:
-            try:
-                self._redis = aioredis.from_url(
-                    self.settings.redis_url,
-                    password=self.settings.redis_auth or None,
-                    decode_responses=True,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Redis 客户端初始化失败, 降级无缓存: %s", e)
-                self._redis = None
+        self._redis_initialized = False
         self._bm25_corpus = []
         self._bm25_docs = []
         self._bm25 = None
+        # P1-6: 分词缓存初始化
+        self._token_cache = {}
+        # P1-4: singleflight 锁字典初始化
+        self._inflight_locks = {}
 
     def build_namespaces(self, user_id: str | None = None) -> list[str]:
         """构建检索 namespace 列表 (共享 + 用户私有).
@@ -170,67 +170,79 @@ class HybridRetriever:
             logger.info("RAG 缓存命中: query=%s", query[:50])
             return cached
 
-        async with trace_retriever(
-            name="hybrid-retrieve",
-            input={"query": query[:200], "namespaces": namespaces, "top_k": k},
-            metadata={"retriever_type": "hybrid", "has_private_data": has_private},
-            user_id=user_id,
-            session_id=session_id,
-        ) as span:
-            # 并行执行 BM25 + 向量检索
-            import asyncio
+        # P1-4: singleflight 互斥锁 (按 query+user_id hash 分锁, 防止缓存击穿)
+        # 同一 query 并发请求只允许一个执行 BM25+Vector+Rerank, 其他等待结果
+        inflight_key = cache_key  # 复用 cache_key (已含 agent_id+user_id+query_hash)
+        lock = self._inflight_locks.get(inflight_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._inflight_locks[inflight_key] = lock
+        async with lock:
+            # 双重检查: 持有锁后再次查缓存, 可能在等待期间已被其他协程填充
+            cached = await self._get_cache(cache_key, user_id)
+            if cached is not None:
+                logger.info("RAG 缓存命中 (singleflight 等待后): query=%s", query[:50])
+                return cached
 
-            vector_task = self._vector_search(query, namespaces, k * 3)
-            bm25_task = self._bm25_search(query, k * 3)
+            async with trace_retriever(
+                name="hybrid-retrieve",
+                input={"query": query[:200], "namespaces": namespaces, "top_k": k},
+                metadata={"retriever_type": "hybrid", "has_private_data": has_private},
+                user_id=user_id,
+                session_id=session_id,
+            ) as span:
+                # 并行执行 BM25 + 向量检索
+                vector_task = self._vector_search(query, namespaces, k * 3)
+                bm25_task = self._bm25_search(query, k * 3)
 
-            results = await asyncio.gather(
-                vector_task,
-                bm25_task,
-                return_exceptions=True,
-            )
+                results = await asyncio.gather(
+                    vector_task,
+                    bm25_task,
+                    return_exceptions=True,
+                )
 
-            # 容错: 任一失败用空列表
-            vector_results: list[dict[str, Any]] = []
-            if isinstance(results[0], Exception):
-                logger.warning("向量检索失败: %s", results[0])
-            else:
-                vector_results = cast(list[dict[str, Any]], results[0])
-            bm25_results: list[dict[str, Any]] = []
-            if isinstance(results[1], Exception):
-                logger.warning("BM25 检索失败: %s", results[1])
-            else:
-                bm25_results = cast(list[dict[str, Any]], results[1])
+                # 容错: 任一失败用空列表
+                vector_results: list[dict[str, Any]] = []
+                if isinstance(results[0], Exception):
+                    logger.warning("向量检索失败: %s", results[0])
+                else:
+                    vector_results = cast(list[dict[str, Any]], results[0])
+                bm25_results: list[dict[str, Any]] = []
+                if isinstance(results[1], Exception):
+                    logger.warning("BM25 检索失败: %s", results[1])
+                else:
+                    bm25_results = cast(list[dict[str, Any]], results[1])
 
-            # RRF 融合
-            fused = self._rrf_fuse(
-                vector_results,
-                bm25_results,
-                vector_weight=self.settings.vector_weight,
-                bm25_weight=self.settings.bm25_weight,
-            )
+                # RRF 融合
+                fused = self._rrf_fuse(
+                    vector_results,
+                    bm25_results,
+                    vector_weight=self.settings.vector_weight,
+                    bm25_weight=self.settings.bm25_weight,
+                )
 
-            # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 对标 GPTR context 去重)
-            fused = self._deduplicate_by_content_hash(fused)
+                # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 对标 GPTR context 去重)
+                fused = self._deduplicate_by_content_hash(fused)
 
-            # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
-            if self.settings.rerank_enabled:
-                reranked = await self._rerank(query, fused, k)
-            else:
-                # rerank 未启用, 直接用 RRF 融合分数取 top_k
-                # 注意: score_threshold 仅适用于 rerank 分数 (0~1), RRF 融合分数不应用此阈值
-                reranked = fused[:k]
+                # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
+                if self.settings.rerank_enabled:
+                    reranked = await self._rerank(query, fused, k)
+                else:
+                    # rerank 未启用, 直接用 RRF 融合分数取 top_k
+                    # 注意: score_threshold 仅适用于 rerank 分数 (0~1), RRF 融合分数不应用此阈值
+                    reranked = fused[:k]
 
-            span.update(
-                output={"matched": len(reranked)},
-                metadata={
-                    "candidate_count": len(fused),
-                    "retriever_type": "hybrid",
-                    "top_score": reranked[0]["score"] if reranked else 0.0,
-                },
-            )
-            # P2-04: 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
-            await self._set_cache(cache_key, reranked, user_id)
-            return reranked
+                span.update(
+                    output={"matched": len(reranked)},
+                    metadata={
+                        "candidate_count": len(fused),
+                        "retriever_type": "hybrid",
+                        "top_score": reranked[0]["score"] if reranked else 0.0,
+                    },
+                )
+                # P2-04: 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
+                await self._set_cache(cache_key, reranked, user_id)
+                return reranked
 
     async def _vector_search(
         self,
@@ -256,11 +268,13 @@ class HybridRetriever:
         """BM25 检索 (基于内存语料, jieba 中文分词).
 
         AGENTS.md 第 7 章: rank-bm25 + jieba, 中文分词 + IDF.
+        P1-6: query 分词结果缓存 (重复 query 命中缓存, 避免重复 jieba.cut).
         """
         if not self._bm25 or not self._bm25_docs:
             return []
 
-        query_tokens = list(jieba.cut(query))
+        # P1-6: query 分词缓存 (query 通常重复率高)
+        query_tokens = self._get_tokens(query)
         scores = self._bm25.get_scores(query_tokens)
 
         # 按分数排序取 top limit
@@ -328,7 +342,7 @@ class HybridRetriever:
         deduped: list[dict[str, Any]] = []
         for r in results:
             content = r.get("content", r.get("body", ""))
-            h = hashlib.md5(content.encode("utf-8")).hexdigest()
+            h = hashlib.sha256(content.encode("utf-8")).hexdigest()
             if h not in seen:
                 seen.add(h)
                 deduped.append(r)
@@ -338,7 +352,7 @@ class HybridRetriever:
         """构建 Redis 缓存键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:{module}:{type}:{id})."""
         agent_id = self.settings.agent_name
         uid = user_id or self.settings.default_user_id
-        query_hash = hashlib.md5(query.encode("utf-8")).hexdigest()
+        query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
         return f"{agent_id}:{uid}:rag:retriever:{query_hash}"
 
     def _lru_key(self, user_id: str | None = None) -> str:
@@ -346,6 +360,22 @@ class HybridRetriever:
         agent_id = self.settings.agent_name
         uid = user_id or self.settings.default_user_id
         return f"{agent_id}:{uid}:cache_access_times"
+
+    async def _ensure_redis(self) -> Any:
+        """P0-5: 惰性初始化 Redis 客户端 (复用 common.redis_client 全局单例).
+
+        __init__ 是同步方法, 无法 await, 故推迟到首次 _get_cache/_set_cache 时初始化.
+        Redis 不可用时返回 None (降级无缓存, 不阻断检索).
+
+        Returns:
+            aioredis.Redis | None
+        """
+        if self._redis_initialized:
+            return self._redis
+        # 复用全局单例 (双重检查锁由 get_redis_client 内部保证)
+        self._redis = await get_redis_client(self.settings)
+        self._redis_initialized = True
+        return self._redis
 
     async def _get_cache(
         self,
@@ -356,6 +386,8 @@ class HybridRetriever:
 
         命中时更新访问时间 (LRU 排序). Redis 不可用时降级返回 None, 不阻断检索.
         """
+        if not self._redis_initialized:
+            await self._ensure_redis()
         if self._redis is None:
             return None
         try:
@@ -366,7 +398,7 @@ class HybridRetriever:
             if self.settings.redis_cache_lru_enabled:
                 lru_key = self._lru_key(user_id)
                 await self._redis.zadd(lru_key, {key: time.time()})
-            return cast(list[dict[str, Any]], json.loads(data))
+            return cast(list[dict[str, Any]], orjson.loads(data))
         except Exception as e:  # noqa: BLE001
             logger.warning("Redis 缓存读取失败, 降级无缓存: %s", e)
             return None
@@ -382,12 +414,14 @@ class HybridRetriever:
         写入后检查总数, 超过 max_size 时淘汰最久未访问.
         Redis 不可用时静默跳过.
         """
+        if not self._redis_initialized:
+            await self._ensure_redis()
         if self._redis is None:
             return
         try:
             await self._redis.set(
                 key,
-                json.dumps(results, ensure_ascii=False, default=str),
+                orjson.dumps(results, default=str),
                 ex=self.RETRIEVER_CACHE_TTL,
             )
             # P1-03: 写入 LRU 访问时间 + 检查总数淘汰最久未访问
@@ -463,19 +497,44 @@ class HybridRetriever:
             logger.warning("Rerank 失败, 降级用 RRF 分数: %s", e)
             return docs[:top_k]
 
+    def _get_tokens(self, text: str) -> list[str]:
+        """P1-6: 带缓存的 jieba 分词 (key=text sha256).
+
+        重复 query/重复 content 命中缓存, 避免重复 jieba.cut.
+        缓存上限 2000 条 (LRU 淘汰最旧).
+        """
+        import hashlib
+
+        key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        cached = self._token_cache.get(key)
+        if cached is not None:
+            return cached
+        tokens = list(jieba.cut(text))
+        # LRU 淘汰: 超过 2000 条删除最旧
+        if len(self._token_cache) >= 2000:
+            # dict 在 Python 3.7+ 保持插入顺序, popitem(last=False) 删最旧
+            self._token_cache.pop(next(iter(self._token_cache)))
+        self._token_cache[key] = tokens
+        return tokens
+
     def update_bm25_corpus(self, docs: list[dict[str, Any]]) -> None:
-        """更新 BM25 内存语料."""
+        """更新 BM25 内存语料.
+
+        P1-6: 复用 _token_cache 避免对同一 content 重复 jieba.cut.
+        """
         self._bm25_docs = docs
-        self._bm25_corpus = [list(jieba.cut(d["content"])) for d in docs]
+        self._bm25_corpus = [self._get_tokens(d["content"]) for d in docs]
         self._bm25 = BM25Okapi(self._bm25_corpus) if self._bm25_corpus else None
 
     async def close(self) -> None:
-        """关闭资源."""
+        """关闭资源.
+
+        P0-5: 不再关闭 Redis 客户端; Redis 改为全局单例 (common.redis_client),
+        由 server.py lifespan 统一调用 close_redis_client() 关闭.
+        """
         await self._embeddings.close()
         await self._qdrant.close()
         await self._rerank_client.aclose()
-        if self._redis is not None:
-            await self._redis.aclose()
 
 
 # ========== 全局单例 ==========

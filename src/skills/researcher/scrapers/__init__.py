@@ -264,6 +264,10 @@ async def scrape_with_fallback(
 
         return await _safe_scrape(PlaywrightScraper(url, session))
 
+    # P1-12: 串行降级超时预算 (保留串行降级, 仅优化超时)
+    #   BS: 15s (BeautifulSoupScraper 内部 timeout, P1-10 由 10s 提升至 15s)
+    #   Playwright: 30s (page.goto timeout)
+    #   总最坏情况: ~45s (仅当 BS 内容过短触发降级时)
     # 第一级: BeautifulSoup
     from src.skills.researcher.scrapers.beautiful_soup_scraper import BeautifulSoupScraper
 

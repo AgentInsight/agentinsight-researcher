@@ -30,6 +30,7 @@ WORKDIR /app
 
 # 联网安装运行时共享库 (WeasyPrint/lxml/psycopg 依赖) + Node.js 22 LTS (MCP 运行时)
 # 联网模式: apt-get 从 NodeSource 仓库安装 Node.js (MCP 服务依赖 npx)
+# 同时安装 uv (uvx 运行 PyPI MCP 服务, 如 mcp-server-fetch/mcp-server-git 等)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
@@ -46,6 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ln -sf /root/.local/bin/uv /usr/local/bin/uv \
+    && ln -sf /root/.local/bin/uvx /usr/local/bin/uvx \
+    && uv --version && uvx --version \
     && rm -rf /var/lib/apt/lists/*
 
 # 联网安装 Playwright chromium (JS 渲染抓取, 方案 E)
@@ -69,6 +74,12 @@ RUN groupadd -r agent && useradd -r -g agent -d /app -s /sbin/nologin agent \
 COPY --chown=agent:agent . .
 
 USER agent
+
+# P0-2 修复: 验证 litellm 已正确安装 (构建时强校验, 避免运行时 ModuleNotFoundError)
+# 重建镜像须加 --no-cache: docker compose -p agentinsight build --no-cache (确保 litellm 被重新安装)
+# 注意: litellm 库不暴露 __version__ 属性, 用 importlib.metadata.version 读取
+RUN python -c "import litellm; from importlib.metadata import version; print(f'litellm version: {version(\"litellm\")}')" || \
+    (echo "ERROR: litellm not installed, rebuild required" && exit 1)
 
 EXPOSE 8066
 

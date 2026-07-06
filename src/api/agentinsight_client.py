@@ -6,9 +6,10 @@ AGENTS.md 第 8 章: JWT 验证与 user_id 获取在 API 入口中间件完成.
 对标: D:\\Projects\\Entrepreneurship\\AIProjects\\AgentInsightService\\Agents\\common\\api_client.py
 
 AgentType 枚举 (对标 AgentInsightService Models/Common/Enums/PaymentEnums.cs):
-- Assistant = 1: 助手型 Agent, 校验/扣除 MonthlyAgentRate, 需传 orgId/projectId
-- Research = 2: 研究型 Agent, 校验/扣除 MonthlyResearchRate, 服务端从 JWT token
-  中的 UserId 解析最新 OrgId, 忽略传入的 orgId/projectId
+- Research = 2: 研究型 Agent, 校验/扣除 MonthlyResearchRate, 服务端从 JWT Token
+  解析 UserId → 默认 OrgId, 请求不传 orgId/projectId
+
+注: 本项目仅调用 type=2 (Research), 不存在其他类型调用.
 """
 
 from __future__ import annotations
@@ -24,8 +25,8 @@ from src.observability.tracing import trace_tool
 logger = logging.getLogger(__name__)
 
 # AgentType 枚举常量 (对标 AgentInsightService AgentType enum)
-# Assistant = 1: 助手型, Research = 2: 研究型
-AGENT_TYPE_RESEARCH = 2
+# Research = 2: 研究型 (本项目唯一使用类型)
+_AGENT_TYPE_RESEARCH: int = 2
 
 
 class AgentInsightClient:
@@ -34,9 +35,7 @@ class AgentInsightClient:
     仅在 SELF_HOST=False 时启用.
     失败降级策略: fail_open=True 时 API 失败放行 (与 AgentInsightService Python Agents 一致).
 
-    type 参数 (AgentType 枚举):
-    - type=1 (Assistant): 校验/扣除 UsedMonthlyAgentRate, 需传 orgId/projectId
-    - type=2 (Research): 校验/扣除 UsedMonthlyResearchRate, 服务端从 token 解析 OrgId
+    所有调用均使用 type=2 (Research), 服务端从 JWT Token 解析 UserId → 默认 OrgId.
     """
 
     settings: Settings
@@ -48,21 +47,13 @@ class AgentInsightClient:
             timeout=self.settings.agent_privilege_api_timeout,
         )
 
-    async def validate_agent_usage(
-        self,
-        token: str,
-        *,
-        org_id: str | None = None,
-        project_id: str | None = None,
-        agent_type: int = AGENT_TYPE_RESEARCH,
-    ) -> tuple[bool, str | None]:
-        """校验 Agent 月度配额是否超限.
+    async def validate_agent_usage(self, token: str) -> tuple[bool, str | None]:
+        """校验 Research Agent 月度配额是否超限.
+
+        服务端从 JWT Token 解析 UserId → 默认 OrgId, 请求仅传 type=2.
 
         Args:
-            token: JWT 令牌 (type=2 时服务端从中解析 UserId → OrgId)
-            org_id: 组织 ID (type=1 时必需, type=2 时忽略)
-            project_id: 项目 ID (type=1 时 org_id 为空则用此, type=2 时忽略)
-            agent_type: Agent 类型 (1=Assistant, 2=Research, 默认 2)
+            token: JWT 令牌
 
         Returns:
             (exceeded, error_message)
@@ -71,22 +62,13 @@ class AgentInsightClient:
             - API 失败时: 按 fail_open 策略, fail_open=True 返回 (False, None),
               fail_open=False 返回 (True, error)
         """
-        # type=2 (Research): 服务端从 token 解析 OrgId, 无需 org_id/project_id
-        # type=1 (Assistant): 需 org_id 或 project_id
-        if agent_type != AGENT_TYPE_RESEARCH and not (org_id or project_id):
-            return False, None  # Assistant 模式无 org/project 信息, 跳过校验
-
         async with trace_tool(
             name="agentinsight-validate",
-            input={"org_id": org_id, "project_id": project_id, "agent_type": agent_type},
+            input={"agent_type": _AGENT_TYPE_RESEARCH},
             metadata={"api": "validate"},
         ) as span:
             try:
-                params: dict[str, Any] = {"type": agent_type}
-                if org_id:
-                    params["orgId"] = org_id
-                if project_id:
-                    params["projectId"] = project_id
+                params: dict[str, Any] = {"type": _AGENT_TYPE_RESEARCH}
 
                 resp = await self._client.get(
                     f"{self.settings.agent_privilege_api_base_url}"
@@ -113,41 +95,24 @@ class AgentInsightClient:
                     return False, None  # 放行
                 return True, f"校验失败: {type(e).__name__}"
 
-    async def deduct_agent_usage(
-        self,
-        token: str,
-        *,
-        org_id: str | None = None,
-        project_id: str | None = None,
-        agent_type: int = AGENT_TYPE_RESEARCH,
-    ) -> bool:
-        """扣除一次 Agent 使用配额.
+    async def deduct_agent_usage(self, token: str) -> bool:
+        """扣除一次 Research Agent 使用配额.
+
+        服务端从 JWT Token 解析 UserId → 默认 OrgId, 请求仅传 type=2.
 
         Args:
-            token: JWT 令牌 (type=2 时服务端从中解析 UserId → OrgId)
-            org_id: 组织 ID (type=1 时必需, type=2 时忽略)
-            project_id: 项目 ID (type=1 时 org_id 为空则用此, type=2 时忽略)
-            agent_type: Agent 类型 (1=Assistant, 2=Research, 默认 2)
+            token: JWT 令牌
 
         Returns:
             success: 是否扣除成功
         """
-        # type=2 (Research): 服务端从 token 解析 OrgId, 无需 org_id/project_id
-        # type=1 (Assistant): 需 org_id 或 project_id
-        if agent_type != AGENT_TYPE_RESEARCH and not (org_id or project_id):
-            return False  # Assistant 模式无 org/project 信息, 跳过
-
         async with trace_tool(
             name="agentinsight-deduct",
-            input={"org_id": org_id, "project_id": project_id, "agent_type": agent_type},
+            input={"agent_type": _AGENT_TYPE_RESEARCH},
             metadata={"api": "deduct"},
         ) as span:
             try:
-                params: dict[str, Any] = {"type": agent_type}
-                if org_id:
-                    params["orgId"] = org_id
-                if project_id:
-                    params["projectId"] = project_id
+                params: dict[str, Any] = {"type": _AGENT_TYPE_RESEARCH}
 
                 resp = await self._client.get(
                     f"{self.settings.agent_privilege_api_base_url}"

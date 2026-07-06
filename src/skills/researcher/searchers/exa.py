@@ -34,6 +34,7 @@ class ExaSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.exa_api_key
+        self._client = httpx.AsyncClient(timeout=15.0)
 
     async def search(
         self,
@@ -69,17 +70,16 @@ class ExaSearcher(BaseSearcher):
                         "text": {"maxCharacters": 1000},
                     },
                 }
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.post(self._api_url, headers=headers, json=payload)
-                    if response.status_code == 429:
-                        reset_at = self._calc_quota_reset(response)
-                        raise QuotaExceededError(
-                            engine="exa",
-                            reset_at=reset_at,
-                            message="Exa 月度额度已满",
-                        )
-                    response.raise_for_status()
-                    data = response.json()
+                response = await self._client.post(self._api_url, headers=headers, json=payload)
+                if response.status_code == 429:
+                    reset_at = self._calc_quota_reset(response)
+                    raise QuotaExceededError(
+                        engine="exa",
+                        reset_at=reset_at,
+                        message="Exa 月度额度已满",
+                    )
+                response.raise_for_status()
+                data = response.json()
 
                 results: list[dict[str, Any]] = []
                 # Exa 返回结构: {"results": [{"title": "", "url": "", "text": ""}]}
@@ -114,3 +114,6 @@ class ExaSearcher(BaseSearcher):
         if now.month == 12:
             return now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0)
         return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
+
+    async def close(self) -> None:
+        await self._client.aclose()

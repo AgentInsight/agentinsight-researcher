@@ -1,4 +1,5 @@
-"""MCP Server 封装 + registry 注册中心.
+"""MCP Server 封装.
 
-AGENTS.md 第 3/9 章: 工具注册集中在 tools/registry.py, 按智能体名分组授权.
+AGENTS.md 第 9 章: MCP 工具配置存储在 PostgreSQL mcp_configs 表 (按 agent_id + user_id 隔离),
+运行时由 src/skills/researcher/mcp_coordinator.py 加载; 多 Agent 落地后再引入 tools/registry.py 集中授权.
 """

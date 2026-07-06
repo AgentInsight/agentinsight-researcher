@@ -17,6 +17,7 @@ settings.short_query_reply / settings.off_topic_reply, 不走任何 graph, 零 L
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -25,10 +26,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-import redis.asyncio as aioredis
-
+from src.common.redis_client import get_redis_client
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 
 logger = logging.getLogger(__name__)
@@ -191,8 +191,10 @@ class QueryIntentClassifier:
 
     settings: Settings
     _llm: LLMClient
-    _redis: aioredis.Redis | None
+    _redis: Any | None
     _redis_initialized: bool
+    # P1-4: singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复 LLM 调用)
+    _inflight_locks: dict[str, asyncio.Lock]
 
     def __init__(
         self,
@@ -200,12 +202,14 @@ class QueryIntentClassifier:
         llm: LLMClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._redis = None
         self._redis_initialized = False
+        # P1-4: singleflight 锁字典初始化
+        self._inflight_locks = {}
 
-    async def _get_redis(self) -> aioredis.Redis | None:
-        """惰性初始化 Redis 连接 (P1 缓存层).
+    async def _get_redis(self) -> Any | None:
+        """P0-5: 惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
 
         Redis 不可用时降级为不缓存 (每次走 LLM), 不阻断主流程.
         遵循 AGENTS.md 第 7 章 Redis 约定: key 加 {agent_id} 前缀.
@@ -214,17 +218,8 @@ class QueryIntentClassifier:
             return None
         if self._redis_initialized:
             return self._redis
-        try:
-            self._redis = aioredis.from_url(
-                self.settings.redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                password=self.settings.redis_auth or None,
-            )
-            await self._redis.ping()
-        except Exception as e:  # noqa: BLE001
-            logger.warning("QueryClassifier Redis 连接失败, 降级为不缓存: %s", e)
-            self._redis = None
+        # 复用全局单例 (双重检查锁 + ping 检查 + 降级 None 由 get_redis_client 内部保证)
+        self._redis = await get_redis_client(self.settings)
         self._redis_initialized = True
         return self._redis
 
@@ -394,14 +389,19 @@ class QueryIntentClassifier:
     async def _classify_with_cache(self, query: str, has_report: bool) -> tuple[QueryIntent, str]:
         """带 Redis 缓存的 LLM 分类 (P1).
 
+        P1-4: singleflight 互斥锁防止缓存击穿 — 同一 query 并发请求只允许一个
+        调用 LLM, 其他等待结果后从缓存读取 (避免并发重复 LLM 调用浪费成本).
+
         Returns:
             (intent, source) 元组; source ∈ {"cache_hit", "llm", "llm_fallback"}.
         """
+        cache_key = self._cache_key(query, has_report)
+
         # 缓存命中检查
         r = await self._get_redis()
         if r is not None:
             try:
-                cached = await r.get(self._cache_key(query, has_report))
+                cached = await r.get(cache_key)
                 if cached is not None:
                     cached_str = str(cached).lower().strip()
                     for intent in QueryIntent:
@@ -410,22 +410,41 @@ class QueryIntentClassifier:
             except Exception as e:  # noqa: BLE001
                 logger.warning("QueryClassifier 缓存读取失败, 走 LLM: %s", e)
 
-        # 缓存未命中或不可用 → 调 LLM
-        intent = await self._llm_classify(query, has_report)
-        source = "llm_fallback" if intent == self._fallback_intent() else "llm"
+        # P1-4: singleflight 互斥锁 — 缓存未命中时按 query hash 加锁
+        # 同一 query 并发只允许一个调用 LLM, 其他等待后从缓存读取
+        lock = self._inflight_locks.get(cache_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._inflight_locks[cache_key] = lock
+        async with lock:
+            # 双重检查: 持有锁后再次查缓存, 可能在等待期间已被其他协程填充
+            if r is not None:
+                try:
+                    cached = await r.get(cache_key)
+                    if cached is not None:
+                        cached_str = str(cached).lower().strip()
+                        for intent in QueryIntent:
+                            if intent.value == cached_str:
+                                return intent, "cache_hit"
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("QueryClassifier 缓存读取失败 (singleflight), 走 LLM: %s", e)
 
-        # 写入缓存 (仅缓存 LLM 真实分类结果, 不缓存 fallback, 避免缓存污染)
-        if r is not None and source == "llm":
-            try:
-                await r.setex(
-                    self._cache_key(query, has_report),
-                    self.settings.query_classify_cache_ttl,
-                    intent.value,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("QueryClassifier 缓存写入失败 (不阻断): %s", e)
+            # 缓存未命中或不可用 → 调 LLM
+            intent = await self._llm_classify(query, has_report)
+            source = "llm_fallback" if intent == self._fallback_intent() else "llm"
 
-        return intent, source
+            # 写入缓存 (仅缓存 LLM 真实分类结果, 不缓存 fallback, 避免缓存污染)
+            if r is not None and source == "llm":
+                try:
+                    await r.setex(
+                        cache_key,
+                        self.settings.query_classify_cache_ttl,
+                        intent.value,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("QueryClassifier 缓存写入失败 (不阻断): %s", e)
+
+            return intent, source
 
     async def classify(self, query: str, has_report: bool) -> QueryIntent:
         """分类查询意图 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配).

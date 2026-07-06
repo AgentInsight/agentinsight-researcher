@@ -12,13 +12,13 @@ AGENTS.md 第 13/14 章硬约束:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+import orjson
 from fastapi import (
     APIRouter,
     File,
@@ -94,7 +94,9 @@ async def _get_chat_graph() -> Any:
 async def _has_report(session_id: str) -> bool:
     """检查会话是否已有报告 (P0-Future-05/06).
 
-    从 checkpointer 读取会话状态, 判断是否已有 report_md.
+    P1-2 修复: 优先查 research_reports 表 (有 session_id 索引), 避免每次
+    aget_state 加载全量 State; 查询失败时降级回 aget_state.
+
     AGENTS.md 第 6 章: thread_id 做会话隔离, checkpointer 自动持久化.
 
     Args:
@@ -103,6 +105,23 @@ async def _has_report(session_id: str) -> bool:
     Returns:
         True 表示会话已有报告 (用于意图分类 has_report 参数).
     """
+    # P1-2: 优先走 report_store (按 session_id 索引查询, 比 aget_state 快几个数量级)
+    try:
+        from src.memory.report_store import get_report_store
+
+        report_store = get_report_store()
+        # list_reports 已按 session_id 过滤, 取 1 条即可判断
+        reports = await report_store.list_reports(
+            user_id=None,  # _has_report 仅按 session_id 判断, 不区分 user_id
+            session_id=session_id,
+            limit=1,
+        )
+        if reports:
+            return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("report_store 查询失败, 降级 aget_state (session=%s): %s", session_id, e)
+
+    # P1-2 降级: report_store 查询失败时回退到 aget_state
     try:
         graph = await _get_graph()
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
@@ -246,93 +265,74 @@ async def chat_completions(
         )
         intent = QueryIntent.OFF_TOPIC
 
-    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 走 ChitchatResponder 或固定话术
-    # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: chitchat_enabled=True 时走 FAST_LLM 人性化响应
+    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 走 ChitchatResponder
+    # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: 始终走 FAST_LLM 人性化响应, FAST 失败时降级 multi-template
     if intent in (QueryIntent.SHORT_QUERY, QueryIntent.OFF_TOPIC):
-        if settings.chitchat_enabled:
-            # 新路径: ChitchatResponder (FAST_LLM + Persona + 三段式 + 多模板兜底)
-            category = (
-                _infer_off_topic_category(query) if intent == QueryIntent.OFF_TOPIC else "greeting"
-            )
-            responder = get_chitchat_responder()
-            if intent == QueryIntent.SHORT_QUERY:
-                if request.stream:
-                    return StreamingResponse(
-                        _stream_chitchat(
-                            responder.respond_short_query(
-                                query, session_id=session_id, user_id=user_id, stream=True
-                            ),
-                            request,
-                            session_id,
-                            intent=intent.value,
-                        ),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive",
-                            "X-Session-Id": session_id,
-                        },
-                    )
-                return await _run_chitchat(
-                    responder.respond_short_query(
-                        query, session_id=session_id, user_id=user_id, stream=False
-                    ),
-                    request,
-                    session_id,
-                    intent=intent.value,
-                )
-            else:  # OFF_TOPIC
-                if request.stream:
-                    return StreamingResponse(
-                        _stream_chitchat(
-                            responder.respond_off_topic(
-                                query,
-                                category=category,
-                                session_id=session_id,
-                                user_id=user_id,
-                                stream=True,
-                            ),
-                            request,
-                            session_id,
-                            intent=intent.value,
-                        ),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache",
-                            "Connection": "keep-alive",
-                            "X-Session-Id": session_id,
-                        },
-                    )
-                return await _run_chitchat(
-                    responder.respond_off_topic(
-                        query,
-                        category=category,
-                        session_id=session_id,
-                        user_id=user_id,
-                        stream=False,
-                    ),
-                    request,
-                    session_id,
-                    intent=intent.value,
-                )
-
-        # 旧路径: chitchat_enabled=False 时走固定话术 (向后兼容)
-        reply = (
-            settings.short_query_reply
-            if intent == QueryIntent.SHORT_QUERY
-            else settings.off_topic_reply
+        # ChitchatResponder (FAST_LLM + Persona + 三段式 + 多模板兜底)
+        category = (
+            _infer_off_topic_category(query) if intent == QueryIntent.OFF_TOPIC else "greeting"
         )
-        if request.stream:
-            return StreamingResponse(
-                _stream_short_query(reply, request, session_id, intent=intent.value),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Session-Id": session_id,
-                },
+        responder = get_chitchat_responder()
+        if intent == QueryIntent.SHORT_QUERY:
+            if request.stream:
+                return StreamingResponse(
+                    _stream_chitchat(
+                        responder.respond_short_query(
+                            query, session_id=session_id, user_id=user_id, stream=True
+                        ),
+                        request,
+                        session_id,
+                        intent=intent.value,
+                    ),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Session-Id": session_id,
+                    },
+                )
+            return await _run_chitchat(
+                responder.respond_short_query(
+                    query, session_id=session_id, user_id=user_id, stream=False
+                ),
+                request,
+                session_id,
+                intent=intent.value,
             )
-        return await _run_short_query(reply, request, session_id, intent=intent.value)
+        else:  # OFF_TOPIC
+            if request.stream:
+                return StreamingResponse(
+                    _stream_chitchat(
+                        responder.respond_off_topic(
+                            query,
+                            category=category,
+                            session_id=session_id,
+                            user_id=user_id,
+                            stream=True,
+                        ),
+                        request,
+                        session_id,
+                        intent=intent.value,
+                    ),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Session-Id": session_id,
+                    },
+                )
+            return await _run_chitchat(
+                responder.respond_off_topic(
+                    query,
+                    category=category,
+                    session_id=session_id,
+                    user_id=user_id,
+                    stream=False,
+                ),
+                request,
+                session_id,
+                intent=intent.value,
+            )
 
     # P1-Future-06: CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
     # 显式指定 report_type 时强制走 researcher graph (用户明确要新研究)
@@ -379,9 +379,7 @@ async def chat_completions(
             )
 
         client = get_agentinsight_client()
-        exceeded, _err = await client.validate_agent_usage(
-            token, org_id=request.org_id, project_id=request.project_id
-        )
+        exceeded, _err = await client.validate_agent_usage(token)
         if exceeded:
             raise HTTPException(
                 status_code=429,
@@ -404,7 +402,8 @@ async def chat_completions(
     # 加载已上传文件上下文 (用户需求 8)
     uploaded_files_context: list[str] = []
     if request.uploaded_files:
-        uploaded_files_context = _load_uploaded_files_context(
+        # P2-11: _load_uploaded_files_context 已改为 async, 内部文件 I/O 经 asyncio.to_thread
+        uploaded_files_context = await _load_uploaded_files_context(
             request.uploaded_files, user_id, agent_id
         )
 
@@ -430,9 +429,8 @@ async def chat_completions(
         "sources": [],
         "visited_urls": [],
         "curated_sources": [],
-        "report_md": "",
-        "report_html": "",
-        "report_pdf_path": "",
+        "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
+        "report_formats": {},  # P2-1: {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
         # P0-01: 深度研究配置
         "research_mode": research_mode,
@@ -490,7 +488,7 @@ async def _stream_research(
                 }
             ],
         }
-        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        return f"data: {orjson.dumps(chunk).decode('utf-8')}\n\n"
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
@@ -565,11 +563,7 @@ async def _stream_research(
                             )
                             if token:
                                 asyncio.create_task(
-                                    get_agentinsight_client().deduct_agent_usage(
-                                        token,
-                                        org_id=request.org_id,
-                                        project_id=request.project_id,
-                                    )
+                                    get_agentinsight_client().deduct_agent_usage(token)
                                 )
                         # 非 markdown 格式: 跳过逐段推送 (publisher 节点会推送最终格式)
                         fmt = request.report_format or "markdown"
@@ -586,7 +580,7 @@ async def _stream_research(
                         for para in paragraphs:
                             yield _sse_chunk({"content": para + "\n\n"})
                             # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
-                            await asyncio.sleep(0)
+                            await asyncio.sleep(0.001)
                         continue  # 跳过下面的进度提示
                     elif node_name == "publisher":
                         fmt = delta.get("report_format", "markdown")
@@ -594,37 +588,40 @@ async def _stream_research(
                         # 推送 report_id (前端用于构造 /v1/reports/{report_id}/download 链接)
                         if delta.get("report_id"):
                             yield _sse_chunk({"report_id": delta["report_id"]})
-                        # 流式推送最终格式的报告内容
-                        if delta.get("report_html"):
-                            yield _sse_chunk({"content": delta["report_html"]})
-                        elif delta.get("report_json"):
-                            yield _sse_chunk({"content": delta["report_json"]})
-                        elif delta.get("report_pdf_path"):
+                        # P2-1: 流式推送最终格式的报告内容 (统一从 report_formats 读取)
+                        new_formats = delta.get("report_formats") or {}
+                        if new_formats.get("html"):
+                            yield _sse_chunk({"content": new_formats["html"]})
+                        elif new_formats.get("json"):
+                            yield _sse_chunk({"content": new_formats["json"]})
+                        elif new_formats.get("pdf"):
                             yield _sse_chunk(
-                                {"file_path": delta["report_pdf_path"], "report_format": "pdf"}
+                                {"file_path": new_formats["pdf"], "report_format": "pdf"}
                             )
                         # docx 二进制不适合 SSE, 跳过 (客户端可走非流式或下载端点)
                         continue
 
                     yield _sse_chunk({"content": progress})
                     # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
-                    await asyncio.sleep(0)
+                    await asyncio.sleep(0.001)
 
             # 输出最终报告元信息
             fmt = request.report_format or "markdown"
+            # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+            final_formats = final_state.get("report_formats") or {}
             final_content = (
-                final_state.get("report_html")
-                or final_state.get("report_json")
+                final_formats.get("html")
+                or final_formats.get("json")
+                or final_formats.get("md")
                 or final_state.get("report_md")
                 or ""
             )
             if not final_content:
                 yield _sse_chunk({"content": "\n\n*未生成报告内容 (可能上下文为空)*"})
             # 如果是 PDF, 推送 file_path
-            if fmt == "pdf" and final_state.get("report_pdf_path"):
-                yield _sse_chunk(
-                    {"file_path": final_state["report_pdf_path"], "report_format": "pdf"}
-                )
+            pdf_path = final_formats.get("pdf") or final_state.get("report_pdf_path")
+            if fmt == "pdf" and pdf_path:
+                yield _sse_chunk({"file_path": pdf_path, "report_format": "pdf"})
 
             # P0-01: 流式推送 sources 元信息帧 (在 finish 之前)
             # 客户端可通过 delta.sources 获取结构化来源列表
@@ -642,6 +639,28 @@ async def _stream_research(
                     )
             if normalized_sources:
                 yield _sse_chunk({"sources": normalized_sources})
+
+            # P2-7: 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
+            # graph 完成后调用 report_store.save_report, 保存失败仅 warn 不影响响应
+            # (用户已收到报告内容, 不返回 500; AGENTS.md 第 5 章节点纯函数约束)
+            try:
+                from src.memory.report_store import get_report_store
+
+                _report_store = get_report_store()
+                _saved_report_id = await _report_store.save_report(
+                    session_id=session_id,
+                    user_id=initial_state.get("user_id", ""),
+                    agent_id=initial_state.get("agent_id", ""),
+                    query=initial_state.get("query", ""),
+                    report_md=final_state.get("report_md", ""),
+                    report_format=final_state.get("report_format", "markdown"),
+                    sources=(final_state.get("curated_sources") or final_state.get("sources", [])),
+                    agent_role=final_state.get("agent_role_server"),
+                )
+                if _saved_report_id:
+                    yield _sse_chunk({"report_id": _saved_report_id})
+            except Exception:
+                logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
 
         except Exception as e:
             logger.exception("研究流水线执行失败")
@@ -684,24 +703,47 @@ async def _run_research(
             graph = await _get_graph(multi_agent=request.multi_agent)
             final_state = await graph.ainvoke(initial_state, config=graph_config)
             fmt = request.report_format or "markdown"
-            if fmt == "html" and final_state.get("report_html"):
-                content = final_state["report_html"]
-            elif fmt == "json" and final_state.get("report_json"):
-                content = final_state["report_json"]
-            elif fmt == "pdf" and final_state.get("report_pdf_path"):
+            # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+            final_formats = final_state.get("report_formats") or {}
+            if fmt == "html" and final_formats.get("html"):
+                content = final_formats["html"]
+            elif fmt == "json" and final_formats.get("json"):
+                content = final_formats["json"]
+            elif fmt == "pdf" and final_formats.get("pdf"):
                 # PDF 返回路径信息, 客户端可通过下载端点获取
-                content = final_state["report_pdf_path"]
-                file_path = final_state["report_pdf_path"]
-            elif fmt == "docx" and final_state.get("report_docx"):
+                content = final_formats["pdf"]
+                file_path = final_formats["pdf"]
+            elif fmt == "docx" and final_formats.get("docx"):
                 # DOCX 二进制无法直接放入 OpenAI 兼容响应, 返回提示信息
                 content = "[DOCX 报告已生成, 请通过下载端点获取]"
             else:
-                content = final_state.get("report_md", "")
+                content = final_formats.get("md") or final_state.get("report_md", "")
             if not content:
                 content = "未生成报告内容 (可能上下文为空)"
-            # P1-Future-09 重构: 提取 publisher 节点写入的 report_id
-            # 客户端用此值构造 /v1/reports/{report_id}/download 链接
-            report_id = final_state.get("report_id") or None
+            # P2-7: 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
+            # graph 完成后调用 report_store.save_report, 保存失败仅 warn 不影响响应
+            # (用户已收到报告内容, 不返回 500; AGENTS.md 第 5 章节点纯函数约束)
+            # 客户端用 report_id 构造 /v1/reports/{report_id}/download 链接
+            # mypy no-redef: 第 706 行已声明 report_id, 此处重新赋值 (非重新声明)
+            report_id = None
+            try:
+                from src.memory.report_store import get_report_store
+
+                _report_store = get_report_store()
+                _saved = await _report_store.save_report(
+                    session_id=session_id,
+                    user_id=initial_state.get("user_id", ""),
+                    agent_id=initial_state.get("agent_id", ""),
+                    query=initial_state.get("query", ""),
+                    report_md=final_state.get("report_md", ""),
+                    report_format=final_state.get("report_format", "markdown"),
+                    sources=(final_state.get("curated_sources") or final_state.get("sources", [])),
+                    agent_role=final_state.get("agent_role_server"),
+                )
+                if _saved:
+                    report_id = _saved
+            except Exception:
+                logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
 
             # P0-01: sources 作为结构化字段返回 (优先 curated_sources, 回退 sources)
             sources = final_state.get("curated_sources") or final_state.get("sources", [])
@@ -775,11 +817,7 @@ async def _run_research(
                 else ""
             )
             if token:
-                await get_agentinsight_client().deduct_agent_usage(
-                    token,
-                    org_id=request.org_id,
-                    project_id=request.project_id,
-                )
+                await get_agentinsight_client().deduct_agent_usage(token)
         except Exception as e:  # noqa: BLE001
             logger.warning("扣除点数失败 (不阻断响应): %s", e)
 
@@ -841,7 +879,7 @@ async def _stream_short_query(
                 }
             ],
         }
-        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        return f"data: {orjson.dumps(chunk).decode('utf-8')}\n\n"
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
@@ -1000,7 +1038,7 @@ async def _stream_chitchat(
                 }
             ],
         }
-        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        return f"data: {orjson.dumps(chunk).decode('utf-8')}\n\n"
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
@@ -1117,7 +1155,7 @@ async def _stream_chat(
                 }
             ],
         }
-        return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        return f"data: {orjson.dumps(chunk).decode('utf-8')}\n\n"
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
@@ -1158,7 +1196,7 @@ async def _stream_chat(
                                 for para in paragraphs:
                                     yield _sse_chunk({"content": para + "\n\n"})
                                     # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
-                                    await asyncio.sleep(0)
+                                    await asyncio.sleep(0.001)
 
         except Exception as e:
             logger.exception("对话追问流式执行失败")
@@ -1277,11 +1315,12 @@ async def upload_file(
 
     # 存储路径 (按 agent_id + user_id 隔离)
     upload_dir = Path(settings.upload_dir) / agent_id / user_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # P2-11: 同步文件 I/O 经 asyncio.to_thread 包裹, 避免阻塞事件循环
+    await asyncio.to_thread(upload_dir.mkdir, parents=True, exist_ok=True)
     save_path = upload_dir / f"{file_id.split(':')[-2]}_{file_id.split(':')[-1]}.{ext}"
 
-    # 写入文件
-    save_path.write_bytes(contents)
+    # 写入文件 (P2-11: asyncio.to_thread 包裹同步 write_bytes)
+    await asyncio.to_thread(save_path.write_bytes, contents)
 
     logger.info(
         "文件上传成功: file_id=%s, filename=%s, size=%.2fMB, user=%s",
@@ -1304,10 +1343,15 @@ async def upload_file(
     )
 
 
-def _load_uploaded_files_context(file_ids: list[str], user_id: str, agent_id: str) -> list[str]:
+async def _load_uploaded_files_context(
+    file_ids: list[str], user_id: str, agent_id: str
+) -> list[str]:
     """加载已上传文件内容作为研究上下文.
 
     AGENTS.md 第 7 章: 按 agent_id + user_id 隔离, 禁止跨用户访问.
+    P2-11: 所有同步文件 I/O (exists/glob/read_text/第三方库 open) 经 asyncio.to_thread
+    包裹, 避免阻塞事件循环. _extract_file_content 内部含 fitz/Document/openpyxl/pptx
+    等同步库调用, 整体托管到线程执行.
     """
     settings = get_settings()
     contexts: list[str] = []
@@ -1330,14 +1374,28 @@ def _load_uploaded_files_context(file_ids: list[str], user_id: str, agent_id: st
 
             # 查找文件 (按 uuid 前缀匹配)
             upload_dir = Path(settings.upload_dir) / agent_id / user_id
-            if not upload_dir.exists():
+            # P2-11: exists/glob 同步 I/O 经 asyncio.to_thread 包裹
+            if not await asyncio.to_thread(upload_dir.exists):
                 continue
-            matches = list(upload_dir.glob(f"{fid_uuid}_*"))
+            # B023: 显式绑定循环变量到 lambda 默认参数, 避免闭包延迟绑定
+            _upload_dir = upload_dir
+            _fid_uuid = fid_uuid
+
+            def _glob_files(d: Path = _upload_dir, u: str = _fid_uuid) -> list[Path]:
+                return list(d.glob(f"{u}_*"))
+
+            matches = await asyncio.to_thread(_glob_files)
             if not matches:
                 continue
 
             file_path = matches[0]
-            content = _extract_file_content(file_path, file_path.suffix.lstrip(".").lower())
+            # P2-11: _extract_file_content 含 read_text/fitz.open/Document 等同步 I/O,
+            # 整体经 asyncio.to_thread 包裹, 避免阻塞事件循环
+            content = await asyncio.to_thread(
+                _extract_file_content,
+                file_path,
+                file_path.suffix.lstrip(".").lower(),
+            )
             if content:
                 contexts.append(f"=== 用户上传文件: {file_path.name} ===\n{content[:8000]}")
         except Exception as e:  # noqa: BLE001
@@ -1551,7 +1609,16 @@ async def download_report(
 
     user_id = get_request_user_id() or "anonymous"
     store = get_report_store()
-    report = await store.get_report(report_id)
+
+    # report_id 应为 UUID, 不符合格式时跳过 get_report (避免 asyncpg $1::uuid 抛 DataError → 500)
+    # 直接走 deprecated session_id 兼容分支 (session_id 为 VARCHAR(64), 接受任意字符串)
+    report: dict[str, Any] | None = None
+    try:
+        uuid.UUID(report_id)
+    except ValueError:
+        report = None
+    else:
+        report = await store.get_report(report_id)
 
     deprecated_fallback = False
     if not report:

@@ -21,7 +21,6 @@ from src.agents.researcher.reviewer import Reviewer
 from src.agents.researcher.reviser import Reviser
 from src.config.settings import Settings
 from src.graph.state import ResearcherState
-from src.memory.report_store import get_report_store
 from src.observability.tracing import trace_chain
 from src.skills.researcher.agent_creator import AgentCreator
 from src.skills.researcher.publisher import Publisher
@@ -213,8 +212,14 @@ async def report_generator_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
+        report_md = result["report_md"]
+        # P2-1: 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        existing_formats = state.get("report_formats") or {}
+        new_formats: dict[str, str] = dict(existing_formats)
+        new_formats["md"] = report_md
         delta: dict[str, Any] = {
-            "report_md": result["report_md"],
+            "report_md": report_md,  # deprecated: 兼容旧代码
+            "report_formats": new_formats,
             "status": "completed",
         }
         # P2-06: 补充报告配图字段 (若生成了图像)
@@ -262,6 +267,13 @@ async def publisher_node(
 
     对标 GPT Researcher multi_agents/agents/publisher.py:
     Markdown/HTML/PDF 输出, 引用规范化.
+
+    P2-7: 节点保持纯函数无副作用, 仅生成 report_md/report_formats/file_path 等到 state,
+    不再直接调用 report_store.save_report. 报告持久化由 API 层 (routes.py) 在
+    graph 完成后异步调用 report_store.save_report 完成 (AGENTS.md 第 5 章节点纯函数约束).
+
+    P2-1: 报告格式字段统一写入 report_formats dict (key 为 md/html/pdf/docx/json),
+    report_md 同步写入兼容旧代码 (deprecated, 兼容期保留).
     """
     async with trace_chain(
         name="publisher",
@@ -270,8 +282,11 @@ async def publisher_node(
         user_id=state.get("user_id"),
     ):
         publisher = Publisher(settings)
+        # P2-1: 优先读 report_formats["md"], 兼容期回退 report_md
+        report_formats = state.get("report_formats") or {}
+        report_md = report_formats.get("md") or state.get("report_md", "")
         result = await publisher.publish(
-            state.get("report_md", ""),
+            report_md,
             output_format=state.get("report_format", "markdown"),
             title=state.get("query", ""),
             sources=state.get("curated_sources") or state.get("sources", []),
@@ -280,35 +295,27 @@ async def publisher_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
+        # P2-1: 合并到 report_formats dict (key 为格式名), 同时同步 report_md 兼容旧代码
+        new_formats: dict[str, str] = dict(report_formats)
+        new_formats["md"] = report_md
+        result_format = result.get("format", "markdown")
+        if result_format == "html":
+            new_formats["html"] = result["content"]
+        elif result_format == "pdf":
+            new_formats["pdf"] = result["path"]
+        elif result_format == "docx":
+            new_formats["docx"] = result["content"]
+        elif result_format == "json":
+            new_formats["json"] = result["content"]
+
         delta: dict[str, Any] = {
             "status": "completed",
-            "report_format": result.get("format", "markdown"),
+            "report_format": result_format,
+            "report_formats": new_formats,
+            "report_md": report_md,  # deprecated: 同步写入兼容旧代码
         }
-        if result.get("format") == "html":
-            delta["report_html"] = result["content"]
-        elif result.get("format") == "pdf":
-            delta["report_pdf_path"] = result["path"]
-        elif result.get("format") == "docx":
-            delta["report_docx"] = result["content"]
-        elif result.get("format") == "json":
-            delta["report_json"] = result["content"]
-        # P1-Future-09: 报告持久化存储 (失败不阻断主流程)
-        try:
-            report_store = get_report_store()
-            report_id = await report_store.save_report(
-                session_id=state.get("session_id", ""),
-                user_id=state.get("user_id", ""),
-                agent_id=state.get("agent_id", ""),
-                query=state.get("query", ""),
-                report_md=state.get("report_md", ""),
-                report_format=state.get("report_format", "markdown"),
-                sources=state.get("curated_sources") or state.get("sources", []),
-                agent_role=state.get("agent_role_server"),
-            )
-            if report_id:
-                delta["report_id"] = report_id
-        except Exception:
-            logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
+        # P2-7: 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
+        # 节点不再直接写 DB (AGENTS.md 第 5 章节点纯函数无副作用约束).
         return delta
 
 
@@ -406,9 +413,15 @@ async def reviser_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
+        # P2-1: 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        revised_md = result["report_md"]
+        existing_formats = state.get("report_formats") or {}
+        new_formats: dict[str, str] = dict(existing_formats)
+        new_formats["md"] = revised_md
         # revision_count 累加 1 (Annotated[int, operator.add] reducer)
         delta: dict[str, Any] = {
-            "report_md": result["report_md"],
+            "report_md": revised_md,  # deprecated: 兼容旧代码
+            "report_formats": new_formats,
             "revision_count": 1,
         }
         return delta

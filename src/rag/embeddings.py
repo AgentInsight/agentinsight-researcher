@@ -32,34 +32,46 @@ logger = logging.getLogger(__name__)
 NAMESPACE_DNS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 # ========== 进程内 Embedding 缓存 (P1-3, LRU + TTL) ==========
+# P0-1 修复: 改为单文本级缓存 (key=单条文本 sha256), 提升命中率
+# 旧版整批 sha256 在 query 变化时 100% miss, 单文本缓存可跨 query 复用 chunks 向量
 _EMBED_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
-_EMBED_CACHE_MAX_SIZE: int = 1000  # 最大缓存条目
+_EMBED_CACHE_MAX_SIZE: int = 2000  # 最大缓存条目 (单文本级, 提升容量)
 _EMBED_CACHE_TTL: int = 3600  # 1 小时 TTL (秒)
 
 
-def _cache_key(texts: list[str]) -> str:
-    """生成缓存键 (基于所有文本的 sha256)."""
-    combined = "\n".join(texts)
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+def _cache_key_single(text: str) -> str:
+    """P0-1 修复: 生成单文本缓存键 (基于单条文本 sha256).
+
+    相比旧版整批 sha256, 单文本 key 在 query 变化但 chunks 相同时可命中,
+    WrittenContentCompressor 已写入 chunks 的 embedding 也可被复用.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _cache_get(key: str) -> list[list[float]] | None:
-    """从缓存获取 (带 TTL 检查)."""
+def _cache_get_single(key: str) -> list[float] | None:
+    """从缓存获取单条向量 (带 TTL 检查)."""
     if key in _EMBED_CACHE:
         entry = _EMBED_CACHE[key]
         if time.time() - entry["ts"] < _EMBED_CACHE_TTL:
             _EMBED_CACHE.move_to_end(key)
-            return cast(list[list[float]], entry["vectors"])
+            return cast(list[float], entry["vector"])
         del _EMBED_CACHE[key]
     return None
 
 
-def _cache_set(key: str, vectors: list[list[float]]) -> None:
-    """写入缓存 (LRU 淘汰)."""
-    _EMBED_CACHE[key] = {"vectors": vectors, "ts": time.time()}
+def _cache_set_single(key: str, vector: list[float]) -> None:
+    """写入单条向量缓存 (LRU 淘汰)."""
+    _EMBED_CACHE[key] = {"vector": vector, "ts": time.time()}
     _EMBED_CACHE.move_to_end(key)
     while len(_EMBED_CACHE) > _EMBED_CACHE_MAX_SIZE:
         _EMBED_CACHE.popitem(last=False)
+
+
+# 保留旧版批量接口兼容 (标记 deprecated, 内部转发到单文本逻辑)
+def _cache_key(texts: list[str]) -> str:
+    """[deprecated] 旧版整批缓存键, 仅供向后兼容."""
+    combined = "\n".join(texts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 class EmbeddingsClient:
@@ -81,25 +93,27 @@ class EmbeddingsClient:
         headers: dict[str, str] = {}
         if self.settings.embeddings_api_key:
             headers["Authorization"] = f"Bearer {self.settings.embeddings_api_key}"
+        # P0-1 修复: 客户端配置优化
+        # - read timeout 60s→90s: batch_size=4 后请求数增多, TEI 内部排队 30-45s + 推理 11-17s = 总 45-60s, 90s 留余量
+        # - max_connections 100→20: 配合 Semaphore(3) 实际并发, 20 已足够 (避免文件描述符膨胀)
+        # - max_keepalive_connections 20→10: 与 max_connections 比例合理
         self._client = httpx.AsyncClient(
             base_url=self.settings.embeddings_base_url,
             timeout=httpx.Timeout(
                 connect=5.0,
-                # P1-04: 读超时 120s, 应对大 batch 慢推理
-                # TEI CPU 后端 inference_time 可达 10s+, queue_time 可达 30s+
-                # 60s 会踩边界触发 ReadTimeout
-                read=120.0,
+                read=90.0,
                 write=10.0,
-                pool=5.0,
+                pool=10.0,
             ),
             headers=headers,
             limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
+                max_connections=20,
+                max_keepalive_connections=10,
                 keepalive_expiry=30.0,
             ),
         )
         # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
+        # P0-1 修复: 走 settings, 默认 3 (匹配 TEI permits=4, 留 1 余量)
         self._semaphore = asyncio.Semaphore(self.settings.embeddings_max_concurrent)
 
     async def embed_texts(
@@ -116,38 +130,55 @@ class EmbeddingsClient:
 
         P1-1: 客户端按 embeddings_max_client_batch_size 分批, asyncio.gather 并发.
         P1-3: 进程内 LRU+TTL 缓存, 命中直接返回.
+        P0-1 修复: 单文本级缓存 (替代旧版整批 sha256), 大幅提升命中率.
         """
         if not texts:
             return []
 
-        # P1-3: 缓存命中检查 (分批之前, 整批命中直接返回)
-        key = _cache_key(texts)
-        cached = _cache_get(key)
-        if cached is not None:
-            logger.debug("Embedding 缓存命中: text_count=%d", len(texts))
-            return cached
+        # P0-1 修复: 单文本级缓存查询
+        # 1. 逐条查缓存, 收集未命中部分
+        keys = [_cache_key_single(t) for t in texts]
+        results: list[list[float] | None] = [None] * len(texts)
+        miss_indices: list[int] = []
+        miss_texts: list[str] = []
+        for i, key in enumerate(keys):
+            v = _cache_get_single(key)
+            if v is not None:
+                results[i] = v
+            else:
+                miss_indices.append(i)
+                miss_texts.append(texts[i])
 
-        # P1-1: 客户端分批 (避免单次请求超过 TEI 上限)
-        batch_size = getattr(self.settings, "embeddings_max_client_batch_size", 32) or 32
-        vectors: list[list[float]]
-        if len(texts) <= batch_size:
-            vectors = await self._embed_texts_single(texts, user_id=user_id, session_id=session_id)
+        # 2. 全部命中, 直接返回
+        if not miss_texts:
+            logger.debug("Embedding 缓存全命中: text_count=%d", len(texts))
+            return cast(list[list[float]], results)
+
+        # 3. 未命中部分批量调 TEI (按 batch_size 分批 + gather 并发)
+        batch_size = self.settings.embeddings_max_client_batch_size
+        miss_vectors: list[list[float]] = []
+        if len(miss_texts) <= batch_size:
+            miss_vectors = await self._embed_texts_single(
+                miss_texts, user_id=user_id, session_id=session_id
+            )
         else:
-            # 分批并发
-            batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+            batches = [
+                miss_texts[i : i + batch_size] for i in range(0, len(miss_texts), batch_size)
+            ]
             tasks = [
                 self._embed_texts_single(batch, user_id=user_id, session_id=session_id)
                 for batch in batches
             ]
-            results = await asyncio.gather(*tasks)
-            # 拍平结果
-            vectors = []
-            for batch_vectors in results:
-                vectors.extend(batch_vectors)
+            batch_results = await asyncio.gather(*tasks)
+            for batch_vectors in batch_results:
+                miss_vectors.extend(batch_vectors)
 
-        # P1-3: 写入缓存
-        _cache_set(key, vectors)
-        return vectors
+        # 4. 回填缓存 + 结果
+        for idx, vec in zip(miss_indices, miss_vectors, strict=True):
+            results[idx] = vec
+            _cache_set_single(keys[idx], vec)
+
+        return cast(list[list[float]], results)
 
     async def _embed_texts_single(
         self,
@@ -199,11 +230,14 @@ class EmbeddingsClient:
 
                 except httpx.HTTPStatusError as e:
                     last_error = e
-                    # P1-04: 429 Too Many Requests → 指数退避重试
-                    if e.response.status_code == 429 and attempt < max_retries:
+                    status = e.response.status_code
+                    # P0-1 修复: 429 限流 + 5xx 服务端错误 → 指数退避重试
+                    should_retry = (status == 429 or 500 <= status < 600) and attempt < max_retries
+                    if should_retry:
                         delay = base_delay * (2**attempt)
                         logger.warning(
-                            "Embedding 429 限流, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
+                            "Embedding HTTP %d, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
+                            status,
                             attempt + 1,
                             max_retries,
                             delay,
@@ -211,15 +245,48 @@ class EmbeddingsClient:
                         )
                         await asyncio.sleep(delay)
                         continue
-                    # 非 429 或重试次数用尽, 抛出
+                    # 非重试状态码或重试次数用尽, 抛出
                     logger.error(
                         "Embedding 调用失败 (HTTP %d): %s",
-                        e.response.status_code,
+                        status,
                         e,
                     )
                     span.update(
                         metadata={
-                            "error": f"HTTPStatusError {e.response.status_code}: {e}",
+                            "error": f"HTTPStatusError {status}: {e}",
+                            "retries": attempt,
+                        }
+                    )
+                    raise
+
+                except (
+                    httpx.ConnectError,
+                    httpx.ReadTimeout,
+                    httpx.PoolTimeout,
+                    httpx.RemoteProtocolError,
+                ) as e:
+                    # P0-1 修复: 网络错误重试 (TEI 重启/过载/网络抖动)
+                    last_error = e
+                    if attempt < max_retries:
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            "Embedding 网络错误 %s, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
+                            type(e).__name__,
+                            attempt + 1,
+                            max_retries,
+                            delay,
+                            len(texts),
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error(
+                        "Embedding 网络错误重试耗尽: type=%s repr=%r",
+                        type(e).__name__,
+                        e,
+                    )
+                    span.update(
+                        metadata={
+                            "error": f"{type(e).__name__}: {e}",
                             "retries": attempt,
                         }
                     )
@@ -261,7 +328,7 @@ class EmbeddingsClient:
         *,
         namespace: str,
         metadata_list: list[dict[str, Any]] | None = None,
-        batch_size: int = 32,
+        batch_size: int | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> int:
@@ -272,11 +339,14 @@ class EmbeddingsClient:
         - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等
         - payload 含 content + metadata + namespace (用户私有额外含 user_id)
 
+        P0-修复3: 入口显式 ensure_collection, 避免首批 upsert 抛 404;
+                 batch_size 统一走 settings.embeddings_max_client_batch_size.
+
         Args:
             texts: 待索引文本列表.
             namespace: Qdrant payload namespace.
             metadata_list: 每条文本的 metadata (可选, 长度须与 texts 一致).
-            batch_size: 内部分批大小 (减少 TEI HTTP 请求次数, 默认 32).
+            batch_size: 内部分批大小 (None 时走 settings.embeddings_max_client_batch_size).
             user_id: 用户 ID (隔离键, 私有数据需传).
             session_id: 会话 ID (trace 用).
 
@@ -294,10 +364,16 @@ class EmbeddingsClient:
                 f"metadata_list 长度 {len(metadata_list)} 与 texts 长度 {len(texts)} 不一致"
             )
 
+        # P0-修复3: batch_size 统一走 settings (与 embed_texts 一致, 默认 4, 匹配 TEI max_batch_requests=4)
+        if batch_size is None:
+            batch_size = self.settings.embeddings_max_client_batch_size
+
         # 延迟导入避免循环依赖
         from src.rag.qdrant_manager import get_qdrant_manager
 
         qdrant = get_qdrant_manager()
+        # P0-修复3: 显式 ensure_collection (QdrantManager 内部已 _ensure_collection_once 自保, 此处冗余但语义清晰)
+        await qdrant.ensure_collection()
         total_indexed = 0
 
         # 分批处理 (避免单次 TEI 请求过大)

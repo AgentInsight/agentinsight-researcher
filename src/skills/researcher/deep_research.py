@@ -13,9 +13,10 @@ from typing import Any
 
 from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.context_manager import ContextManager
+from src.skills.researcher.mcp_coordinator import MCPCoordinator, get_user_mcp_configs
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
     BaseSearcher,
@@ -36,6 +37,8 @@ class DeepResearcher:
     _llm: LLMClient
     _context_manager: ContextManager
     _visited_urls: set[str]
+    # P0-7: MCPCoordinator 惰性初始化
+    _mcp: MCPCoordinator | None
 
     def __init__(
         self,
@@ -44,9 +47,20 @@ class DeepResearcher:
         context_manager: ContextManager | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._context_manager = context_manager or ContextManager(self.settings)
         self._visited_urls = set()
+        # P0-7: MCPCoordinator 惰性初始化 (避免启动期构造开销)
+        self._mcp = None
+
+    def _get_mcp(self) -> MCPCoordinator:
+        """惰性初始化 MCPCoordinator (P0-7).
+
+        复用 self._llm 单例, 避免重复构造 LLMClient 导致 step_costs 累计丢失.
+        """
+        if self._mcp is None:
+            self._mcp = MCPCoordinator(self.settings, self._llm)
+        return self._mcp
 
     async def research(
         self,
@@ -353,6 +367,29 @@ class DeepResearcher:
                 rate_limit_delay=self.settings.scraper_rate_limit_delay,
             )
 
+            # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+            # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
+            context_parts: list[str] = []
+            if self.settings.mcp_strategy != "disabled":
+                try:
+                    mcp = self._get_mcp()
+                    mcp_configs = await get_user_mcp_configs(
+                        user_id or "", self.settings.agent_name
+                    )
+                    if mcp_configs:
+                        mcp_contexts = await mcp.conduct_research(
+                            sub_query,
+                            strategy=self.settings.mcp_strategy,
+                            mcp_configs=mcp_configs,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                        if mcp_contexts:
+                            # mcp_contexts 是 list[str], 拼接到 context
+                            context_parts.append("\n\n".join(mcp_contexts))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("MCP 工具调用失败 (不阻断): %s", e)
+
             # 压缩
             context = await self._context_manager.get_similar_content(
                 sub_query,
@@ -361,7 +398,9 @@ class DeepResearcher:
                 user_id=user_id,
                 session_id=session_id,
             )
-            return {"context": context, "sources": sources}
+            if context:
+                context_parts.append(context)
+            return {"context": "\n\n".join(context_parts), "sources": sources}
         except Exception as e:  # noqa: BLE001
             logger.warning("DeepResearch 子查询 '%s' 失败: %s", sub_query[:50], e)
             return {"context": "", "sources": []}

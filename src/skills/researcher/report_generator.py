@@ -23,7 +23,7 @@ from typing import Any
 
 from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.context_manager import WrittenContentCompressor
 from src.skills.researcher.image_generator import ImageGenerator
@@ -93,7 +93,7 @@ class ReportGenerator:
         prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         # 图像生成器延迟初始化 (仅启用时创建, 避免无谓依赖)
         self._image_generator = image_generator
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
@@ -577,10 +577,14 @@ class ReportGenerator:
         if len(sub_context) > max_context_chars:
             sub_context = sub_context[:max_context_chars]
 
-        # 2. WrittenContentCompressor 去重 (并行场景下用锁保护内部状态)
+        # 2. WrittenContentCompressor 去重 (P4 修复: 缩小 dedup_lock 锁粒度)
+        # 锁外: compute_embedding 完成网络 I/O (embed_texts), 不持锁保持并行度
+        # 锁内: check_and_update 做 numpy 相似度比对 + 更新内部状态 (同步操作)
+        # 旧版将 should_keep 整体放锁内, embedding 网络调用使并行退化为串行
         try:
+            chunks, content_embs = await written_compressor.compute_embedding(sub_context)
             async with dedup_lock:
-                keep = await written_compressor.should_keep(sub_context)
+                keep = written_compressor.check_and_update(chunks, content_embs)
         except Exception as e:  # noqa: BLE001
             logger.warning("子主题 '%s' 去重检查失败, 保留内容: %s", topic, e)
             keep = True

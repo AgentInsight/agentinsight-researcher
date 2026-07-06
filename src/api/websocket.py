@@ -59,6 +59,29 @@ ALL_WS_MSG_TYPES: tuple[str, ...] = (
 )
 
 
+# 模块级 httpx client 单例 (复用 TCP/TLS 连接, 避免 _verify_token 每次握手开销)
+_verify_client: httpx.AsyncClient | None = None
+
+
+def _get_verify_client(settings: Settings) -> httpx.AsyncClient:
+    """懒加载模块级 httpx client (单例).
+
+    timeout 从 settings.user_info_api_timeout 注入, 与 JWTAuthMiddleware 一致.
+    """
+    global _verify_client
+    if _verify_client is None:
+        _verify_client = httpx.AsyncClient(timeout=settings.user_info_api_timeout)
+    return _verify_client
+
+
+async def close_verify_client() -> None:
+    """关闭模块级 httpx client (应用 shutdown 时调用)."""
+    global _verify_client
+    if _verify_client is not None:
+        await _verify_client.aclose()
+        _verify_client = None
+
+
 async def _verify_token(token: str, settings: Settings) -> bool:
     """验证 JWT token 有效性 (复用 JWTAuthMiddleware 的验证逻辑).
 
@@ -70,16 +93,16 @@ async def _verify_token(token: str, settings: Settings) -> bool:
     if not token:
         return False
     try:
-        async with httpx.AsyncClient(timeout=settings.user_info_api_timeout) as client:
-            response = await client.get(
-                settings.user_info_api_url,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            if response.status_code != 200:
-                return False
-            data = response.json()
-            user_id = str(data.get("id") or data.get("user_id") or "")
-            return bool(user_id)
+        client = _get_verify_client(settings)
+        response = await client.get(
+            settings.user_info_api_url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if response.status_code != 200:
+            return False
+        data = response.json()
+        user_id = str(data.get("id") or data.get("user_id") or "")
+        return bool(user_id)
     except httpx.TimeoutException:
         logger.warning("WebSocket token 验证超时 (%ss)", settings.user_info_api_timeout)
         return False

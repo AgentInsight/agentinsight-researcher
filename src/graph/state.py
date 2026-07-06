@@ -57,15 +57,9 @@ class ResearcherState(TypedDict, total=False):
     curated_sources: list[dict[str, Any]]  # Reviewer 策展后的来源
 
     # ========== Token 优化 (用户需求 10) ==========
-    context_compressed: bool  # 是否已压缩
     total_cost_usd: float  # 累计成本
     total_tokens: int  # 累计 Token
     token_logs: list[dict[str, Any]]  # 各阶段 Token 明细
-
-    # ========== MCP (用户需求 9) ==========
-    mcp_strategy: str  # fast | deep | disabled
-    mcp_configs: list[dict[str, Any]]
-    mcp_context: list[str]  # MCP 检索结果
 
     # ========== 文件上传 (用户需求 8) ==========
     uploaded_files: list[dict[str, Any]]  # 上传文件元数据
@@ -99,12 +93,13 @@ class ResearcherState(TypedDict, total=False):
     ]  # 修订计数器 (reviser 节点累加, max_revisions 守卫)
 
     # ========== 输出 ==========
-    report_md: str  # Markdown 报告
-    report_html: str  # HTML 报告
-    report_pdf_path: str  # PDF 文件路径
-    report_docx: bytes  # DOCX 报告 (P1-05)
-    report_json: str  # JSON 报告 (P1-05)
+    # P2-1: 报告格式字段合并为单一 dict, key 为格式名 (md/html/pdf/docx/json),
+    # value 为内容 (md/html/docx/json) 或文件路径 (pdf).
+    # 旧字段 report_html/report_pdf_path/report_docx/report_json 已移除, 统一走 report_formats.
+    # report_md 保留一个发布周期 (deprecated), 新代码应使用 report_formats["md"].
+    report_md: str  # deprecated: 改用 report_formats["md"], 兼容期保留
+    report_formats: dict[str, str]  # {md|html|pdf|docx|json: 内容或路径}
     report_image_url: str  # 报告配图 URL (P2-06, deepseek-v4-flash 生成)
     report_image_b64: str  # 报告配图 base64 (P2-06, 与 url 二选一)
-    error: str  # 错误信息
+    report_id: str  # 报告主键 UUID (publisher 写入, routes/cli 读取用于下载链接)
     status: str  # pending | running | completed | failed

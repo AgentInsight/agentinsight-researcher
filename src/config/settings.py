@@ -61,8 +61,12 @@ class Settings(BaseSettings):
     summary_token_limit: int = 700
     max_total_tokens: int = 128000  # 单次研究流程总 token 预算上限 (P1-02)
     temperature: float = 0.4
-    llm_timeout: int = 60
+    llm_timeout: int = 120  # LLM 调用超时 (秒); 60→120: deepseek-v4-pro 报告生成需 60s+
     llm_max_retries: int = 2
+    # P2-2: LLM 响应缓存 (Redis)
+    # 仅缓存 temperature=0 的成功响应; 异常/错误响应绝不缓存; 流式响应不缓存.
+    llm_response_cache_enabled: bool = True
+    llm_response_cache_ttl: int = 3600  # 缓存 TTL (秒, 默认 1 小时)
     litellm_proxy_base_url: str | None = None
     litellm_proxy_api_key: str | None = None
 
@@ -104,11 +108,12 @@ class Settings(BaseSettings):
     embeddings_model: str = "BAAI/bge-large-zh-v1.5"
     embeddings_dimension: int = 1024
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
-    embeddings_max_client_batch_size: int = 16  # 客户端单次 TEI 请求上限 (P1-1, 超过则分批并发; P1-04: 32→16, 减少单次推理时间避免 ReadTimeout)
-    # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
-    # 注意: TEI CPU 后端强制 max_batch_requests=4, 客户端并发应略低于此值
-    # 过高 (如 10) 会导致请求在 TEI 队列排队 30+s, 触发客户端 ReadTimeout
-    embeddings_max_concurrent: int = 3
+    embeddings_max_client_batch_size: int = (
+        4  # 客户端单次 TEI 请求上限 (P0-1 修复: 16→4, 匹配 TEI CPU max_batch_requests=4)
+    )
+    # P0-1 根因: 16 texts/请求 → TEI 内部分 4 推理批次 → 占 4 permits; Semaphore(3) × 4 = 12 permits 需求 > 4 可用 → 429
+    # 修复: 4 texts/请求 → 1 推理批次 → 1 permit; Semaphore(3) × 1 = 3 permits < 4 可用 → 无 429
+    embeddings_max_concurrent: int = 3  # 客户端并发限流 (3 HTTP 请求 × 1 permit = 3, 留 1 余量)
     # P1-04: 429 重试配置 (指数退避)
     embeddings_max_retries: int = 3
     embeddings_retry_base_delay: float = 0.5  # 基础延迟 (秒), 实际 = base * 2^attempt
@@ -127,6 +132,11 @@ class Settings(BaseSettings):
     postgres_user: str = "agentinsight"
     postgres_password: str | None = None
     postgres_connection_pool_size: int = 10
+    # P2-6: PostgresSaver AsyncConnectionPool 连接池 min/max 配置化 (按负载调整)
+    # langgraph-checkpoint-postgres 1.x AsyncConnectionPool 支持 min_size/max_size 参数;
+    # min_size 不超过 max_size (checkpointer 内部会做 clamp 校验).
+    postgres_pool_min_size: int = 4
+    postgres_pool_max_size: int = 20
 
     @property
     def postgres_dsn(self) -> str:
@@ -303,8 +313,6 @@ class Settings(BaseSettings):
     # 闲聊响应器: FAST_LLM 实时生成 + Persona + 三段式 + 多模板兜底
     # 对标 Anthropic Claude system prompt 四段式 + Character.AI persona 一致性
     chitchat_config_dir: str = "src/config/researcher"  # 闲聊配置目录 (相对项目根)
-    chitchat_enabled: bool = True  # 闲聊响应器总开关
-    chitchat_use_fast_llm: bool = True  # 是否走 FAST_LLM (False 则用固定话术)
     chitchat_temperature: float = 0.7  # 闲聊温度 (略高创意)
     chitchat_max_tokens: int = 200  # 闲聊响应 max_tokens
     chitchat_stream_char_by_char: bool = True  # 流式是否逐字 yield

@@ -32,6 +32,7 @@ class BingSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.bing_api_key
+        self._client = httpx.AsyncClient(timeout=15.0)
 
     async def search(
         self,
@@ -57,10 +58,9 @@ class BingSearcher(BaseSearcher):
             try:
                 headers = {"Ocp-Apim-Subscription-Key": self._api_key}
                 params: dict[str, Any] = {"q": query, "count": max_results}
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.get(self._api_url, headers=headers, params=params)
-                    response.raise_for_status()
-                    data = response.json()
+                response = await self._client.get(self._api_url, headers=headers, params=params)
+                response.raise_for_status()
+                data = response.json()
 
                 results: list[dict[str, Any]] = []
                 # Bing 返回结构: {"webPages": {"value": [...]}}
@@ -84,3 +84,6 @@ class BingSearcher(BaseSearcher):
                 logger.warning("Bing 搜索失败: %s", e)
                 span.update(metadata={"tool_name": "bing", "success": False, "error": str(e)})
                 return []
+
+    async def close(self) -> None:
+        await self._client.aclose()

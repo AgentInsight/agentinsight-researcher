@@ -19,7 +19,7 @@ from typing import Any
 
 from src.config.settings import Settings, get_settings
 from src.graph.state import ResearcherState
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ class Reviser:
         llm: LLMClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
 
     async def revise(
         self,

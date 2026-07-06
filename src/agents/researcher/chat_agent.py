@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from src.config.settings import Settings, get_settings
 from src.graph.state import ResearcherState
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 
@@ -55,7 +55,7 @@ class ChatAgent:
         prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     def _assess_chat_complexity(self, query: str) -> LLMTier:

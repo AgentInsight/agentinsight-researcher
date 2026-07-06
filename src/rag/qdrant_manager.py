@@ -28,9 +28,11 @@ class QdrantManager:
 
     settings: Settings
     _client: Any  # AsyncQdrantClient
+    _collection_ready: bool  # P0-修复2: 集合就绪缓存标志, 避免每次操作都网络检查
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self._collection_ready = False  # 首次操作前必须 ensure_collection
         # 延迟导入, 避免模块加载时强依赖
         # P1-04: 抑制 qdrant_client 在 http+api_key 场景的 UserWarning
         # (测试环境用 http+api_key, qdrant_client 会警告 "Api key is used with an insecure connection")
@@ -57,18 +59,31 @@ class QdrantManager:
                 check_compatibility=False,
             )
 
+    async def _ensure_collection_once(self) -> None:
+        """P0-修复2: 幂等确保集合存在 (首次调用 ensure_collection, 后续短路返回).
+
+        性能考虑: 首次调用有 RTT 开销 (~10ms get_collection),
+        后续直接返回, 避免每次操作都检查.
+        """
+        if not self._collection_ready:
+            await self.ensure_collection()
+            self._collection_ready = True
+
     async def ensure_collection(self) -> None:
         """确保集合存在 (不存在则创建, 含 HNSW 参数调优 P0-03).
 
         AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=1024.
         P0-03: 中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
         scalar 量化降低内存 50%.
+
+        P0-修复1: 显式刷新 _collection_ready 标志 (允许外部强制重检).
         """
         from qdrant_client.http.exceptions import UnexpectedResponse
 
         try:
             await self._client.get_collection(self.settings.qdrant_collection)
             logger.debug("Qdrant 集合 %s 已存在", self.settings.qdrant_collection)
+            self._collection_ready = True
         except (UnexpectedResponse, Exception):  # noqa: BLE001
             logger.info(
                 "创建 Qdrant 集合 %s (HNSW m=%d, ef_construct=%d, quantization=%s)",
@@ -112,6 +127,7 @@ class QdrantManager:
                 hnsw_config=hnsw_config,
                 quantization_config=quantization_config,
             )
+            self._collection_ready = True
 
     def build_shared_namespace(self) -> str:
         """共享知识库 namespace = agent_id (旧版兼容, 推荐用 build_data_shared_namespace).
@@ -215,10 +231,15 @@ class QdrantManager:
         - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等生成
         - payload 必须含 content + metadata + namespace
         - 用户私有数据额外含 user_id
+
+        P0-修复2: 入口自保 ensure_collection, 避免新环境首次写入 404.
         """
         from qdrant_client.http.models import PointStruct
 
         from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
+
+        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        await self._ensure_collection_once()
 
         embeddings_client = get_embeddings_client()
 
@@ -258,6 +279,8 @@ class QdrantManager:
         """删除指定 namespace 下的所有点 (按 payload namespace 字段过滤).
 
         用于种子模式版本更新时清理旧数据 (AGENTS.md 第 7 章: payload namespace 隔离).
+
+        P0-修复2: 入口自保 ensure_collection, 避免新环境首次删除 404.
         """
         from qdrant_client.http.models import (
             FieldCondition,
@@ -265,6 +288,9 @@ class QdrantManager:
             FilterSelector,
             MatchValue,
         )
+
+        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        await self._ensure_collection_once()
 
         query_filter = Filter(
             must=[
@@ -288,8 +314,13 @@ class QdrantManager:
         """向量检索.
 
         AGENTS.md 第 7 章: 必须显式传 namespace 列表, 禁止全集合扫描.
+
+        P0-修复2: 入口自保 ensure_collection, 避免新环境首次检索 404.
         """
         from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        await self._ensure_collection_once()
 
         # 构建 namespace 过滤 (OR 关系)
         should_conditions = [

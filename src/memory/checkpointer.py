@@ -10,7 +10,7 @@ AGENTS.md 第 3/6 章硬约束:
 P0-02: 连接池复用.
 - 模块级单例 _checkpointer_instance 避免每次调用创建新连接.
 - 生产用 AsyncPostgresSaver + AsyncConnectionPool 复用同一 asyncpg 连接池,
-  池大小从 settings.postgres_connection_pool_size 读取.
+  池 min/max 从 settings.postgres_pool_min_size/postgres_pool_max_size 读取.
 - 双重检查锁 (_pool_lock) 保证并发安全.
 """
 
@@ -74,8 +74,9 @@ async def get_checkpointer(settings: Settings | None = None) -> Any:
 async def _create_postgres_checkpointer(settings: Settings) -> Any:
     """创建生产 AsyncPostgresSaver (P0-02 连接池复用).
 
-    用 AsyncConnectionPool 复用连接, 池大小从 settings.postgres_connection_pool_size
-    读取. 创建/setup 失败时降级到 MemorySaver 并告警.
+    用 AsyncConnectionPool 复用连接, 池 min/max 从
+    settings.postgres_pool_min_size/postgres_pool_max_size 读取
+    (P2-6 配置化, 支持按负载调整). 创建/setup 失败时降级到 MemorySaver 并告警.
 
     Args:
         settings: 全局配置.
@@ -88,16 +89,17 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
         from psycopg.rows import dict_row
         from psycopg_pool import AsyncConnectionPool
 
-        pool_size = max(int(settings.postgres_connection_pool_size), 1)
-        # min_size 不超过 max_size, 避免 ValueError; 默认基线 4
-        min_size = min(4, pool_size)
+        # P2-6: 连接池 min/max 从 settings 读取, 支持按负载调整
+        # min_size 不超过 max_size, 且均 ≥1, 避免 AsyncConnectionPool ValueError
+        max_size = max(int(settings.postgres_pool_max_size), 1)
+        min_size = max(min(int(settings.postgres_pool_min_size), max_size), 1)
 
         # AsyncConnectionPool 配置对齐 from_conn_string:
         # autocommit=True / prepare_threshold=0 / row_factory=dict_row
         pool = AsyncConnectionPool(
             conninfo=settings.postgres_dsn_psycopg,
             min_size=min_size,
-            max_size=pool_size,
+            max_size=max_size,
             kwargs={
                 "autocommit": True,
                 "prepare_threshold": 0,
@@ -113,7 +115,7 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
         logger.info(
             "PostgresSaver 已初始化 (生产环境, 连接池复用, min=%d max=%d)",
             min_size,
-            pool_size,
+            max_size,
         )
         return checkpointer
     except Exception as exc:  # noqa: BLE001

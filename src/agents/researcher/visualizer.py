@@ -23,7 +23,7 @@ from typing import Any
 
 from src.config.settings import Settings, get_settings
 from src.graph.state import ResearcherState
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 
@@ -51,7 +51,7 @@ class Visualizer:
         prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     async def visualize(
@@ -205,4 +205,9 @@ async def visualizer_node(
         user_id=state.get("user_id"),
         session_id=state.get("session_id"),
     )
-    return {"report_md": result["report_md"]}
+    # P2-1: 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+    updated_md = result["report_md"]
+    existing_formats = state.get("report_formats") or {}
+    new_formats: dict[str, str] = dict(existing_formats)
+    new_formats["md"] = updated_md
+    return {"report_md": updated_md, "report_formats": new_formats}

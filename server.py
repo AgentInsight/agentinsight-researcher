@@ -44,6 +44,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await init_database(settings)
 
+    # P0-修复1: 显式同步 ensure Qdrant 集合 (AGENTS.md 第 6/7 章, 用户首要需求)
+    # 必须同步等待完成, 避免新环境首请求竞态 (后台任务可能在集合未就绪时被查询)
+    # 失败不阻断启动 (仅告警), 后续业务方法自保 _ensure_collection_once 兜底
+    async def _ensure_qdrant_collection() -> None:
+        try:
+            from src.rag.qdrant_manager import get_qdrant_manager
+
+            mgr = get_qdrant_manager()
+            await mgr.ensure_collection()  # 幂等, 不存在则创建
+            logger.info("Qdrant 集合 %s 已就绪", mgr.settings.qdrant_collection)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Qdrant ensure_collection 失败 (不阻断启动): %s", e)
+
+    await _ensure_qdrant_collection()  # 同步等待, 确保集合就绪后再启动
+
     # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
     # 阶段 3: 可预热图
 
@@ -73,6 +88,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     asyncio.create_task(_warmup_embeddings())
 
     yield
+
+    # P0-5: 关闭全局 Redis 单例 (由 common.redis_client 统一工厂创建, lifespan 统一关闭)
+    from src.common.redis_client import close_redis_client
+
+    await close_redis_client()
+
+    # P0-9: 关闭 WebSocket token 验证模块级 httpx client 单例
+    from src.api.websocket import close_verify_client
+
+    await close_verify_client()
+
+    # P0-6: 关闭全局 Playwright 浏览器池单例 (复用 browser, 避免每 URL 启动 chromium)
+    from src.skills.researcher.scrapers.playwright_scraper import _PlaywrightPool
+
+    await _PlaywrightPool.shutdown()
 
     logger.info("agentinsight-researcher 关闭")
 

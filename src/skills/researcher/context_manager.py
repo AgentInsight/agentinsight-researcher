@@ -12,11 +12,14 @@ AGENTS.md 用户需求 10: Token 优化核心.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any, cast
 
+import numpy as np
+
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 
@@ -38,7 +41,7 @@ class ContextManager:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._embeddings = get_embeddings_client()
-        self._llm = LLMClient(self.settings)
+        self._llm = get_llm_client()
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
 
@@ -285,6 +288,40 @@ class ContextManager:
         return cast(float, dot / (norm_a * norm_b))
 
     @staticmethod
+    def _cosine_similarity_batch(
+        new_vecs: list[list[float]],
+        written_vecs: list[list[float]],
+    ) -> np.ndarray:
+        """批量余弦相似度 (numpy 矩阵加速, P4 修复 context-compress 性能瓶颈).
+
+        一次性计算 M 条新向量与 N 条已写入向量之间的两两余弦相似度,
+        替代旧版 WrittenContentCompressor.should_keep 内的 O(N*M) 双重 for 循环.
+
+        Args:
+            new_vecs: 新向量列表 (M 条, 每条 D 维)
+            written_vecs: 已写入向量列表 (N 条, 每条 D 维)
+
+        Returns:
+            shape=(M, N) 的 numpy 数组, 每元素为对应位置的余弦相似度.
+            若任一输入为空或维度不匹配, 返回 shape=(0, 0) 的空数组.
+        """
+        if not new_vecs or not written_vecs:
+            return np.zeros((0, 0), dtype=np.float32)
+        new_matrix = np.asarray(new_vecs, dtype=np.float32)
+        written_matrix = np.asarray(written_vecs, dtype=np.float32)
+        if new_matrix.ndim != 2 or written_matrix.ndim != 2:
+            return np.zeros((0, 0), dtype=np.float32)
+        # L2 归一化 (避免除零, 零向量范数置 1, 结果为 0)
+        new_norms = np.linalg.norm(new_matrix, axis=1, keepdims=True)
+        written_norms = np.linalg.norm(written_matrix, axis=1, keepdims=True)
+        new_norms = np.where(new_norms == 0, 1.0, new_norms)
+        written_norms = np.where(written_norms == 0, 1.0, written_norms)
+        new_normalized = new_matrix / new_norms
+        written_normalized = written_matrix / written_norms
+        # 矩阵乘法: (M, D) @ (D, N) = (M, N)
+        return new_normalized @ written_normalized.T
+
+    @staticmethod
     def _truncate_by_words(texts: list[str], max_words: int) -> str:
         """按词数截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)."""
         result: list[str] = []
@@ -366,7 +403,7 @@ class SlidingWindowCompressor:
         max_summary_tokens: int = 2000,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self.recent_ratio = recent_ratio
         self.max_summary_tokens = max_summary_tokens
 
@@ -440,6 +477,9 @@ class WrittenContentCompressor:
     # V2-P1: chunk 级去重, 替代旧版整篇 content 比对
     _written_embeddings: list[list[float]]
     _written_chunks: list[str]
+    # P4 修复: 单条 chunk embedding 缓存 (key=chunk sha256), 避免同一 chunk
+    # 在不同 content 中重复嵌入; reset() 时一并清空.
+    _chunk_cache: dict[str, list[float]]
 
     def __init__(
         self,
@@ -456,22 +496,32 @@ class WrittenContentCompressor:
         )
         self._written_embeddings = []
         self._written_chunks = []
+        self._chunk_cache = {}
 
-    async def should_keep(self, content: str) -> bool:
-        """判断内容是否应保留 (与已写入内容相似度 < threshold).
+    async def compute_embedding(
+        self,
+        content: str,
+    ) -> tuple[list[str], list[list[float]]]:
+        """锁外计算 content 的 chunk embeddings (P4 修复: 缩小锁粒度).
 
-        V2-P1: chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
-        相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
-        与 GPTR WrittenContentCompressor 对齐.
+        在锁外完成网络 I/O (embed_texts), 利用 _chunk_cache 缓存单条 chunk 的
+        embedding, 避免同一 chunk 在不同 content 中重复嵌入. 返回 (chunks,
+        content_embs) 供 check_and_update 在锁内做 numpy 相似度比对.
+
+        拆分动机: 旧版 should_keep 在 dedup_lock 内部调用 embed_texts, 使并行
+        退化为串行 (P50=176s). 现将 embed_texts 移到锁外, 锁仅保护
+        _written_embeddings / _written_chunks 的并发修改.
 
         Args:
             content: 待判断的内容字符串
 
         Returns:
-            True 表示应保留 (无高度相似的已写入内容), False 表示应丢弃.
+            (chunks, content_embs): chunks 为分块后的文本列表, content_embs 为
+            对应 embedding 列表. content 为空或 embedding 失败时返回 ([], []),
+            调用方应据此降级保留内容.
         """
         if not content.strip():
-            return False
+            return [], []
 
         # V2-P1: chunk 级切分 (与 EmbeddingsFilter 同款递归分块, chunk_size=1000)
         from src.rag.embeddings_filter import EmbeddingsFilter
@@ -485,41 +535,111 @@ class WrittenContentCompressor:
         if not chunks:
             chunks = [content]
 
-        # 首次写入: 直接记录所有 chunks 的 embedding
-        if not self._written_embeddings:
+        # P4 修复: 单条 chunk embedding 缓存, 避免同一 chunk 在不同 content 中重复嵌入
+        content_embs: list[list[float]] = [[] for _ in chunks]
+        miss_indices: list[int] = []
+        miss_chunks: list[str] = []
+        for i, chunk in enumerate(chunks):
+            cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+            cached = self._chunk_cache.get(cache_key)
+            if cached is not None:
+                content_embs[i] = cached
+            else:
+                miss_indices.append(i)
+                miss_chunks.append(chunk)
+
+        if miss_chunks:
             try:
-                content_embs = await self._embeddings.embed_texts(chunks)
-                self._written_embeddings.extend(content_embs)
-                self._written_chunks.extend(chunks)
-                return True
+                miss_embs = await self._embeddings.embed_texts(miss_chunks)
             except Exception as e:  # noqa: BLE001
                 logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
-                return True
+                return [], []
+            for idx, chunk, emb in zip(miss_indices, miss_chunks, miss_embs, strict=True):
+                content_embs[idx] = emb
+                cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+                self._chunk_cache[cache_key] = emb
 
-        # V2-P1: chunk 级去重 — 取所有 chunks 的最高相似度判断
-        try:
-            content_embs = await self._embeddings.embed_texts(chunks)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
+        return chunks, content_embs
+
+    def check_and_update(
+        self,
+        chunks: list[str],
+        content_embs: list[list[float]],
+    ) -> bool:
+        """锁内同步: numpy 矩阵比对相似度 + 更新内部状态 (P4 修复).
+
+        在锁内执行 (保护 _written_embeddings 和 _written_chunks 的并发修改),
+        用 numpy 矩阵乘法一次性计算所有相似度, 替代旧版 O(N*M) 双重 for 循环.
+        任意 chunk 与已写入 chunks 的最高相似度 >= threshold 即丢弃整篇 content,
+        保留原语义.
+
+        Args:
+            chunks: 分块后的文本列表 (来自 compute_embedding)
+            content_embs: 对应的 embedding 列表 (来自 compute_embedding)
+
+        Returns:
+            True 表示应保留 (无高度相似的已写入内容), False 表示应丢弃.
+            chunks/content_embs 为空 (compute_embedding 失败) 时降级保留.
+        """
+        # compute_embedding 失败时返回 ([], []), 此处降级保留
+        if not chunks or not content_embs:
             return True
 
-        # 对每个新 chunk, 检查与所有已写入 chunks 的最高相似度
-        max_similarity = 0.0
-        for new_emb in content_embs:
-            for written_emb in self._written_embeddings:
-                sim = ContextManager._cosine_similarity(new_emb, written_emb)
-                if sim > max_similarity:
-                    max_similarity = sim
-                if sim >= self.threshold:
-                    # 与已有 chunk 高度相似, 丢弃整篇 content
-                    return False
+        # 首次写入: 直接记录所有 chunks 的 embedding, 无需比对
+        if not self._written_embeddings:
+            self._written_embeddings.extend(content_embs)
+            self._written_chunks.extend(chunks)
+            return True
+
+        # P4 修复: numpy 矩阵运算替代双重 for 循环
+        # sim_matrix shape = (len(content_embs), len(self._written_embeddings))
+        sim_matrix = ContextManager._cosine_similarity_batch(
+            content_embs,
+            self._written_embeddings,
+        )
+        if sim_matrix.size == 0:
+            # 矩阵为空 (维度不匹配等), 降级保留并记录
+            self._written_embeddings.extend(content_embs)
+            self._written_chunks.extend(chunks)
+            return True
+
+        # 每个 chunk 与所有已写入 chunks 的最高相似度
+        max_sims = np.max(sim_matrix, axis=1)
+        # 任意 chunk 的最高相似度 >= threshold 即丢弃整篇 content (保留原语义)
+        if float(np.max(max_sims)) >= self.threshold:
+            return False
 
         # 无高度相似: 记录新 chunks 的 embedding
         self._written_embeddings.extend(content_embs)
         self._written_chunks.extend(chunks)
         return True
 
+    async def should_keep(self, content: str) -> bool:
+        """判断内容是否应保留 (兼容入口, 内部调用 compute_embedding + check_and_update).
+
+        V2-P1: chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
+        相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
+        与 GPTR WrittenContentCompressor 对齐.
+
+        P4 修复: 内部拆分为 compute_embedding (锁外 I/O) + check_and_update
+        (锁内 numpy 比对). 单调用方可直接用此方法; 并行场景应分别调用两步
+        以缩小锁粒度 (见 report_generator._research_and_write_subtopic).
+
+        Args:
+            content: 待判断的内容字符串
+
+        Returns:
+            True 表示应保留 (无高度相似的已写入内容), False 表示应丢弃.
+            空 content 返回 False (保留原语义); embedding 失败降级返回 True.
+        """
+        # 保留原语义: 空 content 直接丢弃 (不进入 compute_embedding)
+        if not content.strip():
+            return False
+        chunks, content_embs = await self.compute_embedding(content)
+        return self.check_and_update(chunks, content_embs)
+
     def reset(self) -> None:
         """重置已写入内容记录 (每次新研究调用)."""
         self._written_embeddings.clear()
         self._written_chunks.clear()
+        self._chunk_cache.clear()

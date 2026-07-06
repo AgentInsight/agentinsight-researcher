@@ -32,6 +32,7 @@ class BraveSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.brave_api_key
+        self._client = httpx.AsyncClient(timeout=15.0)
 
     async def search(
         self,
@@ -60,10 +61,9 @@ class BraveSearcher(BaseSearcher):
                     "Accept": "application/json",
                 }
                 params: dict[str, Any] = {"q": query, "count": max_results}
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.get(self._api_url, headers=headers, params=params)
-                    response.raise_for_status()
-                    data = response.json()
+                response = await self._client.get(self._api_url, headers=headers, params=params)
+                response.raise_for_status()
+                data = response.json()
 
                 results: list[dict[str, Any]] = []
                 for item in data.get("web", {}).get("results", [])[:max_results]:
@@ -85,3 +85,6 @@ class BraveSearcher(BaseSearcher):
                 logger.warning("Brave 搜索失败: %s", e)
                 span.update(metadata={"tool_name": "brave", "success": False, "error": str(e)})
                 return []
+
+    async def close(self) -> None:
+        await self._client.aclose()

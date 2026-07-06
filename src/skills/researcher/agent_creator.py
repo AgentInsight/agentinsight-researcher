@@ -20,7 +20,7 @@ from typing import Any
 
 from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
-from src.llm.client import LLMClient, LLMTier
+from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 
@@ -87,7 +87,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         prompt_family: PromptFamily | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._llm = llm or LLMClient(self.settings)
+        self._llm = llm or get_llm_client()
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     async def create_agent(

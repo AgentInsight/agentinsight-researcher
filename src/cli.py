@@ -158,9 +158,8 @@ def _build_initial_state(
         "visited_urls": set[str](),
         "curated_sources": [],
         # 输出占位
-        "report_md": "",
-        "report_html": "",
-        "report_pdf_path": "",
+        "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
+        "report_formats": {},  # P2-1: {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
         # 深度研究配置
         "research_mode": mode,
@@ -181,9 +180,14 @@ def _emit_result(
     - markdown/html/json: 文本, 写文件 (-o) 或 stdout
     - pdf: 提示 PDF 路径; -o 时复制到目标路径
     - docx: 二进制, -o 写文件; 无 -o 则提示需指定路径
+
+    P2-1: 优先从 report_formats 读取, 兼容期回退旧字段 (report_pdf_path/report_docx).
     """
+    # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+    formats = final_state.get("report_formats") or {}
+
     if fmt == "pdf":
-        pdf_path = str(final_state.get("report_pdf_path", "") or "")
+        pdf_path = str(formats.get("pdf") or final_state.get("report_pdf_path", "") or "")
         if not pdf_path:
             print("警告: 未生成 PDF 路径", file=sys.stderr)
             return 1
@@ -199,7 +203,7 @@ def _emit_result(
         return 0
 
     if fmt == "docx":
-        data = final_state.get("report_docx", b"")
+        data = formats.get("docx") or final_state.get("report_docx", b"")
         if not isinstance(data, (bytes, bytearray)):
             data = str(data).encode("utf-8")
         if output_path:
@@ -212,9 +216,15 @@ def _emit_result(
         sys.stdout.buffer.flush()
         return 0
 
-    # 文本类: markdown / html / json
-    field_map = {"markdown": "report_md", "html": "report_html", "json": "report_json"}
-    content = str(final_state.get(field_map[fmt], "") or "")
+    # 文本类: markdown / html / json (P2-1: 优先 report_formats, 兼容旧字段)
+    field_map = {"markdown": "md", "html": "html", "json": "json"}
+    key = field_map[fmt]
+    content = str(
+        formats.get(key)
+        or final_state.get(f"report_{key}", "")
+        or (final_state.get("report_md", "") if key == "md" else "")
+        or ""
+    )
     if output_path:
         Path(output_path).write_text(content, encoding="utf-8")
         print(f"已写入: {output_path}")
