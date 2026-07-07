@@ -238,113 +238,113 @@ WHERE is_system = TRUE
     'chrome-mcp', 'aws-kb-retrieval'
   );
 
--- 6.3 预置系统公用 MCP 服务 (v2=2026-07-06 MCP 修复版)
+-- 6.3 预置系统公用 MCP 服务 (v3=2026-07-06 MCP 修复版, 修正 wikipedia 可执行文件名)
 -- 修复内容: 替换 8 个 npm 失效包为 PyPI/社区包 (官方已迁移 npm → PyPI)
 --   fetch:        @modelcontextprotocol/server-fetch (npm 404) → mcp-server-fetch (PyPI, uvx)
---   git:          @modelcontextprotocol/server-git (npm 404) → mcp-server-git (PyPI, uvx)
---   wikipedia:    @phuongcao/mcp-server-wikipedia (npm 404) → mcp-server-wikipedia (PyPI, uvx)
+--   git:          @modelcontextprotocol/server-git (npm 404) → mcp-server-git (PyPI, uvx, 需系统 git)
+--   wikipedia:    @phuongcao/mcp-server-wikipedia (npm 404) → mcp-server-wikipedia (PyPI, uvx, 可执行文件名 wikipedia-mcp-server)
 --   confluence:   @sooperset/mcp-atlassian (npm 404) → mcp-atlassian (PyPI, uvx)
 --   neo4j:        @neo4j/mcp-server (npm 404) → mcp-server-neo4j (PyPI, uvx)
 --   chrome-mcp:   @anthropic-ai/chrome-mcp (npm 404) → chrome-devtools-mcp (npm 社区替代)
 --   clickhouse:   @clickhouse/mcp-server (npm 404) → clickhouse-mcp-server (npm 社区替代)
 --   github:       保留 npx (npm 200, 之前超时为网络问题)
--- version=2: 触发 ON CONFLICT DO UPDATE 更新已部署的 v1 配置
+-- version=3: 触发 ON CONFLICT DO UPDATE 更新已部署的 v1/v2 配置 (v2 wikipedia 可执行文件名错误)
 INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, version, description) VALUES
     -- ===== 核心保留 12 个 (研究场景高价值、无冗余、合规无冲突) =====
     -- 1. Web 抓取与文件操作 (3 个)
     ('agentinsight-researcher', 'system', 'fetch', NULL, 'stdio', 'uvx',
      '["mcp-server-fetch"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
+     TRUE, TRUE, 3, 'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
     ('agentinsight-researcher', 'system', 'filesystem', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]'::jsonb, NULL,
-     TRUE, TRUE, 2, '安全文件操作, 可配置访问路径 (官方 npm 实现, 核心保留)'),
+     TRUE, TRUE, 3, '安全文件操作, 可配置访问路径 (官方 npm 实现, 核心保留)'),
     ('agentinsight-researcher', 'system', 'sequential-thinking', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-sequential-thinking"]'::jsonb, NULL,
-     TRUE, TRUE, 2, '通过思维序列进行动态反思式问题求解 (官方 npm 实现, 核心保留)'),
+     TRUE, TRUE, 3, '通过思维序列进行动态反思式问题求解 (官方 npm 实现, 核心保留)'),
     -- 2. 代码与知识库 (5 个)
     ('agentinsight-researcher', 'system', 'github', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-github"]'::jsonb,
      '{"GITHUB_PERSONAL_ACCESS_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 2, 'GitHub API: 仓库管理/文件操作 (核心保留, 需配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
+     TRUE, TRUE, 3, 'GitHub API: 仓库管理/文件操作 (核心保留, 需配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
     ('agentinsight-researcher', 'system', 'notion', NULL, 'stdio', 'npx',
      '["-y", "@notionhq/notion-mcp-server"]'::jsonb,
      '{"OPENAPI_MCP_HEADERS": "{\"Authorization\":\"Bearer <your-token>\",\"Notion-Version\":\"2022-06-28\"}"}'::jsonb,
-     TRUE, TRUE, 2, 'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需配置 Notion Integration Token)'),
+     TRUE, TRUE, 3, 'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需配置 Notion Integration Token)'),
     ('agentinsight-researcher', 'system', 'obsidian', NULL, 'stdio', 'npx',
      '["-y", "mcp-obsidian", "--vault-path", "/path/to/vault"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Obsidian 知识库: Markdown 解析/双向链接/语义搜索 (核心保留, 需配置 vault 路径)'),
+     TRUE, TRUE, 3, 'Obsidian 知识库: Markdown 解析/双向链接/语义搜索 (核心保留, 需配置 vault 路径)'),
     ('agentinsight-researcher', 'system', 'confluence', NULL, 'stdio', 'uvx',
      '["mcp-atlassian", "--confluence"]'::jsonb,
      '{"ATLASSIAN_SITE_NAME": "<your-site>", "ATLASSIAN_USER_EMAIL": "<your-email>", "ATLASSIAN_API_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 2, 'Confluence: 维基内容/空间/页面管理 (PyPI 实现 mcp-atlassian, 需配置 ATLASSIAN_API_TOKEN)'),
+     TRUE, TRUE, 3, 'Confluence: 维基内容/空间/页面管理 (PyPI 实现 mcp-atlassian, 需配置 ATLASSIAN_API_TOKEN)'),
     ('agentinsight-researcher', 'system', 'elasticsearch', NULL, 'stdio', 'npx',
      '["-y", "@elastic/mcp-server-elasticsearch"]'::jsonb,
      '{"ES_URL": "http://localhost:9200", "ES_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 2, 'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
+     TRUE, TRUE, 3, 'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
     -- 3. 搜索与新闻信源 (2 个)
     ('agentinsight-researcher', 'system', 'wikipedia', NULL, 'stdio', 'uvx',
-     '["mcp-server-wikipedia"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia)'),
+     '["--from", "mcp-server-wikipedia", "wikipedia-mcp-server"]'::jsonb, NULL,
+     TRUE, TRUE, 3, 'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia, 可执行文件名 wikipedia-mcp-server)'),
     ('agentinsight-researcher', 'system', 'hackernews', NULL, 'stdio', 'npx',
      '["-y", "mcp-hacker-news"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
+     TRUE, TRUE, 3, 'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
     -- 4. 数据库 (1 个)
     ('agentinsight-researcher', 'system', 'neo4j', NULL, 'stdio', 'uvx',
      '["mcp-server-neo4j"]'::jsonb,
      '{"NEO4J_URL": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 2, 'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需配置连接凭据)'),
+     TRUE, TRUE, 3, 'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需配置连接凭据)'),
     -- 5. 翻译 (1 个)
     ('agentinsight-researcher', 'system', 'deepl', NULL, 'stdio', 'npx',
      '["-y", "deepl-mcp-server"]'::jsonb,
      '{"DEEPL_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 2, 'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
+     TRUE, TRUE, 3, 'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
     -- ===== 推荐 11 个 (有价值但需用户按需配置 Key 或验证场景) =====
     -- 6. 开发与代码工具 (3 个)
     ('agentinsight-researcher', 'system', 'git', NULL, 'stdio', 'uvx',
      '["mcp-server-git", "--repository", "/path/to/git/repo"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行)'),
+     TRUE, TRUE, 3, 'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行)'),
     ('agentinsight-researcher', 'system', 'gitlab', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gitlab"]'::jsonb,
      '{"GITLAB_PERSONAL_ACCESS_TOKEN": "<your-token>", "GITLAB_API_URL": "https://gitlab.com/api/v4"}'::jsonb,
-     TRUE, TRUE, 2, 'GitLab: 仓库管理/项目/合并请求 (推荐, 需配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
+     TRUE, TRUE, 3, 'GitLab: 仓库管理/项目/合并请求 (推荐, 需配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
     ('agentinsight-researcher', 'system', 'chrome-mcp', NULL, 'stdio', 'npx',
      '["-y", "chrome-devtools-mcp"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
+     TRUE, TRUE, 3, 'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
     -- 7. 知识库与协作 (1 个)
     ('agentinsight-researcher', 'system', 'google-drive', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gdrive"]'::jsonb,
      '{"GDRIVE_CLIENT_ID": "<your-client-id>", "GDRIVE_CLIENT_SECRET": "<your-client-secret>"}'::jsonb,
-     TRUE, TRUE, 2, 'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
+     TRUE, TRUE, 3, 'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
     -- 8. 社交媒体与视频 (2 个)
     ('agentinsight-researcher', 'system', 'youtube', NULL, 'stdio', 'npx',
      '["-y", "@anaisbetts/mcp-youtube"]'::jsonb,
      '{"YOUTUBE_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 2, 'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需配置 YOUTUBE_API_KEY)'),
+     TRUE, TRUE, 3, 'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需配置 YOUTUBE_API_KEY)'),
     ('agentinsight-researcher', 'system', 'twitter', NULL, 'stdio', 'npx',
      '["-y", "@enescinar/twitter-mcp"]'::jsonb,
      '{"TWITTER_API_KEY": "<your-api-key>", "TWITTER_API_SECRET": "<your-secret>", "TWITTER_ACCESS_TOKEN": "<your-token>", "TWITTER_ACCESS_SECRET": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 2, 'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
+     TRUE, TRUE, 3, 'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
     -- 9. 数据库 (3 个)
     ('agentinsight-researcher', 'system', 'mongodb', NULL, 'stdio', 'npx',
      '["-y", "mongodb-mcp-server", "mongodb://localhost:27017/mydb"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
+     TRUE, TRUE, 3, 'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
     ('agentinsight-researcher', 'system', 'supabase', NULL, 'stdio', 'npx',
      '["-y", "@supabase/mcp-server-supabase"]'::jsonb,
      '{"SUPABASE_URL": "<your-url>", "SUPABASE_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 2, 'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
+     TRUE, TRUE, 3, 'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
     ('agentinsight-researcher', 'system', 'clickhouse', NULL, 'stdio', 'npx',
      '["-y", "clickhouse-mcp-server"]'::jsonb,
      '{"CLICKHOUSE_HOST": "localhost", "CLICKHOUSE_PORT": "8123", "CLICKHOUSE_USER": "default", "CLICKHOUSE_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 2, 'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需配置连接凭据)'),
+     TRUE, TRUE, 3, 'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需配置连接凭据)'),
     -- 10. AWS (1 个)
     ('agentinsight-researcher', 'system', 'aws-kb-retrieval', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-aws-kb-retrieval"]'::jsonb,
      '{"AWS_REGION": "<your-region>", "AWS_ACCESS_KEY_ID": "<your-key>", "AWS_SECRET_ACCESS_KEY": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 2, 'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
+     TRUE, TRUE, 3, 'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
     -- 11. 文档工具 (1 个)
     ('agentinsight-researcher', 'system', 'pdf-tools', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-pdf"]'::jsonb, NULL,
-     TRUE, TRUE, 2, 'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
+     TRUE, TRUE, 3, 'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
 -- v2 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
 -- 避免每次启动都 UPDATE (旧 v1 DO NOTHING 无法更新已部署配置)
 -- 避免覆盖用户克隆后的定制 (仅系统 MCP is_system=TRUE 且 version 落后时更新)

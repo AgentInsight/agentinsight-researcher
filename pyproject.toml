@@ -38,6 +38,7 @@ markers = [
     "regression: 回归测试 (合并 main 前门禁)",
     "api: API 测试 (OpenAI 兼容端点)",
     "e2e: 端到端测试 (完整链路)",
+    "performance: 性能测试 (延迟/吞吐/负载, 部署后容器栈)",
 ]
 # P1-04: 抑制第三方库不可控的警告 (业务代码已修复的除外)
 # 格式: action:message:category:module:lineno (category 为空则匹配任意类别)
