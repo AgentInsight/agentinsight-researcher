@@ -232,8 +232,4 @@ async def get_token_budget_allocator() -> TokenBudgetAllocator:
     return _allocator
 
 
-async def reset_token_budget_allocator() -> None:
-    """重置全局单例 (测试用)."""
-    global _allocator
-    async with _allocator_lock:
-        _allocator = None
+

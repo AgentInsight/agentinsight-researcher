@@ -160,18 +160,6 @@ class PromptFamily(ABC):
         """
 
     @abstractmethod
-    def visualizer_prompt(self, report_md: str, query: str) -> str:
-        """Visualizer Mermaid 图表生成 prompt.
-
-        Args:
-            report_md: 报告内容
-            query: 研究主题
-
-        Returns:
-            完整 prompt 字符串
-        """
-
-    @abstractmethod
     def chat_prompt(
         self,
         query: str,
@@ -563,23 +551,6 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 
 仅返回 JSON, 不要其他内容:"""
 
-    def visualizer_prompt(self, report_md: str, query: str) -> str:
-        return f"""你是可视化专家. 请根据以下研究报告内容, 生成一张 Mermaid 流程图或架构图, 用于直观展示报告的核心逻辑.
-
-要求:
-1. 使用 Mermaid 语法 (flowchart/graph/sequenceDiagram/mindmap 等)
-2. 图表应概括报告的核心结构、关键发现或逻辑关系
-3. 节点标签应简洁 (不超过 15 字符)
-4. 图表复杂度适中 (10-20 个节点)
-5. 仅输出 ```mermaid 围栏内的代码, 不要其他内容
-
-研究主题: {query}
-
-报告内容:
-{report_md[:6000]}
-
-请生成 Mermaid 图表:"""
-
     def chat_prompt(
         self,
         query: str,
@@ -964,23 +935,6 @@ Return a JSON array, each item containing name and args:
 
 Return JSON only, nothing else:"""
 
-    def visualizer_prompt(self, report_md: str, query: str) -> str:
-        return f"""You are a visualization expert. Generate a Mermaid flowchart, architecture diagram, or mindmap based on the following research report to visually present its core logic.
-
-Requirements:
-1. Use Mermaid syntax (flowchart/graph/sequenceDiagram/mindmap etc.)
-2. The diagram should summarize the core structure, key findings, or logical relationships of the report
-3. Node labels should be concise (no more than 15 characters)
-4. Moderate diagram complexity (10-20 nodes)
-5. Output only the code within a ```mermaid fence, nothing else
-
-Research topic: {query}
-
-Report content:
-{report_md[:6000]}
-
-Generate Mermaid diagram:"""
-
     def chat_prompt(
         self,
         query: str,
@@ -1128,8 +1082,10 @@ Written section summaries:
 Output the conclusion (starting with `## Conclusion`):"""
 
 
-# ========== 工厂路由 ==========
+# ========== 工厂路由 (注册表驱动, 与 scrapers/searchers 一致的模式) ==========
 
+# 内置 PromptFamily 注册表: 项目内 family 静态注册, 第三方扩展通过
+# register_prompt_family 动态注册. get_prompt_family 优先查询注册表.
 _PROMPT_FAMILY_REGISTRY: dict[str, type[PromptFamily]] = {
     "default": DefaultPromptFamily,
     "english": EnglishPromptFamily,
@@ -1137,29 +1093,43 @@ _PROMPT_FAMILY_REGISTRY: dict[str, type[PromptFamily]] = {
 
 
 def get_prompt_family(name: str = "default") -> PromptFamily:
-    """工厂方法: 按 name 获取 PromptFamily 实例.
+    """工厂方法: 按 name 获取 PromptFamily 实例 (注册表驱动).
+
+    优先查询 _PROMPT_FAMILY_REGISTRY 注册表; 未注册时降级为 DefaultPromptFamily
+    (不抛异常, 保证研究流程不因配置错误中断).
+
+    区域路由逻辑:
+    - 用户明确指定 "english" → EnglishPromptFamily
+    - 区域为 GLOBAL (无中文字符) → EnglishPromptFamily
+    - 其他情况 → DefaultPromptFamily (中文)
 
     Args:
-        name: 策略名称 ("default" | "english")
+        name: 策略名称 ("default" | "english" | 自定义注册名)
 
     Returns:
         PromptFamily 实例
-
-    Raises:
-        ValueError: name 不在注册表中
     """
+    if name == "english":
+        return EnglishPromptFamily()
+
+    from src.skills.researcher.searchers import SearchRegion, detect_region
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+    if settings.prompt_family == "english":
+        return EnglishPromptFamily()
+
+    try:
+        current_query = getattr(settings, "_current_query", "")
+        if current_query:
+            region = detect_region(current_query)
+            if region == SearchRegion.GLOBAL:
+                return EnglishPromptFamily()
+    except Exception:
+        pass
+
     cls = _PROMPT_FAMILY_REGISTRY.get(name)
     if cls is None:
         logger.warning("未注册的 PromptFamily '%s', 降级为 default", name)
         cls = DefaultPromptFamily
     return cls()
-
-
-def register_prompt_family(name: str, family_cls: type[PromptFamily]) -> None:
-    """注册自定义 PromptFamily.
-
-    Args:
-        name: 策略名称
-        family_cls: PromptFamily 子类
-    """
-    _PROMPT_FAMILY_REGISTRY[name] = family_cls

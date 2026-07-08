@@ -42,6 +42,10 @@ qdrant-client>=1.18
 # === Embeddings + Rerank (AGENTS.md 第 7 章, bge-large-zh-v1.5 固定 1024 维) ===
 # 远程 TEI 服务调用, 无需本地模型包; 仅需 HTTP 客户端
 
+# === FastEmbed 本地 Embeddings (上下文压缩用, bge-small-zh-v1.5 ONNX) ===
+fastembed>=0.4  # ONNX INT8 量化, 本地 CPU 推理, ~100MB 内存
+onnxruntime>=1.17  # FastEmbed 底层依赖
+
 # === BM25 + 中文分词 (AGENTS.md 第 7 章) ===
 rank-bm25>=0.2.2
 jieba>=0.42.1
@@ -62,6 +66,8 @@ lxml-html-clean>=0.4
 readability-lxml>=0.8.4
 playwright>=1.49  # JS 渲染抓取(可选, 镜像内安装 chromium)
 PyMuPDF>=1.24  # PDF 抓取与解析
+trafilatura>=1.10  # 网页内容提取, 轻量级去噪, LLM 友好 Markdown 输出
+markdownify>=0.14.1  # HTML→Markdown 转换
 
 # === 文档加载 (用户需求 8, 文件上传) ===
 # 仅 langchain-core 允许, 文档加载器自研薄封装避免引入 langchain-community

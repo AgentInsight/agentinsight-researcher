@@ -18,6 +18,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from src.common.llm_key_resolver import resolve_api_key
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_chain
 
@@ -133,24 +134,6 @@ class ImageGenerator:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
-    def _get_api_key(self, model: str) -> str | None:
-        """按 LiteLLM 路由前缀获取对应 API Key.
-
-        复用 llm/client.py 的路由逻辑; 优先用 image_api_key (若单独配置),
-        否则回退到对应厂商 API Key (deepseek-v4-flash 与 deepseek-chat 共用同一 Key).
-        """
-        if self.settings.image_api_key:
-            return self.settings.image_api_key
-        if model.startswith("deepseek/"):
-            return self.settings.deepseek_api_key
-        if model.startswith("openai/"):
-            return self.settings.openai_api_key
-        if model.startswith("anthropic/"):
-            return self.settings.anthropic_api_key
-        if model.startswith("zhipu/"):
-            return self.settings.zhipu_api_key
-        return None
-
     async def generate_image(
         self,
         prompt: str,
@@ -183,7 +166,9 @@ class ImageGenerator:
         注意: deepseek-v4-flash 图像生成能力假设支持, 实际能力以官方文档为准.
         """
         model = self.settings.image_model
-        api_key = self._get_api_key(model)
+        # P1-3: 复用 common/llm_key_resolver.resolve_api_key (DRY, 不再定义 _get_api_key)
+        # 优先用 image_api_key (若单独配置), 否则回退到对应厂商 API Key
+        api_key = self.settings.image_api_key or resolve_api_key(model, self.settings)
         quality = self.settings.image_quality
 
         async with trace_chain(

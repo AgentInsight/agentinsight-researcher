@@ -3,11 +3,17 @@
 AGENTS.md 第 7 章硬约束:
 - 检索必须混合 BM25 + 向量 (bge-large-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
 - 重排序默认不启用; 当 rerank_enabled=True 时经 bge-reranker-v2-m3, Top-K 召回后 rerank
-- score_threshold 默认 0.3, 低于阈值丢弃 (仅 rerank 启用时生效)
+- score_threshold 默认 0.3, 低于阈值丢弃 (仅 rerank 启用时生效, 向量检索阶段不套用)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API
 
 对标 AgentInsightService common/retriever.py 的 HybridRetriever 模式.
 所有检索必须包裹在 trace_retriever span 内.
+
+P0 BM25 断点修复 (方案 A 路径 1, 保守快速修复):
+- retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant scroll 拉取 namespace 内所有 content
+- 语料缓存到 Redis (key 含 namespace 版本号, TTL 24h 兜底)
+- 文档新增/删除通过 invalidate_bm25_cache 失效缓存 (embed_and_index 后由调用方触发)
+- Redis 不可用时降级为每次从 Qdrant 拉取 (不阻断检索, 仅增加 Qdrant 调用次数)
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ import asyncio
 import hashlib
 import logging
 import time
+import weakref
 from typing import Any, cast
 
 import httpx
@@ -37,9 +44,18 @@ class HybridRetriever:
 
     AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量; rerank 默认不启用,
     rerank_enabled=True 时经 bge-reranker-v2-m3.
+
+    P0 BM25 断点修复: retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant 拉取 namespace
+    content 填充语料, Redis 缓存 (含版本号); 文档新增/删除通过 invalidate_bm25_cache
+    失效缓存. 详见 _ensure_bm25_corpus / invalidate_bm25_cache 文档.
     """
 
     RETRIEVER_CACHE_TTL: int = 3600  # 检索结果缓存 TTL (秒, 1 小时, 可配置)
+    # P0 BM25 断点修复: BM25 语料 Redis 缓存 TTL (秒, 24 小时兜底过期)
+    # 主路径靠 invalidate_bm25_cache 主动失效 (版本号 +1), TTL 仅兜底防止长期僵尸缓存
+    _BM25_CORPUS_CACHE_TTL: int = 86400
+    # P0 BM25 断点修复: BM25 语料 Redis 缓存默认版本号 (从未 INCR 过的 namespace)
+    _BM25_CORPUS_DEFAULT_VERSION: int = 1
 
     settings: Settings
     _embeddings: EmbeddingsClient
@@ -48,13 +64,19 @@ class HybridRetriever:
     _redis: Any  # aioredis.Redis | None (Redis 客户端, 不可用时为 None)
     _redis_initialized: bool  # P0-5: 惰性初始化标记, 避免每次检索都调用 get_redis_client
     _bm25_corpus: list[list[str]]  # BM25 语料 (jieba 分词后)
-    _bm25_docs: list[dict[str, Any]]  # BM25 原始文档
+    _bm25_docs: list[dict[str, Any]]  # BM25 原始文档 (跨 namespace 合并)
     _bm25: BM25Okapi | None
+    # P0 BM25 断点修复: 按 namespace 维度的内存语料缓存 (避免每次检索都重拉 Qdrant)
+    # key = namespace, value = (docs, version) 已加载版本号
+    _bm25_per_namespace: dict[str, tuple[list[dict[str, Any]], int]]
+    # P0 BM25 断点修复: BM25 语料加载 singleflight 锁 (按 namespace 分锁, 防止并发重复拉取)
+    _bm25_load_locks: weakref.WeakValueDictionary[str, asyncio.Lock]
     # P1-6: BM25 分词结果缓存 (key=content sha256, value=tokens list)
     # 避免重复语料更新时对同一 content 重复 jieba.cut
     _token_cache: dict[str, list[str]]
     # P1-4: singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复计算)
-    _inflight_locks: dict[str, asyncio.Lock]
+    # P1-1 修复: 使用 WeakValueDictionary, 锁对象无引用时自动 GC, 避免无界增长
+    _inflight_locks: weakref.WeakValueDictionary[str, asyncio.Lock]
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -79,22 +101,15 @@ class HybridRetriever:
         self._bm25_corpus = []
         self._bm25_docs = []
         self._bm25 = None
+        # P0 BM25 断点修复: 按 namespace 维度的内存语料缓存初始化
+        self._bm25_per_namespace = {}
+        # P0 BM25 断点修复: BM25 语料加载 singleflight 锁初始化 (WeakValueDictionary 自动 GC)
+        self._bm25_load_locks = weakref.WeakValueDictionary()
         # P1-6: 分词缓存初始化
         self._token_cache = {}
         # P1-4: singleflight 锁字典初始化
-        self._inflight_locks = {}
-
-    def build_namespaces(self, user_id: str | None = None) -> list[str]:
-        """构建检索 namespace 列表 (共享 + 用户私有).
-
-        AGENTS.md 第 7 章: 检索时必须显式传目标 namespace 列表 (共享 + 当前用户私有).
-        旧版兼容: 仍使用 build_shared_namespace / build_user_namespace.
-        新代码应使用 build_data_namespaces (含私有数据存在性检查).
-        """
-        namespaces = [self._qdrant.build_shared_namespace()]
-        if user_id:
-            namespaces.append(self._qdrant.build_user_namespace(user_id))
-        return namespaces
+        # P1-1 修复: WeakValueDictionary 自动 GC 无引用的锁, 避免无界增长
+        self._inflight_locks = weakref.WeakValueDictionary()
 
     async def build_data_namespaces(self, user_id: str | None = None) -> tuple[list[str], bool]:
         """构建数据检索 namespace 列表 (新 API, 含私有数据存在性检查).
@@ -172,6 +187,7 @@ class HybridRetriever:
 
         # P1-4: singleflight 互斥锁 (按 query+user_id hash 分锁, 防止缓存击穿)
         # 同一 query 并发请求只允许一个执行 BM25+Vector+Rerank, 其他等待结果
+        # P1-1 修复: WeakValueDictionary 锁获取 (无引用时自动 GC)
         inflight_key = cache_key  # 复用 cache_key (已含 agent_id+user_id+query_hash)
         lock = self._inflight_locks.get(inflight_key)
         if lock is None:
@@ -191,6 +207,16 @@ class HybridRetriever:
                 user_id=user_id,
                 session_id=session_id,
             ) as span:
+                # P0 BM25 断点修复: 检索前确保 BM25 语料已加载 (从 Qdrant scroll + Redis 缓存).
+                # 缓存命中时为快速路径 (Redis GET 版本号 + Redis GET 语料); 缓存未命中时
+                # 从 Qdrant scroll 拉取 namespace 内所有 content. 失败不阻断 (BM25 返回 []).
+                bm25_load_error: Exception | None = None
+                try:
+                    await self._ensure_bm25_corpus(namespaces, user_id)
+                except Exception as e:  # noqa: BLE001
+                    bm25_load_error = e
+                    logger.warning("BM25 语料加载失败, BM25 路径将返回空: %s", e)
+
                 # 并行执行 BM25 + 向量检索
                 vector_task = self._vector_search(query, namespaces, k * 3)
                 bm25_task = self._bm25_search(query, k * 3)
@@ -238,6 +264,10 @@ class HybridRetriever:
                         "candidate_count": len(fused),
                         "retriever_type": "hybrid",
                         "top_score": reranked[0]["score"] if reranked else 0.0,
+                        "vector_matched": len(vector_results),
+                        "bm25_matched": len(bm25_results),
+                        "bm25_corpus_size": len(self._bm25_docs),
+                        "bm25_load_error": str(bm25_load_error) if bm25_load_error else None,
                     },
                 )
                 # P2-04: 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
@@ -518,13 +548,279 @@ class HybridRetriever:
         return tokens
 
     def update_bm25_corpus(self, docs: list[dict[str, Any]]) -> None:
-        """更新 BM25 内存语料.
+        """更新 BM25 内存语料 (3.5.3 死代码修复: 由 _ensure_bm25_corpus 自动调用).
 
         P1-6: 复用 _token_cache 避免对同一 content 重复 jieba.cut.
+
+        P0 BM25 断点修复: 本方法现由 _ensure_bm25_corpus 在 retrieve 入口自动调用,
+        不再依赖业务代码显式触发. docs 来源: Qdrant scroll namespace 内所有 content
+        (经 Redis 缓存). 调用方仍可直接调用以覆盖语料 (如测试场景).
         """
         self._bm25_docs = docs
         self._bm25_corpus = [self._get_tokens(d["content"]) for d in docs]
         self._bm25 = BM25Okapi(self._bm25_corpus) if self._bm25_corpus else None
+
+    # ========== P0 BM25 断点修复: Qdrant 持久化稀疏检索 (方案 A 路径 1) ==========
+    # 设计要点:
+    # - BM25 语料来源: Qdrant scroll 拉取 namespace 内所有 content (替代旧版无调用方路径)
+    # - Redis 缓存: 按 namespace + 版本号键, TTL 24h 兜底; 主路径靠 invalidate 主动失效
+    # - 版本号: Redis INCR 计数器, 文档新增/删除时 +1; 未设置时默认 1
+    # - 内存缓存: _bm25_per_namespace 记录已加载版本, 命中且版本一致跳过重拉
+    # - singleflight: 按 namespace 分锁, 防止并发检索重复拉取同一 namespace
+    # - 降级: Redis 不可用 → 每次从 Qdrant 拉取 (不阻断, 仅增加 Qdrant 调用);
+    #         Qdrant 失败 → 该 namespace 文档为空, BM25 路径返回 []
+
+    def _bm25_cache_uid(self, namespace: str, user_id: str | None) -> str:
+        """确定 BM25 语料 Redis 缓存的 user_id 维度.
+
+        共享 namespace ({agent_id}-data) 跨用户共享, 使用 default_user_id 作为缓存键
+        (所有用户共享同一份缓存); 用户私有 namespace 使用实际 user_id 隔离.
+
+        AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:.
+        """
+        shared_ns = self._qdrant.build_data_shared_namespace()
+        if namespace == shared_ns:
+            return self.settings.default_user_id
+        return user_id or self.settings.default_user_id
+
+    def _bm25_version_key(self, namespace: str, cache_uid: str) -> str:
+        """构建 BM25 语料版本号 Redis 键.
+
+        格式: {agent_id}:{cache_uid}:rag:bm25_corpus_version:{namespace}
+        """
+        agent_id = self.settings.agent_name
+        return f"{agent_id}:{cache_uid}:rag:bm25_corpus_version:{namespace}"
+
+    def _bm25_corpus_key(self, namespace: str, cache_uid: str, version: int) -> str:
+        """构建 BM25 语料内容 Redis 键 (含版本号, 版本变更即缓存失效).
+
+        格式: {agent_id}:{cache_uid}:rag:bm25_corpus:{namespace}:v{version}
+        """
+        agent_id = self.settings.agent_name
+        return f"{agent_id}:{cache_uid}:rag:bm25_corpus:{namespace}:v{version}"
+
+    async def _get_bm25_version(self, namespace: str, cache_uid: str) -> int:
+        """读取 namespace 当前 BM25 语料版本号 (Redis INCR-friendly 计数器).
+
+        未设置时返回默认版本号 1 (不写入 Redis, 避免无数据 namespace 产生垃圾键).
+        Redis 不可用时返回默认版本号 (内存降级, 不阻断).
+        """
+        if not self._redis_initialized:
+            await self._ensure_redis()
+        if self._redis is None:
+            return self._BM25_CORPUS_DEFAULT_VERSION
+        try:
+            version_key = self._bm25_version_key(namespace, cache_uid)
+            raw = await self._redis.get(version_key)
+            if raw is None:
+                return self._BM25_CORPUS_DEFAULT_VERSION
+            # decode_responses=True 时 raw 为 str, 否则为 bytes
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="ignore")
+            return int(raw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取 BM25 版本号失败 (namespace=%s), 用默认值: %s", namespace, e)
+            return self._BM25_CORPUS_DEFAULT_VERSION
+
+    async def _load_namespace_corpus(
+        self,
+        namespace: str,
+        cache_uid: str,
+        version: int,
+    ) -> list[dict[str, Any]]:
+        """加载 namespace BM25 语料 (Redis 缓存 → Qdrant scroll 兜底).
+
+        Redis 命中: 直接反序列化返回 (快速路径);
+        Redis 未命中: scroll Qdrant 拉取所有 content, 写入 Redis 缓存 (TTL 24h), 返回.
+
+        Args:
+            namespace: 要加载的 namespace.
+            cache_uid: 缓存 user_id 维度 (共享 ns 用 default_user_id).
+            version: 当前版本号 (用于缓存键, 版本变更即键变更).
+
+        Returns:
+            文档列表; 任一步骤失败返回空列表 (降级, 不阻断检索).
+        """
+        if not self._redis_initialized:
+            await self._ensure_redis()
+
+        # 1. Redis 缓存命中检查
+        if self._redis is not None:
+            try:
+                corpus_key = self._bm25_corpus_key(namespace, cache_uid, version)
+                cached = await self._redis.get(corpus_key)
+                if cached is not None:
+                    if isinstance(cached, bytes):
+                        cached = cached.decode("utf-8", errors="ignore")
+                    docs = cast(list[dict[str, Any]], orjson.loads(cached))
+                    logger.debug(
+                        "BM25 语料 Redis 缓存命中 (namespace=%s, version=%d, docs=%d)",
+                        namespace,
+                        version,
+                        len(docs),
+                    )
+                    return docs
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "BM25 语料 Redis 读取失败 (namespace=%s), 降级到 Qdrant scroll: %s",
+                    namespace,
+                    e,
+                )
+
+        # 2. Redis 未命中或不可用 → Qdrant scroll 拉取
+        # 降级: Qdrant 失败时该 ns 文档为空 (不阻断检索, 见 _ensure_bm25_corpus docstring)
+        try:
+            docs = await self._qdrant.scroll_all_by_namespace(namespace)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "BM25 语料 Qdrant scroll 失败 (namespace=%s), 降级空语料: %s",
+                namespace,
+                e,
+            )
+            return []
+        logger.debug(
+            "BM25 语料 Qdrant scroll 拉取完成 (namespace=%s, version=%d, docs=%d)",
+            namespace,
+            version,
+            len(docs),
+        )
+
+        # 3. 写入 Redis 缓存 (失败不阻断, 下次仍从 Qdrant 拉)
+        if self._redis is not None and docs:
+            try:
+                corpus_key = self._bm25_corpus_key(namespace, cache_uid, version)
+                await self._redis.set(
+                    corpus_key,
+                    orjson.dumps(docs, default=str),
+                    ex=self._BM25_CORPUS_CACHE_TTL,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "BM25 语料 Redis 写入失败 (namespace=%s), 下次仍从 Qdrant 拉: %s",
+                    namespace,
+                    e,
+                )
+        return docs
+
+    async def _ensure_bm25_corpus(
+        self,
+        namespaces: list[str],
+        user_id: str | None,
+    ) -> None:
+        """检索前确保 BM25 语料已加载 (按 namespace 维度, 含版本号校验).
+
+        AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量. 本方法替代旧版
+        update_bm25_corpus "无业务调用方" 的断点路径, 在 retrieve 入口自动调用.
+
+        流程 (对每个 namespace):
+        1. 读取当前版本号 (Redis 计数器, 默认 1)
+        2. 内存缓存 (_bm25_per_namespace) 命中且版本一致 → 跳过 (快速路径)
+        3. 否则: 加载语料 (Redis 缓存 → Qdrant scroll), 更新内存缓存
+        4. 合并所有 namespace 文档, 调用 update_bm25_corpus 重建 BM25Okapi
+
+        singleflight: 按 namespace 分锁, 防止并发检索重复拉取同一 namespace.
+        降级: Redis 不可用 → 每次从 Qdrant 拉; Qdrant 失败 → 该 ns 文档为空.
+
+        Args:
+            namespaces: 本次检索涉及的所有 namespace (共享 + 用户私有).
+            user_id: 用户 ID (用于 Redis 缓存键的 user_id 维度, 共享 ns 用 default).
+        """
+        if not namespaces:
+            return
+
+        docs_combined: list[dict[str, Any]] = []
+        any_changed = False
+
+        for ns in namespaces:
+            cache_uid = self._bm25_cache_uid(ns, user_id)
+            current_version = await self._get_bm25_version(ns, cache_uid)
+
+            # 内存缓存命中检查
+            cached = self._bm25_per_namespace.get(ns)
+            if cached is not None and cached[1] == current_version:
+                docs_combined.extend(cached[0])
+                continue
+
+            # singleflight: 按 namespace 分锁, 防止并发检索重复拉取
+            lock = self._bm25_load_locks.get(ns)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._bm25_load_locks[ns] = lock
+            async with lock:
+                # 双重检查: 持有锁后再次检查内存缓存 (可能在等待期间已被其他协程填充)
+                cached = self._bm25_per_namespace.get(ns)
+                if cached is not None and cached[1] == current_version:
+                    docs_combined.extend(cached[0])
+                    continue
+
+                # 加载语料 (Redis → Qdrant scroll)
+                docs = await self._load_namespace_corpus(ns, cache_uid, current_version)
+                self._bm25_per_namespace[ns] = (docs, current_version)
+                docs_combined.extend(docs)
+                any_changed = True
+
+        # 清理已不在检索列表中的 namespace 内存缓存 (避免无界增长)
+        # (使用 list 而非在原 dict 上迭代, 防止删除时修改字典)
+        stale_ns = [ns for ns in self._bm25_per_namespace if ns not in namespaces]
+        for ns in stale_ns:
+            del self._bm25_per_namespace[ns]
+            any_changed = True
+
+        # 仅当语料变化或 BM25 未初始化时重建 (避免每次检索都重建 BM25Okapi)
+        if any_changed or self._bm25 is None:
+            self.update_bm25_corpus(docs_combined)
+
+    async def invalidate_bm25_cache(
+        self,
+        namespace: str,
+        user_id: str | None = None,
+    ) -> None:
+        """失效 BM25 语料缓存 (文档新增/删除后由调用方触发).
+
+        增量更新策略:
+        - Redis 版本号 +1 (INCR), 旧版本缓存键自然失效 (下次 _ensure_bm25_corpus 重拉)
+        - 内存缓存清除该 namespace 条目 (下次 retrieve 重新加载)
+        - Redis 不可用时仅清内存缓存 (下次 retrieve 仍会从 Qdrant 拉, 行为正确)
+
+        典型调用场景:
+        - embed_and_index (新增文档) 后: 任务5 在 embeddings.py 调用
+            await get_retriever().invalidate_bm25_cache(namespace, user_id)
+        - delete_by_namespace (删除文档) 后: 调用方触发
+            await get_retriever().invalidate_bm25_cache(namespace, user_id)
+
+        Args:
+            namespace: 文档变更的 namespace.
+            user_id: 用户 ID (共享 ns 用 default; 用户私有 ns 用实际 user_id).
+        """
+        cache_uid = self._bm25_cache_uid(namespace, user_id)
+
+        # 1. 内存缓存清除 (无论 Redis 是否可用都清, 保证下次 retrieve 重拉)
+        self._bm25_per_namespace.pop(namespace, None)
+
+        # 2. Redis 版本号 INCR (旧缓存键自然失效)
+        if not self._redis_initialized:
+            await self._ensure_redis()
+        if self._redis is None:
+            logger.debug(
+                "Redis 不可用, BM25 缓存失效仅清内存 (namespace=%s, 下次 retrieve 从 Qdrant 拉)",
+                namespace,
+            )
+            return
+        try:
+            version_key = self._bm25_version_key(namespace, cache_uid)
+            new_version = await self._redis.incr(version_key)
+            logger.info(
+                "BM25 语料缓存已失效 (namespace=%s, user_id=%s, 新版本号=%d)",
+                namespace,
+                user_id,
+                new_version,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "BM25 缓存失效 Redis INCR 失败 (namespace=%s), 仅清内存: %s",
+                namespace,
+                e,
+            )
 
     async def close(self) -> None:
         """关闭资源.

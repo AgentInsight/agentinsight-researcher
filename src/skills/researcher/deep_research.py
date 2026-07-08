@@ -16,7 +16,10 @@ from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.context_manager import ContextManager
-from src.skills.researcher.mcp_coordinator import MCPCoordinator, get_user_mcp_configs
+from src.skills.researcher.mcp_coordinator import (
+    MCPCoordinator,
+    conduct_mcp_if_enabled,
+)
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
     BaseSearcher,
@@ -368,27 +371,14 @@ class DeepResearcher:
             )
 
             # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+            # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 research_conductor 的重复 28 行块
             # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
             context_parts: list[str] = []
-            if self.settings.mcp_strategy != "disabled":
-                try:
-                    mcp = self._get_mcp()
-                    mcp_configs = await get_user_mcp_configs(
-                        user_id or "", self.settings.agent_name
-                    )
-                    if mcp_configs:
-                        mcp_contexts = await mcp.conduct_research(
-                            sub_query,
-                            strategy=self.settings.mcp_strategy,
-                            mcp_configs=mcp_configs,
-                            user_id=user_id,
-                            session_id=session_id,
-                        )
-                        if mcp_contexts:
-                            # mcp_contexts 是 list[str], 拼接到 context
-                            context_parts.append("\n\n".join(mcp_contexts))
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("MCP 工具调用失败 (不阻断): %s", e)
+            mcp_contexts = await conduct_mcp_if_enabled(
+                self.settings, sub_query, user_id, session_id
+            )
+            if mcp_contexts:
+                context_parts.append("\n\n".join(mcp_contexts))
 
             # 压缩
             context = await self._context_manager.get_similar_content(

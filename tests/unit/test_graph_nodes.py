@@ -16,7 +16,6 @@ AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/Qdrant/Redis/Postgr
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -231,11 +230,10 @@ async def test_source_curator_node_filters_sources(
 
 @pytest.mark.asyncio
 async def test_source_curator_node_skips_when_disabled(
-    settings: Settings,
     base_state: ResearcherState,
 ) -> None:
     """测试 curate_sources=False 时返回空 delta (跳过策展)."""
-    # settings 默认 curate_sources=False
+    settings = Settings(_env_file=None, curate_sources=False)
     base_state["sources"] = [{"title": "src1"}]
     delta = await source_curator_node(base_state, settings=settings)
     assert delta == {}
@@ -588,9 +586,7 @@ async def test_reviser_node_increments_count(
     节点返回 1 由 reducer 累加 (AGENTS.md 第 5 章).
     """
     mock_reviser = MagicMock()
-    mock_reviser.revise = AsyncMock(
-        return_value={"report_md": "# 修订后报告\n\n改进内容"}
-    )
+    mock_reviser.revise = AsyncMock(return_value={"report_md": "# 修订后报告\n\n改进内容"})
     mock_reviser_cls.return_value = mock_reviser
 
     base_state["report_md"] = "# 原报告"
@@ -618,9 +614,7 @@ async def test_reviser_node_preserves_existing_formats(
 ) -> None:
     """测试 reviser_node 保留已有 report_formats 其他格式 (仅更新 md)."""
     mock_reviser = MagicMock()
-    mock_reviser.revise = AsyncMock(
-        return_value={"report_md": "# 新报告"}
-    )
+    mock_reviser.revise = AsyncMock(return_value={"report_md": "# 新报告"})
     mock_reviser_cls.return_value = mock_reviser
 
     base_state["report_md"] = "# 旧报告"

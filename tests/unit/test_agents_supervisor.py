@@ -66,7 +66,6 @@ def test_supervisor_routes_to_end(
 
 
 def test_supervisor_routes_to_revision(
-    settings: Settings,
     base_state: ResearcherState,
 ) -> None:
     """测试有上下文但无报告时路由到 "writer" (修订/生成步骤).
@@ -75,21 +74,18 @@ def test_supervisor_routes_to_revision(
     当有 contexts 但无 report_md 时, route 返回 "writer" (报告生成/修订节点),
     这是修订循环的入口. 此测试验证修订路径的路由条件.
     """
-    # 有上下文, 无报告, curate_sources=False (默认) → "writer"
+    settings = Settings(_env_file=None, curate_sources=False)
     base_state["status"] = "running"
     base_state["contexts"] = ["上下文1", "上下文2"]
-    # curate_sources 默认 False, 无需 curated_sources
     base_state["report_md"] = ""  # 无报告 → 需生成/修订
 
     supervisor = ResearcherSupervisor(settings=settings)
     route = supervisor.route(base_state)
 
-    # 路由到 writer (报告生成/修订节点)
     assert route == "writer"
 
 
 def test_supervisor_routes_to_publish(
-    settings: Settings,
     base_state: ResearcherState,
 ) -> None:
     """测试有报告且 report_format != "markdown" 时路由到 "publisher".
@@ -98,16 +94,17 @@ def test_supervisor_routes_to_publish(
     当 report_md 存在且 report_format 为非 markdown (如 pdf/html) 时,
     route 返回 "publisher" (格式转换节点).
     """
-    # 有报告, report_format=pdf → "publisher"
+    settings = Settings(_env_file=None, curate_sources=True)
+    # 有报告, report_format=pdf, 且有 curated_sources → "publisher"
     base_state["status"] = "running"
     base_state["contexts"] = ["上下文1"]
+    base_state["curated_sources"] = [{"title": "src1"}]
     base_state["report_md"] = "# 报告\n\n正文内容"
     base_state["report_format"] = "pdf"
 
     supervisor = ResearcherSupervisor(settings=settings)
     route = supervisor.route(base_state)
 
-    # 路由到 publisher (发布/格式转换节点)
     assert route == "publisher"
 
 
@@ -125,12 +122,13 @@ def test_supervisor_routes_to_researcher_when_pending(
 
 
 def test_supervisor_routes_to_end_when_report_markdown_complete(
-    settings: Settings,
     base_state: ResearcherState,
 ) -> None:
     """测试有 markdown 报告且无格式转换需求时返回 "END" (流程完成)."""
+    settings = Settings(_env_file=None, curate_sources=True)
     base_state["status"] = "running"
     base_state["contexts"] = ["上下文1"]
+    base_state["curated_sources"] = [{"title": "src1"}]
     base_state["report_md"] = "# 报告\n\n正文"
     base_state["report_format"] = "markdown"  # 默认格式, 无需转换
 

@@ -80,13 +80,13 @@ def test_split_documents_source_field_from_url() -> None:
     assert chunks[0]["source"] == "https://example.com/page"
 
 
-# ========== _cosine_similarity ==========
+# ========== _cosine_similarity_batch ==========
 
 
 def test_cosine_similarity_identical_vectors_returns_1() -> None:
     """测试相同向量余弦相似度为 1.0."""
     vec = [1.0, 2.0, 3.0]
-    sim = ContextManager._cosine_similarity(vec, vec)
+    sim = ContextManager._cosine_similarity_batch([vec], [vec])[0, 0]
     assert sim == pytest.approx(1.0, rel=1e-6)
 
 
@@ -94,42 +94,45 @@ def test_cosine_similarity_orthogonal_vectors_returns_0() -> None:
     """测试正交向量余弦相似度为 0.0."""
     vec1 = [1.0, 0.0]
     vec2 = [0.0, 1.0]
-    sim = ContextManager._cosine_similarity(vec1, vec2)
-    assert sim == pytest.approx(0.0, abs=1e-9)
+    sim = ContextManager._cosine_similarity_batch([vec1], [vec2])[0, 0]
+    assert sim == pytest.approx(0.0, abs=1e-6)
 
 
 def test_cosine_similarity_opposite_vectors_returns_minus_1() -> None:
     """测试相反向量余弦相似度为 -1.0."""
     vec1 = [1.0, 1.0]
     vec2 = [-1.0, -1.0]
-    sim = ContextManager._cosine_similarity(vec1, vec2)
+    sim = ContextManager._cosine_similarity_batch([vec1], [vec2])[0, 0]
     assert sim == pytest.approx(-1.0, rel=1e-6)
 
 
 def test_cosine_similarity_empty_vectors_returns_0() -> None:
-    """测试空向量返回 0.0."""
-    assert ContextManager._cosine_similarity([], []) == 0.0
+    """测试空输入返回空矩阵 (shape=(0, 0))."""
+    result = ContextManager._cosine_similarity_batch([], [])
+    assert result.shape == (0, 0)
 
 
-def test_cosine_similarity_different_lengths_returns_0() -> None:
-    """测试长度不一致返回 0.0."""
+def test_cosine_similarity_different_lengths_raises() -> None:
+    """测试维度不一致时 numpy 矩阵乘法抛出 ValueError (批量 API 不兼容不同维度)."""
     vec1 = [1.0, 2.0, 3.0]
     vec2 = [1.0, 2.0]
-    assert ContextManager._cosine_similarity(vec1, vec2) == 0.0
+    with pytest.raises(ValueError):
+        ContextManager._cosine_similarity_batch([vec1], [vec2])
 
 
 def test_cosine_similarity_zero_vector_returns_0() -> None:
-    """测试零向量 (norm=0) 返回 0.0 (避免除零)."""
+    """测试零向量 (norm=0) 返回 0.0 (避免除零, 范数置 1)."""
     vec1 = [0.0, 0.0]
     vec2 = [1.0, 2.0]
-    assert ContextManager._cosine_similarity(vec1, vec2) == 0.0
+    sim = ContextManager._cosine_similarity_batch([vec1], [vec2])[0, 0]
+    assert sim == pytest.approx(0.0, abs=1e-6)
 
 
 def test_cosine_similarity_partial_similarity() -> None:
     """测试部分相似向量 (0 < sim < 1)."""
     vec1 = [1.0, 0.0]
     vec2 = [1.0, 1.0]
-    sim = ContextManager._cosine_similarity(vec1, vec2)
+    sim = ContextManager._cosine_similarity_batch([vec1], [vec2])[0, 0]
     # cos(45°) = sqrt(2)/2 ≈ 0.7071
     assert 0.5 < sim < 0.9
 

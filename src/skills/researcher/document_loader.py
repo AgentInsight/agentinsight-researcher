@@ -10,6 +10,20 @@
 - AzureBlobLoader: 可选, 需 azure-storage-blob (用 try/except import).
 - 工厂函数 get_document_loader(source): 按 source 形态自动路由.
 
+接入主流程 (P0-02 用户文件上传 RAG 链路):
+    routes.py upload_file 端点应调用本模块提取文档内容, 再调用
+    EmbeddingsClient.embed_and_index 索引到 Qdrant 用户私有 namespace:
+        loader = get_document_loader(file_path, settings)
+        docs = await loader.load(file_path)
+        texts = [d.page_content for d in docs]
+        await embeddings.embed_and_index(
+            texts,
+            namespace=f"{agent_id}:{user_id}",
+            user_id=user_id,
+            session_id=session_id,
+        )
+    注: routes.py 的 upload_file 端点接入由任务1/5负责, 本模块仅保证工厂可用.
+
 依赖说明 (不在 requirements.txt 中的可选依赖):
 - PyMuPDF (fitz): 已在 requirements.txt (PDF 解析).
 - python-docx / openpyxl / python-pptx: 已在 requirements.txt.
@@ -275,104 +289,7 @@ class LocalDocumentLoader(DocumentLoader):
         with open(path, encoding="utf-8", errors="ignore") as f:
             html = f.read()
         soup = BeautifulSoup(html, "html.parser")
-        return cast("str", soup.get_text(separator="\n", strip=True))
-
-
-# ========== AzureBlobLoader (可选) ==========
-
-
-class AzureBlobLoader(DocumentLoader):
-    """从 Azure Blob Storage 加载文档 (可选).
-
-    对标 GPT Researcher document/azure_blob.py + langchain AzureBlobStorageContainerLoader.
-    依赖 azure-storage-blob (不在 requirements.txt, 需手动安装).
-
-    source 格式: blob URL 或 "container/blob" 路径.
-    连接串从环境变量 AZURE_STORAGE_CONNECTION_STRING 注入 (不进 Settings SSOT,
-    避免污染主配置; 该 Loader 为可选组件).
-    """
-
-    async def load(self, source: str) -> list[Document]:
-        """从 Azure Blob 下载并加载文档."""
-        try:
-            from azure.storage.blob import BlobServiceClient
-        except ImportError:
-            logger.warning(
-                "azure-storage-blob 未安装, AzureBlobLoader 不可用; "
-                "请 pip install azure-storage-blob"
-            )
-            return []
-
-        conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
-        if not conn_str:
-            logger.warning("AZURE_STORAGE_CONNECTION_STRING 未配置, AzureBlobLoader 跳过")
-            return []
-
-        # 解析 source: container/blob 形式
-        container, blob_name = self._parse_source(source)
-        if not container or not blob_name:
-            logger.warning("AzureBlobLoader source 格式无效 (期望 container/blob): %s", source)
-            return []
-
-        try:
-            client = BlobServiceClient.from_connection_string(conn_str)
-            blob_client = client.get_blob_client(container=container, blob=blob_name)
-
-            # 同步下载 (用 to_thread 包装避免阻塞事件循环)
-            def _download() -> bytes:
-                stream = blob_client.download_blob()
-                return cast("bytes", stream.readall())
-
-            data = await asyncio.to_thread(_download)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("AzureBlobLoader 下载失败 %s: %s", source, e)
-            return []
-
-        # 写入临时文件后复用 LocalDocumentLoader 按扩展名解析
-        tmp_path = await asyncio.to_thread(self._write_temp, data, blob_name)
-        try:
-            local_loader = LocalDocumentLoader(self.settings)
-            docs = await local_loader.load(tmp_path)
-            # 修正 source 元数据为原始 blob URI
-            for d in docs:
-                d.metadata["source"] = source
-                d.metadata["azure_container"] = container
-                d.metadata["azure_blob"] = blob_name
-            return docs
-        finally:
-            try:
-                await asyncio.to_thread(os.remove, tmp_path)
-            except OSError:
-                pass
-
-    @staticmethod
-    def _parse_source(source: str) -> tuple[str, str]:
-        """解析 source 为 (container, blob_name).
-
-        支持两种格式:
-        - "container/blob/path.pdf"
-        - Azure Blob URL "https://<account>.blob.core.windows.net/<container>/<blob>"
-        """
-        if source.startswith(("http://", "https://")):
-            parsed = urlparse(source)
-            parts = parsed.path.lstrip("/").split("/", 1)
-            if len(parts) != 2:
-                return "", ""
-            return parts[0], parts[1]
-        parts = source.split("/", 1)
-        if len(parts) != 2:
-            return "", ""
-        return parts[0], parts[1]
-
-    @staticmethod
-    def _write_temp(data: bytes, blob_name: str) -> str:
-        """写入临时文件, 后缀与 blob_name 一致."""
-        import tempfile
-
-        _, ext = os.path.splitext(blob_name)
-        with tempfile.NamedTemporaryFile(suffix=ext or ".bin", delete=False) as f:
-            f.write(data)
-            return f.name
+        return soup.get_text(separator="\n", strip=True)
 
 
 # ========== 工厂函数 ==========

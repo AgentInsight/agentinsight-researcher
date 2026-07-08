@@ -26,11 +26,12 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import litellm
 import orjson
 
+from src.common.llm_key_resolver import resolve_api_key
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_generation
 
@@ -135,38 +136,31 @@ class LLMClient:
         LLMTier.SMART: LLMTier.FAST,
         LLMTier.FAST: None,
     }
+    # P2/P1-3: tier → Settings 字段名字典查表, 取代 3 个 if-elif 链
+    _TIER_MODEL_FIELD: ClassVar[dict[LLMTier, str]] = {
+        LLMTier.FAST: "fast_llm",
+        LLMTier.SMART: "smart_llm",
+        LLMTier.STRATEGIC: "strategic_llm",
+    }
+    _TIER_TOKEN_LIMIT_FIELD: ClassVar[dict[LLMTier, str]] = {
+        LLMTier.FAST: "fast_token_limit",
+        LLMTier.SMART: "smart_token_limit",
+        LLMTier.STRATEGIC: "strategic_token_limit",
+    }
 
     def _get_model(self, tier: LLMTier) -> str:
-        """按层级获取模型名."""
-        if tier == LLMTier.FAST:
-            return self.settings.fast_llm
-        if tier == LLMTier.SMART:
-            return self.settings.smart_llm
-        if tier == LLMTier.STRATEGIC:
-            return self.settings.strategic_llm
-        raise ValueError(f"未知 LLM 层级: {tier}")
+        """按层级获取模型名 (P2: 字典查表取代 if-elif)."""
+        field = self._TIER_MODEL_FIELD.get(tier)
+        if field is None:
+            raise ValueError(f"未知 LLM 层级: {tier}")
+        return cast(str, getattr(self.settings, field))
 
     def _get_token_limit(self, tier: LLMTier) -> int:
-        """按层级获取 token 上限."""
-        if tier == LLMTier.FAST:
-            return self.settings.fast_token_limit
-        if tier == LLMTier.SMART:
-            return self.settings.smart_token_limit
-        if tier == LLMTier.STRATEGIC:
-            return self.settings.strategic_token_limit
-        return 4000
-
-    def _get_api_key(self, model: str) -> str | None:
-        """按 LiteLLM 路由前缀获取对应 API Key."""
-        if model.startswith("deepseek/"):
-            return self.settings.deepseek_api_key
-        if model.startswith("openai/"):
-            return self.settings.openai_api_key
-        if model.startswith("anthropic/"):
-            return self.settings.anthropic_api_key
-        if model.startswith("zhipu/") or model.startswith("zhipuai/"):
-            return self.settings.zhipu_api_key
-        return None
+        """按层级获取 token 上限 (P2: 字典查表取代 if-elif)."""
+        field = self._TIER_TOKEN_LIMIT_FIELD.get(tier)
+        if field is None:
+            return 4000
+        return cast(int, getattr(self.settings, field))
 
     def _adapt_zhipu(self, model: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """智谱 AI OpenAI 兼容端点适配.
@@ -277,7 +271,7 @@ class LLMClient:
         model = self._get_model(tier)
         token_limit = max_tokens or self._get_token_limit(tier)
         temp = temperature if temperature is not None else self.settings.temperature
-        api_key = self._get_api_key(model)
+        api_key = resolve_api_key(model, self.settings)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -316,9 +310,14 @@ class LLMClient:
 
     # ========== P2-2: LLM 响应缓存 (Redis) ==========
     # 用户硬约束: "出错了不要存缓存" — 仅缓存成功响应, 异常/错误响应绝不缓存.
-    # 仅缓存 temperature=0 的请求 (temperature>0 结果不确定, 不缓存).
+    # P1-4: 放宽缓存条件 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
+    # (planner/curator/context-summarize 等场景 temperature=0.2/0.3, 结构化 JSON 解析
+    # 不受轻微随机性影响; 可通过本常量回退到 0.0 严格模式).
     # 流式响应 (achat_stream) 不缓存 (流式无法等价复用).
     # Redis 不可用时降级为不缓存, 不阻断主流程; 缓存写入失败仅 warn 不抛出.
+
+    # P1-4: 缓存允许的最大温度 (≤ 此值才缓存). 设为 0.0 即回退严格模式.
+    _CACHE_MAX_TEMPERATURE: ClassVar[float] = 0.3
 
     def _llm_cache_key(
         self,
@@ -337,7 +336,7 @@ class LLMClient:
         Args:
             messages: 消息列表.
             model: 模型名.
-            temperature: 温度 (仅 0.0 时调用方才会缓存).
+            temperature: 温度 (P1-4: ≤ _CACHE_MAX_TEMPERATURE 时调用方才会缓存).
             max_tokens: 最大输出 token 数.
             stop: 停止序列 (影响输出, 必须纳入 key 保证正确性).
 
@@ -446,8 +445,10 @@ class LLMClient:
         P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
         P1-Future-05: tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
         外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
-        P2-2: temperature=0 时接入 Redis 响应缓存, 命中直接返回 (跳过 LLM 调用);
+        P2-2: temperature ≤ _CACHE_MAX_TEMPERATURE 时接入 Redis 响应缓存,
+              命中直接返回 (跳过 LLM 调用);
               仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
+        P1-4: 放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
         """
         # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
         initial_model = self._get_model(tier)
@@ -459,10 +460,11 @@ class LLMClient:
             "timeout": self.settings.llm_timeout,
         }
 
-        # P2-2: LLM 响应缓存 — 仅 temperature=0 时缓存 (温度>0 结果不确定, 不缓存)
+        # P1-4: LLM 响应缓存 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
+        # (planner=0.2 / curator=0.2 / context-summarize=0.3 均可命中; >0.3 仍不缓存)
         # 缓存命中直接返回, 跳过 trace span (无 LLM 调用, 无需追踪 generation)
         cache_key: str | None = None
-        if self.settings.llm_response_cache_enabled and initial_temp == 0.0:
+        if self.settings.llm_response_cache_enabled and initial_temp <= self._CACHE_MAX_TEMPERATURE:
             cache_key = self._llm_cache_key(
                 messages, initial_model, initial_temp, initial_token_limit, stop
             )
@@ -641,7 +643,7 @@ class LLMClient:
                 used_tier = current_tier
                 token_limit = max_tokens or self._get_token_limit(current_tier)
                 temp = temperature if temperature is not None else self.settings.temperature
-                api_key = self._get_api_key(used_model)
+                api_key = resolve_api_key(used_model, self.settings)
                 kwargs: dict[str, Any] = {
                     "model": used_model,
                     "messages": messages,

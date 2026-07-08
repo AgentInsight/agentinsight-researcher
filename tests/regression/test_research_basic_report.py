@@ -141,3 +141,177 @@ def test_basic_report_stream() -> None:
     )
     # 验证 SSE 帧数 (首块 + 内容块 + 末块)
     assert chunks_count >= 3, f"SSE 帧数不足: {chunks_count}"
+
+
+# ========== 异步回归测试 (httpx.AsyncClient, 仅验证 HTTP 状态码/响应头, 不依赖完整 LLM 研究) ==========
+# AGENTS.md 第 13 章: 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
+# 流式研究请求的 StreamingResponse 在查询分类后立即返回 200 + headers,
+# 实际研究 (SMART LLM/检索) 在流式生成器中执行, 不消费流式体即不阻塞.
+
+# 异步测试超时 (仅验证 HTTP 头/状态码, 不等待完整研究)
+ASYNC_TEST_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+
+
+@pytest.mark.regression
+async def test_detailed_report_stream_headers_accepted() -> None:
+    """detailed_report 流式路由: stream=true → 200 + text/event-stream + X-Session-Id.
+
+    覆盖 report_type=detailed_report. 仅验证响应头 (StreamingResponse 立即返回),
+    不消费流式体, 不依赖完整 SMART LLM 研究.
+    """
+    sid = _unique_session_id()
+    _log(f"detailed_report 流式开始: session={sid}")
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "分析 Python 异步编程的核心优势与应用场景"}],
+                "stream": True,
+                "report_type": "detailed_report",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"detailed_report 流式响应非 200: {r.status_code}"
+            content_type = r.headers.get("content-type", "")
+            assert "text/event-stream" in content_type, (
+                f"content-type 非 text/event-stream: {content_type}"
+            )
+            assert r.headers.get("x-session-id") == sid, (
+                f"X-Session-Id 不匹配: 期望={sid}, 实际={r.headers.get('x-session-id')}"
+            )
+    _log(f"detailed_report 流式响应头验证通过: session={sid}")
+
+
+@pytest.mark.regression
+async def test_summary_report_stream_headers_accepted() -> None:
+    """summary 流式路由: stream=true → 200 + text/event-stream.
+
+    覆盖 report_type=summary (ResearchConductor._conduct_summary).
+    """
+    sid = _unique_session_id()
+    _log(f"summary 流式开始: session={sid}")
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "简述 Rust 语言的内存安全机制"}],
+                "stream": True,
+                "report_type": "summary",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"summary 流式响应非 200: {r.status_code}"
+            assert "text/event-stream" in r.headers.get("content-type", ""), (
+                f"content-type 非 text/event-stream: {r.headers.get('content-type')}"
+            )
+    _log(f"summary 流式响应头验证通过: session={sid}")
+
+
+@pytest.mark.regression
+async def test_subtopics_report_stream_headers_accepted() -> None:
+    """subtopics 流式路由: stream=true → 200 + text/event-stream.
+
+    覆盖 report_type=subtopics (ResearchConductor._conduct_subtopics).
+    """
+    sid = _unique_session_id()
+    _log(f"subtopics 流式开始: session={sid}")
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "梳理 Kubernetes 网络插件的核心子主题"}],
+                "stream": True,
+                "report_type": "subtopics",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"subtopics 流式响应非 200: {r.status_code}"
+            assert "text/event-stream" in r.headers.get("content-type", ""), (
+                f"content-type 非 text/event-stream: {r.headers.get('content-type')}"
+            )
+    _log(f"subtopics 流式响应头验证通过: session={sid}")
+
+
+@pytest.mark.regression
+async def test_deep_research_stream_headers_accepted() -> None:
+    """deep_research 流式路由: stream=true → 200 + text/event-stream.
+
+    覆盖 report_type=deep_research (research_mode=deep, 递归深度研究).
+    仅验证响应头, 不等待递归研究完成.
+    """
+    sid = _unique_session_id()
+    _log(f"deep_research 流式开始: session={sid}")
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "深入研究大语言模型在代码生成领域的最新进展"}],
+                "stream": True,
+                "report_type": "deep_research",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"deep_research 流式响应非 200: {r.status_code}"
+            assert "text/event-stream" in r.headers.get("content-type", ""), (
+                f"content-type 非 text/event-stream: {r.headers.get('content-type')}"
+            )
+    _log(f"deep_research 流式响应头验证通过: session={sid}")
+
+
+@pytest.mark.regression
+async def test_invalid_report_type_list_returns_422() -> None:
+    """report_type 为列表类型 → 422 (Pydantic 校验失败, 错误降级).
+
+    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    report_type 字段为 str | None, 传入 list 应被拒绝.
+    """
+    sid = _unique_session_id()
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        r = await client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+                "session_id": sid,
+                "report_type": ["basic_report"],  # list, 非 str
+            },
+        )
+    assert r.status_code == 422, (
+        f"report_type=list 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.regression
+async def test_unknown_report_type_string_stream_no_5xx() -> None:
+    """未知 report_type 字符串流式: stream=true → 200 (降级为 basic, 不 5xx 崩溃).
+
+    AGENTS.md 第 11 章: 未知 report_type 应降级为默认值, 不应崩溃.
+    routes.py 将未知 type 映射为 research_mode=basic, StreamingResponse 立即返回.
+    """
+    sid = _unique_session_id()
+    _log(f"未知 report_type 流式开始: session={sid}")
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "分析 Go 语言的并发模型"}],
+                "stream": True,
+                "report_type": "unknown_type_xyz",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code < 500, (
+                f"未知 report_type 不应 5xx, 实际: {r.status_code}"
+            )
+    _log(f"未知 report_type 降级验证通过: status={r.status_code}, session={sid}")

@@ -104,6 +104,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await _PlaywrightPool.shutdown()
 
+    # P0-7: 关闭共享 httpx.AsyncClient 单例 (scraper 复用 TCP 连接池, P1-3)
+    # 释放底层 TCP 连接池, 避免依赖进程退出回收; 幂等 (无实例时直接返回)
+    from src.skills.researcher.scrapers import close_shared_http_client
+
+    await close_shared_http_client()
+
     logger.info("agentinsight-researcher 关闭")
 
 

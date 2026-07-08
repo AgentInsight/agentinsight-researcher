@@ -1,15 +1,19 @@
 """Postgres Checkpointer 配置.
 
 AGENTS.md 第 3/6 章硬约束:
-- 生产 StateGraph 必须挂 PostgresSaver (PostgreSQL ≥16)
-- 内存 Checkpoint 仅 ENV=dev 允许
+- StateGraph 必须挂 PostgresSaver (PostgreSQL ≥16)
 - thread_id 从请求上下文注入做会话隔离键, 禁止客户端自造
+
+分支优化方案 P-Checkpointer: 工厂统一 PostgresSaver.
+- 移除 dev/prod 分支与 MemorySaver 降级, 全部使用 PostgresSaver
+  (开发环境也需 postgres, 强制依赖一致性, 避免 dev/prod 行为漂移).
+- 连接失败时抛出异常 (fail fast), 由调用方决定是否阻断启动.
 
 对标 AgentInsightService common/memory.py.
 
 P0-02: 连接池复用.
 - 模块级单例 _checkpointer_instance 避免每次调用创建新连接.
-- 生产用 AsyncPostgresSaver + AsyncConnectionPool 复用同一 asyncpg 连接池,
+- AsyncPostgresSaver + AsyncConnectionPool 复用同一 asyncpg 连接池,
   池 min/max 从 settings.postgres_pool_min_size/postgres_pool_max_size 读取.
 - 双重检查锁 (_pool_lock) 保证并发安全.
 """
@@ -32,19 +36,20 @@ _pool_lock = asyncio.Lock()
 async def get_checkpointer(settings: Settings | None = None) -> Any:
     """获取 LangGraph Checkpointer 单例 (P0-02 连接池复用).
 
-    AGENTS.md 第 6 章:
-    - 生产 (ENV=prod): PostgresSaver (复用 AsyncConnectionPool)
-    - 开发 (ENV=dev): MemorySaver (允许)
+    分支优化方案 P-Checkpointer: 统一 PostgresSaver.
+    - 移除 dev/prod 分支, 所有环境均使用 PostgresSaver
+      (开发环境也需 postgres, 保证 dev/prod 行为一致).
+    - 连接池创建/setup 失败时抛出 RuntimeError (fail fast),
+      由调用方决定是否阻断启动 (server.py lifespan 捕获后告警但不阻断).
 
     双重检查锁保证并发场景下只创建一个实例; 首次调用 settings 生效,
     后续调用忽略 settings 参数直接返回已建单例.
 
-    降级策略: 生产环境连接池创建/setup 失败时, 记录 ERROR 并回退到
-    MemorySaver, 保证服务可用 (AGENTS.md 第 6 章 prod 强制 PostgresSaver,
-    但服务可用性优先, 降级时显式告警).
-
     Returns:
-        已 setup() 的 Checkpointer 实例.
+        已 setup() 的 AsyncPostgresSaver 实例.
+
+    Raises:
+        RuntimeError: PostgresSaver 初始化失败 (连接池创建/setup 异常).
     """
     global _checkpointer_instance
 
@@ -59,30 +64,29 @@ async def get_checkpointer(settings: Settings | None = None) -> Any:
         if _checkpointer_instance is not None:
             return _checkpointer_instance
 
-        if settings.env == "prod":
-            _checkpointer_instance = await _create_postgres_checkpointer(settings)
-        else:
-            # 开发环境允许 MemorySaver
-            from langgraph.checkpoint.memory import MemorySaver
-
-            _checkpointer_instance = MemorySaver()
-            logger.info("MemorySaver 已初始化 (开发环境)")
-
+        _checkpointer_instance = await _create_postgres_checkpointer(settings)
         return _checkpointer_instance
 
 
 async def _create_postgres_checkpointer(settings: Settings) -> Any:
-    """创建生产 AsyncPostgresSaver (P0-02 连接池复用).
+    """创建 AsyncPostgresSaver (P0-02 连接池复用).
 
     用 AsyncConnectionPool 复用连接, 池 min/max 从
     settings.postgres_pool_min_size/postgres_pool_max_size 读取
-    (P2-6 配置化, 支持按负载调整). 创建/setup 失败时降级到 MemorySaver 并告警.
+    (P2-6 配置化, 支持按负载调整).
+
+    分支优化方案 P-Checkpointer: 移除 MemorySaver 降级.
+    连接池创建/setup 失败时记录 ERROR 并抛出 RuntimeError (fail fast),
+    不再回退 MemorySaver (避免 dev/prod 行为漂移, 强制 postgres 可用).
 
     Args:
         settings: 全局配置.
 
     Returns:
-        AsyncPostgresSaver 实例 (已 setup); 失败时返回 MemorySaver (降级).
+        AsyncPostgresSaver 实例 (已 setup).
+
+    Raises:
+        RuntimeError: 连接池创建/setup 失败 (包装原始异常).
     """
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -113,18 +117,16 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
         await checkpointer.setup()
 
         logger.info(
-            "PostgresSaver 已初始化 (生产环境, 连接池复用, min=%d max=%d)",
+            "PostgresSaver 已初始化 (连接池复用, min=%d max=%d)",
             min_size,
             max_size,
         )
         return checkpointer
     except Exception as exc:  # noqa: BLE001
-        # 降级: 连接池创建/setup 失败, 回退 MemorySaver 并告警
+        # 分支优化: 不再降级 MemorySaver, 抛出异常由调用方处理
         logger.error(
-            "PostgresSaver 初始化失败, 降级到 MemorySaver (生产环境降级告警): %s",
+            "PostgresSaver 初始化失败 (不降级 MemorySaver, fail fast): %s",
             exc,
             exc_info=True,
         )
-        from langgraph.checkpoint.memory import MemorySaver
-
-        return MemorySaver()
+        raise RuntimeError(f"PostgresSaver 初始化失败: {exc}") from exc

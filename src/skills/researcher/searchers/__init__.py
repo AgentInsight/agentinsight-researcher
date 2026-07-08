@@ -14,6 +14,10 @@ v1.1 新增:
 - 质量评分 + 免费额度综合排序 (优先级组 0-3)
 - QuotaCache 额度缓存机制 (额度已满引擎跳过, TTL 最高 24 小时)
 - get_searchers_async() 异步版本支持额度缓存检查
+
+P1-1 重构: 引入 @register_searcher 装饰器注册表, 取代 11 个 if-else 散点.
+各 searcher 在自身类定义处用装饰器声明 name/regions/require_key 等元数据,
+get_searchers() 遍历注册表按 require_key 自动过滤, 新增引擎只需加装饰器.
 """
 
 from __future__ import annotations
@@ -184,116 +188,38 @@ def get_searchers(
     - GLOBAL 区域加入 GDELT + HackerNews + GitHub + CrossRef
     - ACADEMIC 区域加入 CrossRef + Unpaywall
     - 末尾应用质量评分 + 免费额度综合排序
+
+    P1-1 重构: 遍历 _SEARCHER_REGISTRY 注册表按 require_key 自动过滤,
+    取代原 11 个 if settings.<engine>_api_key: 散点. 新增引擎只需在类定义处
+    加 @register_searcher 装饰器, 无需改本函数.
     """
     settings = settings or get_settings()
+    # P1-1: 首次调用时触发延迟注册 (避免模块加载时循环导入)
+    if not _SEARCHER_REGISTRY:
+        _register_all_searchers()
     searchers: list[BaseSearcher] = []
 
-    # 学术区域优先: PubMed + Semantic Scholar + Arxiv + OpenAlex + CrossRef + Unpaywall
-    if region == SearchRegion.ACADEMIC:
-        from src.skills.researcher.searchers.arxiv import ArxivSearcher
-        from src.skills.researcher.searchers.crossref import CrossRefSearcher
-        from src.skills.researcher.searchers.openalex import OpenAlexSearcher
-        from src.skills.researcher.searchers.pubmed_searcher import PubMedSearcher
-        from src.skills.researcher.searchers.semantic_scholar_searcher import (
-            SemanticScholarSearcher,
-        )
-        from src.skills.researcher.searchers.unpaywall import UnpaywallSearcher
+    # P1-1: 遍历注册表, 按 region + require_key 自动过滤
+    for _name, spec in _SEARCHER_REGISTRY.items():
+        # 区域过滤
+        if region not in spec["regions"]:
+            continue
 
-        searchers.append(PubMedSearcher(settings))
-        searchers.append(SemanticScholarSearcher(settings))
-        searchers.append(ArxivSearcher(settings))
-        searchers.append(OpenAlexSearcher(settings))
-        searchers.append(CrossRefSearcher(settings))  # v1.1 新增: DOI 权威
-        searchers.append(UnpaywallSearcher(settings))  # v1.1 新增: OA 查找
-        # v1.1 综合排序
-        searchers.sort(key=_sort_key)
-        return searchers
+        # Key 校验 (require_key 为 None 表示无需 Key 的免费引擎)
+        require_key = spec["require_key"]
+        if require_key is not None:
+            # 多 Key 支持: require_key 为 tuple 时任一 Key 配置即启用 (如 serpapi 同时注册 Google+SerpApi)
+            if isinstance(require_key, tuple):
+                if not any(getattr(settings, k, None) for k in require_key):
+                    continue
+            elif not getattr(settings, require_key, None):
+                continue
 
-    if region in (SearchRegion.CN, SearchRegion.AUTO):
-        # 国内搜索 (中文优先)
-        from src.skills.researcher.searchers.bocha import BochaSearcher
-        from src.skills.researcher.searchers.duckduckgo import DuckDuckGoSearcher
-        from src.skills.researcher.searchers.gdelt import GDELTSearcher
-        from src.skills.researcher.searchers.hackernews import HackerNewsSearcher
+        # 实例化
+        cls = spec["class"]
+        searchers.append(cls(settings))
 
-        if settings.bocha_api_key:
-            searchers.append(BochaSearcher(settings))
-        # v1.1 新增: 秘塔 AI 搜索 (国内 AI 搜索主力)
-        if settings.metaso_api_key:
-            from src.skills.researcher.searchers.metaso import MetasoSearcher
-
-            searchers.append(MetasoSearcher(settings))
-        searchers.append(DuckDuckGoSearcher(settings))  # 兜底, 无需 Key
-        # v1.1 新增: GDELT 新闻 + Hacker News (免费, 无需 Key)
-        searchers.append(GDELTSearcher(settings))
-        searchers.append(HackerNewsSearcher(settings))
-
-        # P0 修复: CN 区域也启用已配置 Key 的国外引擎作为跨区域兜底
-        # 避免 Bocha 单点失败导致全空结果
-        if settings.tavily_api_key:
-            from src.skills.researcher.searchers.tavily import TavilySearcher
-
-            searchers.append(TavilySearcher(settings))
-        # v1.1 新增: Exa 加入 CN 区域作为 AI 搜索兜底 (与 Tavily 形成双 AI 覆盖)
-        if settings.exa_api_key:
-            from src.skills.researcher.searchers.exa import ExaSearcher
-
-            searchers.append(ExaSearcher(settings))
-
-    if region in (SearchRegion.GLOBAL, SearchRegion.AUTO):
-        # 国外搜索 (按 API Key 是否配置决定是否加入)
-        from src.skills.researcher.searchers.arxiv import ArxivSearcher
-        from src.skills.researcher.searchers.bing_searcher import BingSearcher
-        from src.skills.researcher.searchers.brave_searcher import BraveSearcher
-        from src.skills.researcher.searchers.crossref import CrossRefSearcher
-        from src.skills.researcher.searchers.exa import ExaSearcher
-        from src.skills.researcher.searchers.gdelt import GDELTSearcher
-        from src.skills.researcher.searchers.github import GitHubSearcher
-        from src.skills.researcher.searchers.google_searcher import GoogleSearcher
-        from src.skills.researcher.searchers.hackernews import HackerNewsSearcher
-        from src.skills.researcher.searchers.pubmed_searcher import PubMedSearcher
-        from src.skills.researcher.searchers.searchapi import SearchApiSearcher
-        from src.skills.researcher.searchers.searx import SearXNGSearcher
-        from src.skills.researcher.searchers.semantic_scholar_searcher import (
-            SemanticScholarSearcher,
-        )
-        from src.skills.researcher.searchers.serpapi import SerpApiSearcher
-        from src.skills.researcher.searchers.serper_searcher import SerperSearcher
-        from src.skills.researcher.searchers.tavily import TavilySearcher
-
-        if settings.tavily_api_key:
-            searchers.append(TavilySearcher(settings))
-        if settings.brave_api_key:
-            searchers.append(BraveSearcher(settings))
-        if settings.bing_api_key:
-            searchers.append(BingSearcher(settings))
-        if settings.serpapi_key:
-            searchers.append(GoogleSearcher(settings))
-            searchers.append(SerpApiSearcher(settings))
-        if settings.serper_api_key:
-            searchers.append(SerperSearcher(settings))
-        if settings.exa_api_key:
-            searchers.append(ExaSearcher(settings))
-        if settings.searchapi_api_key:
-            searchers.append(SearchApiSearcher(settings))
-        searchers.append(SearXNGSearcher(settings))
-        # v1.1 新增: GDELT + HackerNews + GitHub + CrossRef (免费/可选)
-        searchers.append(GDELTSearcher(settings))
-        searchers.append(HackerNewsSearcher(settings))
-        if settings.github_token:
-            searchers.append(GitHubSearcher(settings))
-        searchers.append(CrossRefSearcher(settings))
-        # Custom retriever (企业私有端点, 仅当环境变量配置时启用)
-        if os.getenv("CUSTOM_RETRIEVER_ENDPOINT"):
-            from src.skills.researcher.searchers.custom import CustomSearcher
-
-            searchers.append(CustomSearcher(settings))
-        # 学术引擎 (无需 Key, GLOBAL/AUTO 也加入)
-        searchers.append(ArxivSearcher(settings))
-        searchers.append(PubMedSearcher(settings))
-        searchers.append(SemanticScholarSearcher(settings))
-
-    # v1.1 新增: 质量评分 + 免费额度综合排序
+    # v1.1 综合排序
     searchers.sort(key=_sort_key)
     return searchers
 
@@ -366,34 +292,221 @@ def detect_region(query: str) -> SearchRegion:
     return SearchRegion.AUTO
 
 
-# ========== 插件注册表 (可选增强, 对标 GPTR 字典静态注册) ==========
-# 用装饰器注册 searcher, 不破坏现有 get_searchers() 函数式工厂.
-# 第三方扩展可通过 @register_searcher("xxx") 自注册, 再由
-# get_registered_searchers() 查询, 未来可逐步迁移工厂到注册表驱动.
-_SEARCHER_REGISTRY: dict[str, type[BaseSearcher]] = {}
+# ========== P1-1: 搜索引擎注册表 (对标 GPTR VALID_RETRIEVERS + 装饰器模式) ==========
+# @register_searcher 装饰器在类定义处声明元数据 (name/regions/require_key),
+# get_searchers() 遍历注册表自动按 region + require_key 过滤实例化.
+# 新增引擎只需在引擎类上加 @register_searcher 装饰器, 无需改 get_searchers.
+_SEARCHER_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
 def register_searcher(
     name: str,
+    *,
+    regions: tuple[SearchRegion, ...] = (SearchRegion.GLOBAL, SearchRegion.AUTO),
+    require_key: str | tuple[str, ...] | None = None,
 ) -> Callable[[type[BaseSearcher]], type[BaseSearcher]]:
-    """搜索引擎注册装饰器.
+    """搜索引擎注册装饰器 (P1-1).
 
     Args:
-        name: 注册键名 (如 "custom").
+        name: 引擎注册键名 (如 "bocha")
+        regions: 适用的区域列表 (默认 GLOBAL+AUTO)
+        require_key: 必需的 Settings API Key 字段名; None 表示无需 Key 的免费引擎;
+            tuple 表示多 Key 任一配置即启用 (如 serpapi 同时注册 Google+SerpApi)
 
     Returns:
-        类装饰器, 将 cls 注册到 _SEARCHER_REGISTRY 后原样返回.
+        类装饰器, 将 cls + 元数据注册到 _SEARCHER_REGISTRY 后原样返回.
     """
 
     def decorator(cls: type[BaseSearcher]) -> type[BaseSearcher]:
-        _SEARCHER_REGISTRY[name] = cls
+        _SEARCHER_REGISTRY[name] = {
+            "class": cls,
+            "regions": regions,
+            "require_key": require_key,
+        }
         return cls
 
     return decorator
 
 
-def get_registered_searchers() -> dict[str, type[BaseSearcher]]:
-    """返回已注册的搜索引擎字典 (浅拷贝, 防外部篡改)."""
+def _register_all_searchers() -> None:
+    """P1-1: 集中注册所有内置搜索引擎 (延迟导入避免循环依赖).
+
+    各 searcher 按区域 + Key 要求注册到 _SEARCHER_REGISTRY:
+    - ACADEMIC 区域: PubMed/SemanticScholar/Arxiv/OpenAlex/CrossRef/Unpaywall (全免费)
+    - CN 区域: Bocha(require_key)/Metaso(require_key)/DuckDuckGo/GDELT/HackerNews/
+              Tavily(require_key, 跨区域兜底)/Exa(require_key, 跨区域兜底)
+    - GLOBAL 区域: Tavily/Brave/Bing/Google+SerpApi(共享 serpapi_key)/Serper/Exa/
+                   SearchApi/SearXNG/GDELT/HackerNews/GitHub(require_key)/CrossRef/
+                   Arxiv/PubMed/SemanticScholar/Custom(require env var)
+    - AUTO 区域: CN + GLOBAL 引擎并集
+
+    注: 先 clear() 清除各 searcher 模块导入时装饰器预注册的默认条目
+    (如 unpaywall_doi 不应出现在 GLOBAL/AUTO), 以本函数的显式注册为准.
+    """
+    # 清除装饰器预注册的默认条目, 以本函数的显式注册为准
+    _SEARCHER_REGISTRY.clear()
+    # ACADEMIC 区域引擎 (全部免费, 无需 Key)
+    from src.skills.researcher.searchers.arxiv import ArxivSearcher
+    from src.skills.researcher.searchers.crossref import CrossRefSearcher
+    from src.skills.researcher.searchers.openalex import OpenAlexSearcher
+    from src.skills.researcher.searchers.pubmed_searcher import PubMedSearcher
+    from src.skills.researcher.searchers.semantic_scholar_searcher import (
+        SemanticScholarSearcher,
+    )
+    from src.skills.researcher.searchers.unpaywall import UnpaywallSearcher
+
+    _SEARCHER_REGISTRY["pubmed"] = {
+        "class": PubMedSearcher,
+        "regions": (SearchRegion.ACADEMIC, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["semantic_scholar"] = {
+        "class": SemanticScholarSearcher,
+        "regions": (SearchRegion.ACADEMIC, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["arxiv"] = {
+        "class": ArxivSearcher,
+        "regions": (SearchRegion.ACADEMIC, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["openalex"] = {
+        "class": OpenAlexSearcher,
+        "regions": (SearchRegion.ACADEMIC,),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["crossref"] = {
+        "class": CrossRefSearcher,
+        "regions": (
+            SearchRegion.ACADEMIC,
+            SearchRegion.GLOBAL,
+            SearchRegion.AUTO,
+        ),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["unpaywall"] = {
+        "class": UnpaywallSearcher,
+        "regions": (SearchRegion.ACADEMIC,),
+        "require_key": None,
+    }
+
+    # CN 区域引擎 (DuckDuckGo/GDELT/HackerNews 免费; Bocha/Metaso/Tavily/Exa 需 Key)
+    from src.skills.researcher.searchers.bocha import BochaSearcher
+    from src.skills.researcher.searchers.duckduckgo import DuckDuckGoSearcher
+    from src.skills.researcher.searchers.exa import ExaSearcher
+    from src.skills.researcher.searchers.gdelt import GDELTSearcher
+    from src.skills.researcher.searchers.hackernews import HackerNewsSearcher
+    from src.skills.researcher.searchers.metaso import MetasoSearcher
+    from src.skills.researcher.searchers.tavily import TavilySearcher
+
+    _SEARCHER_REGISTRY["bocha"] = {
+        "class": BochaSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.AUTO),
+        "require_key": "bocha_api_key",
+    }
+    _SEARCHER_REGISTRY["metaso"] = {
+        "class": MetasoSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.AUTO),
+        "require_key": "metaso_api_key",
+    }
+    _SEARCHER_REGISTRY["duckduckgo"] = {
+        "class": DuckDuckGoSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["gdelt_cn"] = {
+        "class": GDELTSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["hackernews_cn"] = {
+        "class": HackerNewsSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    # CN 区域跨区域兜底引擎 (Tavily/Exa 在 CN/GLOBAL/AUTO 均注册)
+    _SEARCHER_REGISTRY["tavily"] = {
+        "class": TavilySearcher,
+        "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "tavily_api_key",
+    }
+    _SEARCHER_REGISTRY["exa"] = {
+        "class": ExaSearcher,
+        "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "exa_api_key",
+    }
+
+    # GLOBAL 区域专属引擎
+    from src.skills.researcher.searchers.bing_searcher import BingSearcher
+    from src.skills.researcher.searchers.brave_searcher import BraveSearcher
+    from src.skills.researcher.searchers.github import GitHubSearcher
+    from src.skills.researcher.searchers.google_searcher import GoogleSearcher
+    from src.skills.researcher.searchers.searchapi import SearchApiSearcher
+    from src.skills.researcher.searchers.searx import SearXNGSearcher
+    from src.skills.researcher.searchers.serpapi import SerpApiSearcher
+    from src.skills.researcher.searchers.serper_searcher import SerperSearcher
+
+    _SEARCHER_REGISTRY["brave"] = {
+        "class": BraveSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "brave_api_key",
+    }
+    _SEARCHER_REGISTRY["bing"] = {
+        "class": BingSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "bing_api_key",
+    }
+    # serpapi_key 同时启用 GoogleSearcher + SerpApiSearcher (用 tuple 多 Key 机制)
+    _SEARCHER_REGISTRY["google"] = {
+        "class": GoogleSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "serpapi_key",
+    }
+    _SEARCHER_REGISTRY["serpapi"] = {
+        "class": SerpApiSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "serpapi_key",
+    }
+    _SEARCHER_REGISTRY["serper"] = {
+        "class": SerperSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "serper_api_key",
+    }
+    _SEARCHER_REGISTRY["searchapi"] = {
+        "class": SearchApiSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "searchapi_api_key",
+    }
+    _SEARCHER_REGISTRY["searxng"] = {
+        "class": SearXNGSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": None,
+    }
+    _SEARCHER_REGISTRY["github"] = {
+        "class": GitHubSearcher,
+        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "require_key": "github_token",
+    }
+    # Custom retriever (企业私有端点, 仅当环境变量配置时启用)
+    # 注: CUSTOM_RETRIEVER_ENDPOINT 尚未收敛到 Settings (P0-1 记录需求),
+    # 此处用 env var 检查作为 require_key 的等价判断
+    if os.getenv("CUSTOM_RETRIEVER_ENDPOINT"):
+        from src.skills.researcher.searchers.custom import CustomSearcher
+
+        _SEARCHER_REGISTRY["custom"] = {
+            "class": CustomSearcher,
+            "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+            "require_key": None,  # 已通过 env var 检查, 不再要求 settings Key
+        }
+
+
+def get_registered_searchers() -> dict[str, dict[str, Any]]:
+    """返回已注册的搜索引擎字典 (浅拷贝, 防外部篡改).
+
+    P1-1: 首次调用时触发 _register_all_searchers() 延迟注册.
+    """
+    if not _SEARCHER_REGISTRY:
+        _register_all_searchers()
     return dict(_SEARCHER_REGISTRY)
 
 

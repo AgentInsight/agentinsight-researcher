@@ -74,9 +74,7 @@ def test_sustained_10_requests_no_degradation(agent_url: str) -> None:
                 json=_chat_payload("你好", sid),
             )
             elapsed = time.perf_counter() - start
-            assert r.status_code == 200, (
-                f"顺序请求 #{i} 非 200: {r.status_code} {r.text}"
-            )
+            assert r.status_code == 200, f"顺序请求 #{i} 非 200: {r.status_code} {r.text}"
             elapsed_list.append(elapsed)
 
     first = elapsed_list[0]
@@ -118,9 +116,7 @@ async def _run_session_query(
     return elapsed, r.status_code, expected_sid, resp_sid
 
 
-def test_concurrent_5_sessions_isolation(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_concurrent_5_sessions_isolation(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 5 个并发会话不同主题, 会话隔离 + 全部在 60s 内完成.
 
     AGENTS.md 第 6 章:
@@ -145,10 +141,7 @@ def test_concurrent_5_sessions_isolation(
 
     async def run_all() -> list[tuple[float, int, str, str]]:
         async with make_async_http_client(timeout=CONCURRENT_SESSION_TIMEOUT) as client:
-            tasks = [
-                _run_session_query(client, query, sid)
-                for query, sid in sessions
-            ]
+            tasks = [_run_session_query(client, query, sid) for query, sid in sessions]
             return await asyncio.gather(*tasks)
 
     start = time.perf_counter()
@@ -156,10 +149,8 @@ def test_concurrent_5_sessions_isolation(
     total_elapsed = time.perf_counter() - start
 
     # 验证全部成功 + 会话隔离
-    for i, (elapsed, status, req_sid, resp_sid) in enumerate(results):
-        assert status == 200, (
-            f"并发会话 #{i} (sid={req_sid}) 非 200: {status}"
-        )
+    for i, (_elapsed, status, req_sid, resp_sid) in enumerate(results):
+        assert status == 200, f"并发会话 #{i} (sid={req_sid}) 非 200: {status}"
         # X-Session-Id 应与请求一致 (非流式响应也携带此头)
         # 若中间件未在非流式响应头中注入 X-Session-Id, 跳过此断言 (容错)
         # 流式响应必带 X-Session-Id, 非流式可能不带

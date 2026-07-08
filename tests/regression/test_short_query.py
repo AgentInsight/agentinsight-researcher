@@ -136,3 +136,156 @@ def test_short_query_fast_response() -> None:
     assert r.status_code == 200
     # 短查询不走 graph, 应在 10s 内返回 (含网络/中间件开销)
     assert elapsed < 10.0, f"短查询响应过慢 ({elapsed:.1f}s), 可能未走短查询保护而走了 graph"
+
+
+# ========== 异步回归测试 (httpx.AsyncClient, 仅验证 HTTP 状态码/响应时间, 不依赖完整 LLM) ==========
+# AGENTS.md 第 13 章: 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
+# 覆盖: 短查询路由/闲聊离题/区域路由/工具选择/缓存机制.
+
+# 异步测试超时 (短查询/离题响应快速; 含研究流式头验证)
+ASYNC_TEST_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+
+
+@pytest.mark.regression
+async def test_short_query_pure_digits_routed_async() -> None:
+    """纯数字短查询 "123" → 200 (规则层 pure_digits 命中, 快速返回).
+
+    P0-Future-06: 纯数字查询命中 SHORT_QUERY 规则, 不走任何 graph.
+    覆盖短查询路由 (pure_digits 规则).
+    """
+    sid = _unique_session_id()
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        r = await client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "123"}],
+                "stream": False,
+                "session_id": sid,
+            },
+        )
+    assert r.status_code == 200, f"纯数字短查询响应非 200: {r.status_code}"
+    assert r.json()["object"] == "chat.completion"
+
+
+@pytest.mark.regression
+async def test_off_topic_chitchat_routed_async() -> None:
+    """闲聊/离题查询 "讲个笑话" → 200 (OFF_TOPIC 路由, 快速返回).
+
+    P1-Future-07: 闲聊正则匹配 OFF_TOPIC, 不走任何 graph, 直接返回回复语.
+    覆盖闲聊/离题保护.
+    """
+    sid = _unique_session_id()
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        r = await client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "讲个笑话"}],
+                "stream": False,
+                "session_id": sid,
+            },
+        )
+    assert r.status_code == 200, f"闲聊查询响应非 200: {r.status_code}"
+    assert r.json()["object"] == "chat.completion"
+
+
+@pytest.mark.regression
+async def test_short_query_repeated_cache_hit_async() -> None:
+    """同一短查询重复请求 → 两次均 200 (分类缓存命中).
+
+    P1: query_classify_cache_enabled=True, 高频重复 query 命中 Redis 缓存.
+    验证缓存机制不破坏响应 (Redis 不可用时降级为不缓存, 仍 200).
+    覆盖缓存机制.
+    """
+    sid1 = _unique_session_id()
+    sid2 = _unique_session_id()
+    query = "你好"
+
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        # 第一次请求 (可能未命中缓存)
+        r1 = await client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": query}],
+                "stream": False,
+                "session_id": sid1,
+            },
+        )
+        assert r1.status_code == 200, f"第一次短查询非 200: {r1.status_code}"
+
+        # 第二次相同查询 (不同 session, 但 query 相同 → 分类缓存命中)
+        r2 = await client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": query}],
+                "stream": False,
+                "session_id": sid2,
+            },
+        )
+        assert r2.status_code == 200, f"第二次短查询 (缓存) 非 200: {r2.status_code}"
+
+    # 两次响应均为有效 chat.completion
+    assert r1.json()["object"] == "chat.completion"
+    assert r2.json()["object"] == "chat.completion"
+
+
+@pytest.mark.regression
+async def test_academic_keyword_query_stream_accepted() -> None:
+    """学术关键词查询流式: stream=true → 200 + text/event-stream (区域路由不崩溃).
+
+    AGENTS.md 第 7 章: academic_keywords 命中时路由到 arxiv/pubmed 等专业数据源.
+    验证学术关键词查询不导致 5xx 崩溃, 流式响应头正确返回.
+    覆盖区域路由 (学术检索路由).
+    """
+    sid = _unique_session_id()
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [
+                    {"role": "user", "content": "find recent research papers about machine learning"}
+                ],
+                "stream": True,
+                "report_type": "basic_report",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"学术关键词查询流式非 200: {r.status_code}"
+            assert "text/event-stream" in r.headers.get("content-type", ""), (
+                f"content-type 非 text/event-stream: {r.headers.get('content-type')}"
+            )
+
+
+@pytest.mark.regression
+async def test_research_query_tool_selection_stream_accepted() -> None:
+    """研究查询 + 显式 report_type 流式: stream=true → 200 (工具选择路径不崩溃).
+
+    AGENTS.md 第 7/9 章: 显式 report_type 强制走 researcher graph,
+    MCP 工具选择 (mcp_auto_tool_selection) 在图内执行.
+    验证研究查询 + 工具选择路径不导致 5xx 崩溃, 流式响应头正确返回.
+    覆盖工具选择路径.
+    """
+    sid = _unique_session_id()
+    async with httpx.AsyncClient(timeout=ASYNC_TEST_TIMEOUT) as client:
+        async with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [
+                    {"role": "user", "content": "分析 2024 年新能源汽车市场发展趋势"}
+                ],
+                "stream": True,
+                "report_type": "basic_report",
+                "session_id": sid,
+            },
+        ) as r:
+            assert r.status_code == 200, f"研究查询流式非 200: {r.status_code}"
+            assert "text/event-stream" in r.headers.get("content-type", ""), (
+                f"content-type 非 text/event-stream: {r.headers.get('content-type')}"
+            )

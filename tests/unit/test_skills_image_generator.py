@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from src.common.llm_key_resolver import resolve_api_key
 from src.config.settings import Settings
 from src.skills.researcher.image_generator import ImageGenerator
 
@@ -110,7 +111,7 @@ def test_parse_image_response_returns_dict_with_required_keys() -> None:
     assert set(result.keys()) == expected_keys
 
 
-# ========== _get_api_key 按路由前缀 ==========
+# ========== resolve_api_key 按路由前缀 (P1-3: 抽取到 common/llm_key_resolver) ==========
 
 
 @pytest.fixture()
@@ -129,44 +130,48 @@ def generator_with_keys() -> ImageGenerator:
 
 def test_get_api_key_deepseek_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'deepseek/' 前缀返回 deepseek_api_key."""
-    assert generator_with_keys._get_api_key("deepseek/deepseek-v4-flash") == "deepseek-key-xxx"
+    assert resolve_api_key("deepseek/deepseek-v4-flash", generator_with_keys.settings) == "deepseek-key-xxx"
 
 
 def test_get_api_key_openai_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'openai/' 前缀返回 openai_api_key."""
-    assert generator_with_keys._get_api_key("openai/dall-e-3") == "openai-key-yyy"
+    assert resolve_api_key("openai/dall-e-3", generator_with_keys.settings) == "openai-key-yyy"
 
 
 def test_get_api_key_anthropic_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'anthropic/' 前缀返回 anthropic_api_key."""
-    assert generator_with_keys._get_api_key("anthropic/claude-3-sonnet") == "anthropic-key-zzz"
+    assert resolve_api_key("anthropic/claude-3-sonnet", generator_with_keys.settings) == "anthropic-key-zzz"
 
 
 def test_get_api_key_zhipu_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'zhipu/' 前缀返回 zhipu_api_key."""
-    assert generator_with_keys._get_api_key("zhipu/glm-4v") == "zhipu-key-www"
+    assert resolve_api_key("zhipu/glm-4v", generator_with_keys.settings) == "zhipu-key-www"
 
 
 def test_get_api_key_unknown_prefix_returns_none(generator_with_keys: ImageGenerator) -> None:
     """测试未知前缀返回 None."""
-    assert generator_with_keys._get_api_key("unknown/model") is None
+    assert resolve_api_key("unknown/model", generator_with_keys.settings) is None
 
 
 def test_get_api_key_no_prefix_returns_none(generator_with_keys: ImageGenerator) -> None:
     """测试无前缀模型名返回 None."""
-    assert generator_with_keys._get_api_key("plain-model-name") is None
+    assert resolve_api_key("plain-model-name", generator_with_keys.settings) is None
 
 
 def test_get_api_key_image_api_key_overrides_routes() -> None:
-    """测试 image_api_key 优先级高于路由前缀 (若单独配置)."""
+    """测试 image_api_key 优先级高于路由前缀 (若单独配置).
+
+    ImageGenerator.generate_image 用 `settings.image_api_key or resolve_api_key(...)`,
+    即 image_api_key 配置后优先于路由前缀返回.
+    """
     settings = Settings(
         _env_file=None,
         deepseek_api_key="deepseek-key",
         image_api_key="dedicated-image-key",
     )
-    gen = ImageGenerator(settings=settings)
     # 即使模型名是 deepseek/*, 也应优先返回 image_api_key
-    assert gen._get_api_key("deepseek/deepseek-v4-flash") == "dedicated-image-key"
+    api_key = settings.image_api_key or resolve_api_key("deepseek/deepseek-v4-flash", settings)
+    assert api_key == "dedicated-image-key"
 
 
 def test_get_api_key_no_keys_configured_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,5 +189,6 @@ def test_get_api_key_no_keys_configured_returns_none(monkeypatch: pytest.MonkeyP
     ]:
         monkeypatch.delenv(key, raising=False)
     settings = Settings(_env_file=None)
-    gen = ImageGenerator(settings=settings)
-    assert gen._get_api_key("deepseek/deepseek-v4-flash") is None
+    # image_api_key 未配置, 走 resolve_api_key (deepseek_api_key 也未配置 → None)
+    api_key = settings.image_api_key or resolve_api_key("deepseek/deepseek-v4-flash", settings)
+    assert api_key is None

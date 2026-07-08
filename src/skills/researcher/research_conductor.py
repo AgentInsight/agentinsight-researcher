@@ -29,7 +29,10 @@ from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.skills.researcher.context_manager import ContextManager
-from src.skills.researcher.mcp_coordinator import MCPCoordinator, get_user_mcp_configs
+from src.skills.researcher.mcp_coordinator import (
+    MCPCoordinator,
+    conduct_mcp_if_enabled,
+)
 from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
@@ -61,6 +64,10 @@ class ResearchConductor:
     _mcp_query_count: int
     # P0-7: MCPCoordinator 惰性初始化
     _mcp: MCPCoordinator | None
+    # 用户需求: 私有数据 RAG 检索器 (惰性初始化, 避免启动期构造开销)
+    # HybridRetriever 内部 namespace_has_data 已含 10min TTL 内存缓存,
+    # 无私有数据时零 embeddings+qdrant 调用
+    _retriever: Any | None  # HybridRetriever | None (惰性导入避免循环依赖)
 
     def __init__(
         self,
@@ -77,6 +84,8 @@ class ResearchConductor:
         self._mcp_query_count = 0
         # P0-7: MCPCoordinator 惰性初始化 (避免启动期构造开销)
         self._mcp = None
+        # 用户需求: HybridRetriever 惰性初始化
+        self._retriever = None
 
     def _get_mcp(self) -> MCPCoordinator:
         """惰性初始化 MCPCoordinator (P0-7).
@@ -86,6 +95,92 @@ class ResearchConductor:
         if self._mcp is None:
             self._mcp = MCPCoordinator(self.settings, self._llm)
         return self._mcp
+
+    def _get_retriever(self) -> Any:
+        """惰性初始化 HybridRetriever (用户需求: 私有数据 RAG 检索).
+
+        HybridRetriever.retrieve 内部流程:
+        1. build_data_namespaces: 检查 namespace 可用性 (10min TTL 内存缓存)
+           - 无数据时返回空 namespaces → 零 embeddings+qdrant 调用
+           - 有数据时返回 namespaces 列表
+        2. namespaces 非空时: embed_query (1次) + qdrant.search (1次) + BM25 + RRF + 可选 Rerank
+        3. 结果写入 Redis 缓存 (后续相同 query 命中缓存)
+
+        惰性导入避免循环依赖 (rag.retriever 依赖 rag.qdrant_manager 等).
+        """
+        if self._retriever is None:
+            from src.rag.retriever import get_retriever
+
+            self._retriever = get_retriever()
+        return self._retriever
+
+    async def _retrieve_private_data(
+        self,
+        query: str,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """私有数据 RAG 检索 (用户需求: 最少次 embeddings+qdrant 调用).
+
+        流程:
+        1. 调用 HybridRetriever.retrieve(query, user_id)
+        2. retrieve 内部先检查 namespace 可用性 (10min TTL 缓存):
+           - 缓存命中且无数据 → 直接返回 [] (零 embeddings+qdrant 调用)
+           - 缓存命中且有数据 → 走 BM25+Vector+RRF+Rerank
+           - 缓存未命中 → 调 Qdrant count (exact=False, 毫秒级) 更新缓存
+        3. 私有数据上下文与 Web 搜索上下文在 conduct_research 中统一聚合
+
+        Args:
+            query: 用户查询
+            user_id: 用户 ID (None 时只检索共享数据)
+            session_id: 会话 ID (用于 trace)
+
+        Returns:
+            (contexts, sources): 私有数据上下文列表 + 来源列表
+            无数据或异常时返回 ([], [])
+        """
+        try:
+            retriever = self._get_retriever()
+            results = await retriever.retrieve(
+                query,
+                user_id=user_id,
+                session_id=session_id,
+                top_k=10,
+            )
+            if not results:
+                logger.debug(
+                    "私有数据 RAG 检索无结果 (namespace 无数据或未命中): query=%s", query[:50]
+                )
+                return [], []
+
+            contexts: list[str] = []
+            sources: list[dict[str, Any]] = []
+            for r in results:
+                content = r.get("content", "")
+                if content:
+                    contexts.append(content)
+                # 构造来源信息 (与 Web 搜索来源结构一致)
+                sources.append(
+                    {
+                        "url": r.get("metadata", {}).get("url", ""),
+                        "title": r.get("metadata", {}).get("title", "私有数据"),
+                        "snippet": content[:200] if content else "",
+                        "source": "private_rag",
+                        "score": r.get("score", 0.0),
+                    }
+                )
+            logger.info(
+                "私有数据 RAG 检索完成: query=%s, contexts=%d, sources=%d",
+                query[:50],
+                len(contexts),
+                len(sources),
+            )
+            return contexts, sources
+        except Exception as e:  # noqa: BLE001
+            # 私有数据检索失败不阻断主流程, 降级走 Web 搜索 (与 MCP 调用容错模式一致)
+            logger.warning("私有数据 RAG 检索失败 (不阻断, 降级走 Web 搜索): %s", e)
+            return [], []
 
     async def plan_research(
         self,
@@ -176,52 +271,86 @@ class ResearchConductor:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # P2-01: 摘要模式路由
-            if mode == "summary":
-                result = await self._conduct_summary(
+            # P0-2: 流水线并行化 — _retrieve_private_data 与主流程 (plan_research /
+            # _conduct_summary / _conduct_subtopics) 无数据依赖, 并行执行可节省
+            # 私有数据 RAG 延迟 (BM25+Vector+RRF+Rerank ~2-5s).
+            # 用户需求: namespace 可用性 10min TTL 缓存, 无数据时零 embeddings+qdrant 调用.
+            # _retrieve_private_data 内部异常已捕获返回 ([], []), 不会抛出.
+            private_data_task = asyncio.create_task(
+                self._retrieve_private_data(
                     query,
-                    agent_role=agent_role,
                     user_id=user_id,
                     session_id=session_id,
-                    uploaded_files_context=uploaded_files_context,
-                    query_domains=query_domains,
                 )
+            )
+
+            # P2-01: 摘要模式路由 (P0-2: 与私有数据检索并行)
+            if mode == "summary":
+                result, (private_contexts, private_sources) = await asyncio.gather(
+                    self._conduct_summary(
+                        query,
+                        agent_role=agent_role,
+                        user_id=user_id,
+                        session_id=session_id,
+                        uploaded_files_context=uploaded_files_context,
+                        query_domains=query_domains,
+                    ),
+                    private_data_task,
+                )
+                result = cast(dict[str, Any], result)
+                # 合并私有数据上下文 (优先于 Web 搜索结果)
+                if private_contexts:
+                    result["contexts"] = private_contexts + result.get("contexts", [])
+                    result["sources"] = private_sources + result.get("sources", [])
                 span.update(
                     output={
                         "mode": "summary",
                         "sub_queries_count": len(result.get("sub_queries", [])),
                         "contexts_count": len(result.get("contexts", [])),
                         "sources_count": len(result.get("sources", [])),
+                        "private_contexts_count": len(private_contexts),
                     },
                 )
                 return result
 
-            # P2-01: 子主题模式路由
+            # P2-01: 子主题模式路由 (P0-2: 与私有数据检索并行)
             if mode == "subtopics":
-                result = await self._conduct_subtopics(
-                    query,
-                    agent_role=agent_role,
-                    user_id=user_id,
-                    session_id=session_id,
-                    uploaded_files_context=uploaded_files_context,
-                    query_domains=query_domains,
+                result, (private_contexts, private_sources) = await asyncio.gather(
+                    self._conduct_subtopics(
+                        query,
+                        agent_role=agent_role,
+                        user_id=user_id,
+                        session_id=session_id,
+                        uploaded_files_context=uploaded_files_context,
+                        query_domains=query_domains,
+                    ),
+                    private_data_task,
                 )
+                result = cast(dict[str, Any], result)
+                # 合并私有数据上下文 (优先于 Web 搜索结果)
+                if private_contexts:
+                    result["contexts"] = private_contexts + result.get("contexts", [])
+                    result["sources"] = private_sources + result.get("sources", [])
                 span.update(
                     output={
                         "mode": "subtopics",
                         "sub_queries_count": len(result.get("sub_queries", [])),
                         "contexts_count": len(result.get("contexts", [])),
                         "sources_count": len(result.get("sources", [])),
+                        "private_contexts_count": len(private_contexts),
                     },
                 )
                 return result
 
-            # 1. Planner: 拆解子查询
-            sub_queries = await self.plan_research(
-                query,
-                agent_role=agent_role,
-                user_id=user_id,
-                session_id=session_id,
+            # 1. Planner: 拆解子查询 (P0-2: 与私有数据检索并行, 无数据依赖)
+            sub_queries, (private_contexts, private_sources) = await asyncio.gather(
+                self.plan_research(
+                    query,
+                    agent_role=agent_role,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
+                private_data_task,
             )
 
             # 追加原始 query (对标 GPT Researcher)
@@ -261,11 +390,17 @@ class ResearchConductor:
             if uploaded_files_context:
                 contexts.extend(uploaded_files_context)
 
+            # 5. 合并私有数据 RAG 上下文 (用户需求: 私有数据优先于 Web 搜索结果)
+            if private_contexts:
+                contexts = private_contexts + contexts
+                sources = private_sources + sources
+
             span.update(
                 output={
                     "sub_queries_count": len(sub_queries),
                     "contexts_count": len(contexts),
                     "sources_count": len(sources),
+                    "private_contexts_count": len(private_contexts),
                 },
             )
             return {
@@ -526,25 +661,12 @@ class ResearchConductor:
         )
 
         # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+        # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
         # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
         context_parts: list[str] = []
-        if self.settings.mcp_strategy != "disabled":
-            try:
-                mcp = self._get_mcp()
-                mcp_configs = await get_user_mcp_configs(user_id or "", self.settings.agent_name)
-                if mcp_configs:
-                    mcp_contexts = await mcp.conduct_research(
-                        sub_query,
-                        strategy=self.settings.mcp_strategy,
-                        mcp_configs=mcp_configs,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                    if mcp_contexts:
-                        # mcp_contexts 是 list[str], 拼接到 context
-                        context_parts.append("\n\n".join(mcp_contexts))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("MCP 工具调用失败 (不阻断): %s", e)
+        mcp_contexts = await conduct_mcp_if_enabled(self.settings, sub_query, user_id, session_id)
+        if mcp_contexts:
+            context_parts.append("\n\n".join(mcp_contexts))
 
         # 5. ContextManager 压缩 + 去重 (Token 优化)
         context = await self._context_manager.get_similar_content(

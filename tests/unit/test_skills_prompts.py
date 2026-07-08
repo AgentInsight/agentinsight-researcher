@@ -14,7 +14,6 @@ from src.skills.researcher.prompts import (
     EnglishPromptFamily,
     PromptFamily,
     get_prompt_family,
-    register_prompt_family,
 )
 
 pytestmark = pytest.mark.unit
@@ -97,11 +96,7 @@ def test_default_mcp_tool_selection_prompt_non_empty(
     assert "3" in prompt
 
 
-def test_default_visualizer_prompt_non_empty(default_family: DefaultPromptFamily) -> None:
-    """测试 visualizer_prompt 返回非空字符串."""
-    prompt = default_family.visualizer_prompt("# 报告", "查询")
-    assert isinstance(prompt, str)
-    assert len(prompt) > 0
+
 
 
 def test_default_chat_prompt_non_empty(default_family: DefaultPromptFamily) -> None:
@@ -214,10 +209,7 @@ def test_english_mcp_tool_selection_prompt_non_empty(
     assert len(prompt) > 0
 
 
-def test_english_visualizer_prompt_non_empty(english_family: EnglishPromptFamily) -> None:
-    prompt = english_family.visualizer_prompt("# Report", "query")
-    assert isinstance(prompt, str)
-    assert len(prompt) > 0
+
 
 
 def test_english_chat_prompt_non_empty(english_family: EnglishPromptFamily) -> None:
@@ -261,109 +253,4 @@ def test_get_prompt_family_default_when_no_arg() -> None:
     assert isinstance(family, DefaultPromptFamily)
 
 
-# ========== register_prompt_family 自定义注册 ==========
 
-
-class _CustomPromptFamily(PromptFamily):
-    """自定义 PromptFamily 用于测试注册."""
-
-    def planner_prompt(self, query: str, agent_role: str, max_iterations: int) -> str:
-        return "custom-planner"
-
-    def writer_prompt(
-        self,
-        query: str,
-        contexts: str,
-        agent_role: str,
-        tone: str,
-        word_limit: int,
-        report_type: str,
-        current_date: str,
-        references: str,
-        structure_hint: str,
-        report_style: str = "academic",
-    ) -> str:
-        return "custom-writer"
-
-    def curator_prompt(
-        self, query: str, sources_text: str, agent_role: str, max_results: int
-    ) -> str:
-        return "custom-curator"
-
-    def agent_creator_prompt(self, query: str) -> str:
-        return "custom-agent-creator"
-
-    def reviewer_prompt(self, report_md: str, contexts: str, agent_role: str) -> str:
-        return "custom-reviewer"
-
-    def fact_checker_prompt(self, report_md: str, contexts: str, sources: str) -> str:
-        return "custom-fact-checker"
-
-    def mcp_tool_selection_prompt(self, query: str, tools_json: str, max_tools: int) -> str:
-        return "custom-mcp"
-
-    def visualizer_prompt(self, report_md: str, query: str) -> str:
-        return "custom-visualizer"
-
-    def chat_prompt(self, query: str, report_md: str, agent_role: str) -> str:
-        return "custom-chat"
-
-    def get_tone_prompt(self, tone: str) -> str:
-        return "custom-tone"
-
-    # V2-P1: detailed_report 专用 prompt 实现 (新增 4 个抽象方法)
-    def subtopics_prompt(
-        self,
-        query: str,
-        context: str,
-        role_persona: str,
-        max_subtopics: int = 5,
-    ) -> str:
-        return "custom-subtopics"
-
-    def introduction_prompt(
-        self,
-        query: str,
-        context: str,
-        references: str,
-        role_persona: str,
-        tone: str,
-        current_date: str,
-        style_desc: str,
-        word_min: int = 300,
-        word_max: int = 500,
-    ) -> str:
-        return "custom-introduction"
-
-    def section_prompt(
-        self,
-        topic: str,
-        context: str,
-        references: str,
-        role_persona: str,
-        tone: str,
-        style_desc: str,
-        word_min: int = 800,
-        word_max: int = 1200,
-    ) -> str:
-        return "custom-section"
-
-    def conclusion_prompt(
-        self,
-        query: str,
-        sections_summary: str,
-        role_persona: str,
-        tone: str,
-        style_desc: str,
-        word_min: int = 300,
-        word_max: int = 500,
-    ) -> str:
-        return "custom-conclusion"
-
-
-def test_register_prompt_family_custom() -> None:
-    """测试注册自定义 family 后可被 get_prompt_family 取出."""
-    register_prompt_family("test_custom", _CustomPromptFamily)
-    family = get_prompt_family("test_custom")
-    assert isinstance(family, _CustomPromptFamily)
-    assert family.planner_prompt("q", "r", 1) == "custom-planner"

@@ -74,14 +74,107 @@ def _cache_key(texts: list[str]) -> str:
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
+# ========== P0-1: TEI 熔断器 ==========
+# 当 TEI 服务连续失败 N 次时短路, 避免雪崩; 半开状态试探恢复.
+# 熔断器配置 (常量, 因 settings.py 由其他任务负责, 此处不引入新字段):
+# - failure_threshold: 连续失败次数阈值 (5 次)
+# - recovery_timeout: 熔断后恢复探测时间 (60s)
+# 注: 熔断器为进程级单例, 全局共享 TEI 健康状态.
+_CIRCUIT_FAILURE_THRESHOLD: int = 5
+_CIRCUIT_RECOVERY_TIMEOUT: float = 60.0
+
+
+class EmbeddingsCircuitBreaker:
+    """TEI Embeddings 熔断器 (P0-1).
+
+    三态:
+    - CLOSED (正常): 失败计数 < threshold, 请求正常通过
+    - OPEN (熔断): 失败计数 ≥ threshold 且未过恢复时间, 直接抛 EmbeddingsCircuitOpenError
+    - HALF_OPEN (半开): 失败计数 ≥ threshold 但已过恢复时间, 允许单次试探请求
+
+    线程安全: 仅在 asyncio 单线程事件循环中使用, 无需加锁.
+    对标 GPTR 无 (GPTR 用 SaaS embedding, 不需要熔断器); 主项目因 TEI 自部署必须补.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = _CIRCUIT_FAILURE_THRESHOLD,
+        recovery_timeout: float = _CIRCUIT_RECOVERY_TIMEOUT,
+    ) -> None:
+        self._failure_count: int = 0
+        self._failure_threshold: int = failure_threshold
+        self._recovery_timeout: float = recovery_timeout
+        self._last_failure_time: float = 0.0
+        self._open: bool = False
+
+    def is_open(self) -> bool:
+        """检查熔断器是否开启 (OPEN 状态).
+
+        若已过恢复时间, 自动切换到 HALF_OPEN (返回 False, 允许试探请求).
+        """
+        if self._open and self._failure_count >= self._failure_threshold:
+            if time.time() - self._last_failure_time > self._recovery_timeout:
+                # 半开状态: 允许试探, 不立即清零 (试探成功才清零)
+                logger.info(
+                    "TEI 熔断器进入半开状态, 允许试探请求 (failure_count=%d, recovery=%.1fs)",
+                    self._failure_count,
+                    self._recovery_timeout,
+                )
+                self._open = False
+                return False
+            return True
+        return self._open
+
+    def record_success(self) -> None:
+        """记录成功调用 (半开试探成功或正常路径成功).
+
+        成功时清零失败计数, 关闭熔断器.
+        """
+        if self._failure_count > 0 or self._open:
+            logger.info(
+                "TEI 熔断器关闭 (成功调用恢复, failure_count %d → 0)",
+                self._failure_count,
+            )
+        self._failure_count = 0
+        self._open = False
+
+    def record_failure(self) -> None:
+        """记录失败调用, 失败计数 +1, 达阈值则开启熔断."""
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+        if self._failure_count >= self._failure_threshold and not self._open:
+            self._open = True
+            logger.warning(
+                "TEI 熔断器开启 (连续失败 %d 次 ≥ threshold %d, 熔断 %.1fs)",
+                self._failure_count,
+                self._failure_threshold,
+                self._recovery_timeout,
+            )
+
+
+class EmbeddingsCircuitOpenError(RuntimeError):
+    """TEI 熔断器开启异常 (P0-1).
+
+    熔断器 OPEN 状态时, embed_texts 调用直接抛此异常,
+    供 context_manager 等调用方识别并降级.
+    """
+
+    def __init__(self, message: str = "TEI 熔断器开启, 跳过 embedding 调用") -> None:
+        super().__init__(message)
+
+
 class EmbeddingsClient:
     """Embeddings 客户端, 调用远程 TEI 服务 (bge-large-zh-v1.5).
 
     AGENTS.md 第 1/7 章: bge-large-zh-v1.5 固定 1024 维, 远程 TEI 服务.
+
+    P0-1: 内置 EmbeddingsCircuitBreaker 熔断器, TEI 连续失败 N 次后短路,
+    避免雪崩; 调用方可通过 is_circuit_open() 检查状态做降级 (如 context_manager).
     """
 
     settings: Settings
     _client: httpx.AsyncClient
+    _circuit_breaker: EmbeddingsCircuitBreaker
 
     # 预热文本 (P0-03: 触发 TEI 模型加载, 避免首次调用冷启动)
     _WARMUP_TEXTS: list[str] = ["测试", "test", "研究报告", "research report", "短查询"]
@@ -115,6 +208,16 @@ class EmbeddingsClient:
         # P1-04: 客户端并发限流 (避免高并发击穿 TEI 限流阈值导致 429)
         # P0-1 修复: 走 settings, 默认 3 (匹配 TEI permits=4, 留 1 余量)
         self._semaphore = asyncio.Semaphore(self.settings.embeddings_max_concurrent)
+        # P0-1: TEI 熔断器 (进程级单例, 全局共享 TEI 健康状态)
+        self._circuit_breaker = EmbeddingsCircuitBreaker()
+
+    def is_circuit_open(self) -> bool:
+        """检查 TEI 熔断器是否开启 (P0-1).
+
+        供 context_manager 等调用方识别 TEI 不可用状态,
+        在熔断期间走关键词匹配等降级路径, 避免等待 90s timeout.
+        """
+        return self._circuit_breaker.is_open()
 
     async def embed_texts(
         self,
@@ -134,6 +237,10 @@ class EmbeddingsClient:
         """
         if not texts:
             return []
+
+        # P0-1: 熔断器开启时快速失败, 调用方据此降级 (避免等待 90s timeout)
+        if self._circuit_breaker.is_open():
+            raise EmbeddingsCircuitOpenError()
 
         # P0-1 修复: 单文本级缓存查询
         # 1. 逐条查缓存, 收集未命中部分
@@ -191,6 +298,8 @@ class EmbeddingsClient:
 
         供 embed_texts 内部分批并发调用, 每批一次 TEI /embed 请求.
         P1-04: Semaphore 限流 + 429 指数退避重试.
+        P0-1: 集成熔断器 — 仅在实际 HTTP 请求时持有 semaphore (重试时释放, 避免并发槽耗尽);
+              成功记录 record_success, 失败记录 record_failure.
         """
         if not texts:
             return []
@@ -202,13 +311,24 @@ class EmbeddingsClient:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # P1-04: Semaphore 限流 (避免高并发击穿 TEI 限流阈值导致 429)
             max_retries = self.settings.embeddings_max_retries
             base_delay = self.settings.embeddings_retry_base_delay
             last_error: Exception | None = None
 
             for attempt in range(max_retries + 1):
+                # P0-1: 熔断器检查 (重试前也检查, 避免熔断期间继续重试)
+                if self._circuit_breaker.is_open():
+                    span.update(
+                        metadata={
+                            "error": "circuit_open",
+                            "retries": attempt,
+                        }
+                    )
+                    raise EmbeddingsCircuitOpenError()
+
                 try:
+                    # P0-1: 仅在实际请求时持有 semaphore (重试期间释放, 避免并发槽耗尽)
+                    # 429 限流时退避 sleep 不在 semaphore 持有期间, 不阻塞其他批次
                     async with self._semaphore:
                         # TEI 服务 /embed 接口
                         response = await self._client.post(
@@ -218,19 +338,24 @@ class EmbeddingsClient:
                         response.raise_for_status()
                         vectors = response.json()
 
-                        # 估算 token 数 (粗略: 字符数 / 3)
-                        total_chars = sum(len(t) for t in texts)
-                        token_count = total_chars // 3
+                    # 成功: 重置熔断器 (含半开试探成功)
+                    self._circuit_breaker.record_success()
 
-                        span.update(
-                            output={"vector_count": len(vectors)},
-                            usage_details={"total_tokens": token_count},
-                        )
-                        return cast(list[list[float]], vectors)
+                    # 估算 token 数 (粗略: 字符数 / 3)
+                    total_chars = sum(len(t) for t in texts)
+                    token_count = total_chars // 3
+
+                    span.update(
+                        output={"vector_count": len(vectors)},
+                        usage_details={"total_tokens": token_count},
+                    )
+                    return cast(list[list[float]], vectors)
 
                 except httpx.HTTPStatusError as e:
                     last_error = e
                     status = e.response.status_code
+                    # P0-1: 记录失败 (429/5xx 视为 TEI 服务端问题)
+                    self._circuit_breaker.record_failure()
                     # P0-1 修复: 429 限流 + 5xx 服务端错误 → 指数退避重试
                     should_retry = (status == 429 or 500 <= status < 600) and attempt < max_retries
                     if should_retry:
@@ -243,6 +368,7 @@ class EmbeddingsClient:
                             delay,
                             len(texts),
                         )
+                        # P0-1: semaphore 已释放 (async with 已退出), sleep 不占并发槽
                         await asyncio.sleep(delay)
                         continue
                     # 非重试状态码或重试次数用尽, 抛出
@@ -265,8 +391,9 @@ class EmbeddingsClient:
                     httpx.PoolTimeout,
                     httpx.RemoteProtocolError,
                 ) as e:
-                    # P0-1 修复: 网络错误重试 (TEI 重启/过载/网络抖动)
+                    # P0-1: 网络错误记录失败 (TEI 重启/过载/网络抖动)
                     last_error = e
+                    self._circuit_breaker.record_failure()
                     if attempt < max_retries:
                         delay = base_delay * (2**attempt)
                         logger.warning(
@@ -277,6 +404,7 @@ class EmbeddingsClient:
                             delay,
                             len(texts),
                         )
+                        # P0-1: semaphore 已释放, sleep 不占并发槽
                         await asyncio.sleep(delay)
                         continue
                     logger.error(
@@ -294,6 +422,8 @@ class EmbeddingsClient:
 
                 except Exception as e:  # noqa: BLE001
                     last_error = e
+                    # 未知异常也记录失败 (保守策略, 宁可误熔断也不放过系统性故障)
+                    self._circuit_breaker.record_failure()
                     logger.error(
                         "Embedding 调用失败: type=%s repr=%r str=%s",
                         type(e).__name__,
@@ -339,8 +469,25 @@ class EmbeddingsClient:
         - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等
         - payload 含 content + metadata + namespace (用户私有额外含 user_id)
 
+        3.5.1 死代码修复: 本方法实现完整可用, 供 routes.py 的 upload_file 端点
+        (或异步后台任务) 调用, 将用户上传的文档内容索引到 Qdrant 私有 namespace,
+        使 RAG 检索可召回. 典型调用方式:
+
+            from src.skills.researcher.document_loader import get_document_loader
+            from src.rag.embeddings import get_embeddings_client
+
+            loader = get_document_loader(file_path, settings)
+            docs = await loader.load(file_path)
+            texts = [d.content for d in docs]
+            await get_embeddings_client().embed_and_index(
+                texts,
+                namespace=f"{agent_id}:{user_id}",
+                user_id=user_id,
+            )
+
         P0-修复3: 入口显式 ensure_collection, 避免首批 upsert 抛 404;
                  batch_size 统一走 settings.embeddings_max_client_batch_size.
+        P0-1: 熔断器开启时 fast-fail (EmbeddingsCircuitOpenError), 调用方应捕获降级.
 
         Args:
             texts: 待索引文本列表.
@@ -355,6 +502,7 @@ class EmbeddingsClient:
 
         Raises:
             ValueError: metadata_list 长度与 texts 不一致.
+            EmbeddingsCircuitOpenError: TEI 熔断器开启时 fast-fail.
         """
         if not texts:
             return 0
@@ -363,6 +511,10 @@ class EmbeddingsClient:
             raise ValueError(
                 f"metadata_list 长度 {len(metadata_list)} 与 texts 长度 {len(texts)} 不一致"
             )
+
+        # P0-1: 熔断器开启时快速失败, 调用方据此降级
+        if self._circuit_breaker.is_open():
+            raise EmbeddingsCircuitOpenError()
 
         # P0-修复3: batch_size 统一走 settings (与 embed_texts 一致, 默认 4, 匹配 TEI max_batch_requests=4)
         if batch_size is None:

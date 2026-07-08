@@ -1,18 +1,22 @@
 """网页抓取器注册中心与调度.
 
 对标 GPT Researcher scraper/ 体系.
-- BeautifulSoupScraper: 默认主力 (轻量, 速度快)
+- TrafilaturaScraper: L1 主路径 (LLM 友好 Markdown, 轻量级去噪)
+- BSMarkdownifyScraper: L1 降级链 L2 (HTML→Markdown, 纯本地)
+- BeautifulSoupScraper: 旧版默认 (轻量, 速度快, 输出纯文本)
 - PlaywrightScraper: JS 渲染页面 (可选, 镜像内安装 chromium)
 - PyMuPDFScraper: PDF 抓取
 - ArxivScraper: Arxiv 论文 (含全文)
 - FirecrawlScraper: Firecrawl 商业服务 (P1-Future-08, LLM 友好 Markdown 输出)
-- NodriverScraper: nodriver 无头浏览器 (P1-Future-08, 反反爬绕过 Cloudflare)
 - TavilyExtractScraper: Tavily Extract API (对标 GPTR scraper/tavily_extract,
   LLM 友好纯文本输出, 复用 TAVILY_API_KEY)
 
+L1 降级链:
+  Trafilatura (LLM 友好 Markdown) → BS+markdownify (HTML→Markdown) → Playwright (兜底)
+
 WorkerPool 并发限流: asyncio.Semaphore + GlobalRateLimiter 单例.
 所有 scraper 共享 scrape(url) -> dict 规约.
-- register_scraper 装饰器 (P0-01, 对称 register_searcher, 第三方扩展自注册)
+项目内 scraper 走 get_scraper 函数式工厂路由 (按 URL 后缀 + scraper_type 参数).
 """
 
 from __future__ import annotations
@@ -20,12 +24,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.config.settings import Settings as Settings
 from src.config.settings import get_settings as get_settings
+
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -120,35 +127,7 @@ class BaseScraper:
         raise NotImplementedError
 
 
-# ========== 插件注册表 (对称 register_searcher, P0-01) ==========
-# 用装饰器注册 scraper, 不破坏现有 get_scraper() 函数式工厂.
-# 第三方扩展可通过 @register_scraper("xxx") 自注册, 再由
-# get_registered_scrapers() 查询, 未来可逐步迁移工厂到注册表驱动.
-_SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {}
-
-
-def register_scraper(
-    name: str,
-) -> Callable[[type[BaseScraper]], type[BaseScraper]]:
-    """抓取器注册装饰器 (对称 register_searcher, P0-01).
-
-    Args:
-        name: 注册键名 (如 "tavily_extract").
-
-    Returns:
-        类装饰器, 将 cls 注册到 _SCRAPER_REGISTRY 后原样返回.
-    """
-
-    def decorator(cls: type[BaseScraper]) -> type[BaseScraper]:
-        _SCRAPER_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
-def get_registered_scrapers() -> dict[str, type[BaseScraper]]:
-    """返回已注册的抓取器字典 (浅拷贝, 防外部篡改)."""
-    return dict(_SCRAPER_REGISTRY)
+# ========== Scraper 工厂路由 (函数式 if-else, 项目内 scraper 走此路径) ==========
 
 
 def get_scraper(
@@ -162,13 +141,9 @@ def get_scraper(
     - URL 以 .pdf 结尾 → PyMuPDFScraper
     - URL 含 arxiv.org → ArxivScraper
     - URL 以 Office 文档后缀结尾 → MarkItDownScraper (P2-03)
-    - 否则 → 按配置 (bs/playwright/firecrawl/nodriver)
+    - 否则 → 按配置 (bs/playwright/firecrawl/nodriver/tavily_extract)
     """
     url_lower = url.lower()
-
-    # 优先查询注册表 (P0-01: 支持 @register_scraper 自注册的第三方扩展)
-    if scraper_type and scraper_type in _SCRAPER_REGISTRY:
-        return _SCRAPER_REGISTRY[scraper_type](url, session)
 
     if url_lower.endswith(".pdf"):
         from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
@@ -190,15 +165,22 @@ def get_scraper(
 
         return PlaywrightScraper(url, session)
 
+    if scraper_type == "trafilatura":
+        from src.skills.researcher.scrapers.trafilatura_scraper import TrafilaturaScraper
+
+        return TrafilaturaScraper(url, session)
+
+    if scraper_type == "bs_markdownify":
+        from src.skills.researcher.scrapers.bs_markdownify_scraper import (
+            BSMarkdownifyScraper,
+        )
+
+        return BSMarkdownifyScraper(url, session)
+
     if scraper_type == "firecrawl":
         from src.skills.researcher.scrapers.firecrawl_scraper import FirecrawlScraper
 
         return FirecrawlScraper(url, session)
-
-    if scraper_type == "nodriver":
-        from src.skills.researcher.scrapers.nodriver_scraper import NodriverScraper
-
-        return NodriverScraper(url, session)
 
     if scraper_type == "tavily_extract":
         # Tavily Extract API 抓取器 (对标 GPTR scraper/tavily_extract)
@@ -234,20 +216,22 @@ async def scrape_with_fallback(
     min_content_length: int = 100,
     user_agent: str = "",
 ) -> dict[str, Any]:
-    """带降级链的抓取 (P1-04, 对标 GPT Researcher).
+    """带降级链的抓取 (对标 GPT Researcher).
 
-    降级链: BS → Playwright → 失败.
+    L1 降级链:
+      1. Trafilatura (LLM 友好 Markdown, 轻量级去噪, 15s timeout)
+      2. BS+markdownify (HTML→Markdown, 纯本地, 15s timeout)
+      3. Playwright (JS 渲染兜底, 30s timeout)
+
     PDF/Arxiv 不降级 (专用抓取器).
     user_agent 参数预留 (session 已含 UA, 由调用方在构建 session 时注入).
     方案 E: scraper_mode=lightweight 时跳过 Playwright 降级.
     """
-    # 读取配置
     settings = get_settings()
     scraper_mode = settings.scraper_mode
 
     url_lower = url.lower()
 
-    # PDF / Arxiv 不降级 (专用抓取器)
     if url_lower.endswith(".pdf"):
         from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
 
@@ -258,44 +242,131 @@ async def scrape_with_fallback(
 
         return await _safe_scrape(ArxivScraper(url, session))
 
-    # 方案 E: playwright 模式直接走 Playwright (调试用)
     if scraper_mode == "playwright":
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
 
         return await _safe_scrape(PlaywrightScraper(url, session))
 
-    # P1-12: 串行降级超时预算 (保留串行降级, 仅优化超时)
-    #   BS: 15s (BeautifulSoupScraper 内部 timeout, P1-10 由 10s 提升至 15s)
-    #   Playwright: 30s (page.goto timeout)
-    #   总最坏情况: ~45s (仅当 BS 内容过短触发降级时)
-    # 第一级: BeautifulSoup
-    from src.skills.researcher.scrapers.beautiful_soup_scraper import BeautifulSoupScraper
+    # ━━━━━━━━━━━ L1 降级链 ━━━━━━━━━━━
+    # 第一级: Trafilatura (LLM 友好 Markdown)
+    from src.skills.researcher.scrapers.trafilatura_scraper import TrafilaturaScraper
 
-    bs_result = await _safe_scrape(BeautifulSoupScraper(url, session))
-    content = bs_result.get("content", "") or ""
-    if content and len(content) >= min_content_length:
-        return bs_result
+    tf_result = await _safe_scrape(TrafilaturaScraper(url, session))
+    tf_content = tf_result.get("content", "") or ""
+    if tf_content and len(tf_content) >= min_content_length:
+        return tf_result
 
     if not enable_fallback:
-        return bs_result
+        return tf_result
 
-    # 方案 E: lightweight 模式跳过 Playwright 降级 (适合离线最小化部署)
     if scraper_mode == "lightweight":
-        return bs_result
+        return tf_result
 
-    # 第二级: Playwright 降级 (auto 模式)
-    logger.info("BS 抓取内容过短(%d), 降级 Playwright: %s", len(content), url)
+    # 第二级: BS+markdownify (HTML→Markdown, 纯本地)
+    logger.info(
+        "Trafilatura 抓取内容过短(%d), 降级 BS+markdownify: %s",
+        len(tf_content),
+        url,
+    )
+    from src.skills.researcher.scrapers.bs_markdownify_scraper import (
+        BSMarkdownifyScraper,
+    )
+
+    bsm_result = await _safe_scrape(BSMarkdownifyScraper(url, session))
+    bsm_content = bsm_result.get("content", "") or ""
+    if bsm_content and len(bsm_content) >= min_content_length:
+        return bsm_result
+
+    # 第三级: Playwright (JS 渲染兜底)
+    logger.info(
+        "BS+markdownify 抓取内容过短, 降级 Playwright: %s",
+        url,
+    )
     try:
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
 
         pw_result = await _safe_scrape(PlaywrightScraper(url, session))
-        # Playwright 结果更好则使用
-        if len(pw_result.get("content", "") or "") > len(content):
+        best_content = max(
+            [tf_content, bsm_content, pw_result.get("content", "") or ""],
+            key=len,
+        )
+        if len(pw_result.get("content", "") or "") >= len(best_content):
             return pw_result
-        return bs_result  # 否则保留 BS 结果
+        for r in [tf_result, bsm_result, pw_result]:
+            if r.get("content"):
+                return r
+        return tf_result
     except Exception as e:  # noqa: BLE001
         logger.warning("Playwright 降级失败 %s: %s", url, e)
-        return bs_result
+        return tf_result
+
+
+# ========== 共享 HTTP 客户端 (单例, 复用 TCP 连接, P1-3) ==========
+
+# 模块级单例 (惰性创建, 首次调用 get_shared_http_client 时初始化)
+# httpx 类型注解由 TYPE_CHECKING 守卫 (文件顶部), 运行时在 get_shared_http_client 内惰性导入
+_shared_http_client: httpx.AsyncClient | None = None
+_shared_http_client_lock: asyncio.Lock | None = None
+
+
+async def get_shared_http_client(user_agent: str = "") -> httpx.AsyncClient:
+    """获取共享 httpx.AsyncClient 单例 (惰性创建).
+
+    P1-3: 复用 TCP 连接池, 避免 scrape_urls 每次调用都新建客户端导致
+    重复 TCP 握手与 RTT 开销. 首次调用创建, 后续复用同一实例.
+
+    配置:
+    - timeout: 30s (连接/读取/写入/池整体)
+    - limits: max_connections=20, max_keepalive_connections=10
+    - headers: 默认 User-Agent
+    - follow_redirects: True
+
+    Args:
+        user_agent: 可选 User-Agent (仅在首次创建时生效, 已存在实例时忽略).
+
+    Returns:
+        共享的 httpx.AsyncClient 实例.
+    """
+    global _shared_http_client, _shared_http_client_lock
+
+    if _shared_http_client is not None:
+        return _shared_http_client
+
+    # 锁惰性初始化 (避免模块导入时创建事件循环绑定)
+    if _shared_http_client_lock is None:
+        _shared_http_client_lock = asyncio.Lock()
+
+    async with _shared_http_client_lock:
+        # 双重检查锁定, 防止并发首次创建
+        if _shared_http_client is not None:
+            return _shared_http_client
+
+        import httpx
+
+        _shared_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+            ),
+            headers={
+                "User-Agent": user_agent or "agentinsight-researcher/0.1",
+            },
+            follow_redirects=True,
+        )
+    return _shared_http_client
+
+
+async def close_shared_http_client() -> None:
+    """关闭共享 httpx.AsyncClient (应用关闭时调用).
+
+    P1-3: 供 server.py lifespan 清理调用, 释放底层 TCP 连接池.
+    幂等: 多次调用安全 (无实例时直接返回).
+    """
+    global _shared_http_client
+    if _shared_http_client is not None:
+        await _shared_http_client.aclose()
+        _shared_http_client = None
 
 
 async def scrape_urls(
@@ -313,6 +384,8 @@ async def scrape_urls(
     返回 [{"url","content","title","image_urls","content_type"}].
     enable_fallback=True 时启用 BS → Playwright 降级链 (P1-04).
     scraper_type 仅在非降级路径 (enable_fallback=False) 生效.
+
+    P1-3: 使用共享 httpx.AsyncClient 单例复用 TCP 连接, 不再每次新建客户端.
     """
     if not urls:
         return []
@@ -321,41 +394,36 @@ async def scrape_urls(
     unique_urls = list(dict.fromkeys(urls))
     worker_pool = WorkerPool(max_workers, rate_limit_delay)
 
-    import httpx
+    # P1-3: 复用共享 HTTP 客户端 (单例, 惰性创建)
+    session = await get_shared_http_client(user_agent=user_agent)
 
-    async with httpx.AsyncClient(
-        timeout=30.0,
-        headers={"User-Agent": user_agent or "agentinsight-researcher/0.1"},
-        follow_redirects=True,
-    ) as session:
+    async def _scrape_one(url: str) -> dict[str, Any]:
+        async with worker_pool.throttle():
+            if enable_fallback:
+                return await scrape_with_fallback(
+                    url,
+                    session=session,
+                    enable_fallback=True,
+                    min_content_length=100,
+                    user_agent=user_agent,
+                )
+            try:
+                scraper = get_scraper(url, scraper_type, session)
+                result = await scraper.scrape()
+                # 内容过短直接丢弃 (对标 GPT Researcher)
+                if len(result.get("content", "")) < 100:
+                    return {
+                        "url": url,
+                        "content": None,
+                        "title": "",
+                        "image_urls": [],
+                    }
+                return result
+            except Exception as e:  # noqa: BLE001
+                logger.warning("抓取失败 %s: %s", url, e)
+                return {"url": url, "content": None, "title": "", "image_urls": []}
 
-        async def _scrape_one(url: str) -> dict[str, Any]:
-            async with worker_pool.throttle():
-                if enable_fallback:
-                    return await scrape_with_fallback(
-                        url,
-                        session=session,
-                        enable_fallback=True,
-                        min_content_length=100,
-                        user_agent=user_agent,
-                    )
-                try:
-                    scraper = get_scraper(url, scraper_type, session)
-                    result = await scraper.scrape()
-                    # 内容过短直接丢弃 (对标 GPT Researcher)
-                    if len(result.get("content", "")) < 100:
-                        return {
-                            "url": url,
-                            "content": None,
-                            "title": "",
-                            "image_urls": [],
-                        }
-                    return result
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("抓取失败 %s: %s", url, e)
-                    return {"url": url, "content": None, "title": "", "image_urls": []}
-
-        results = await asyncio.gather(*[_scrape_one(u) for u in unique_urls])
+    results = await asyncio.gather(*[_scrape_one(u) for u in unique_urls])
 
     # 过滤失败结果
     return [r for r in results if r.get("content")]

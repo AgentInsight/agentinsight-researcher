@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import sys
 import types
 from typing import Any
 
 import pytest
 
+from src.common.llm_key_resolver import resolve_api_key
 from src.config.settings import Settings
 from src.llm.client import LLMClient, LLMTier
 
@@ -45,7 +45,7 @@ def test_llm_tier_token_limit():
 
 
 def test_api_key_mapping_by_prefix():
-    """测试按 LiteLLM 路由前缀获取 API Key."""
+    """测试按 LiteLLM 路由前缀获取 API Key (P1-3: 抽取到 common/llm_key_resolver)."""
     settings = Settings(
         deepseek_api_key="ds-key",
         openai_api_key="oa-key",
@@ -54,11 +54,11 @@ def test_api_key_mapping_by_prefix():
         _env_file=None,
     )
     client = LLMClient(settings)
-    assert client._get_api_key("deepseek/deepseek-chat") == "ds-key"
-    assert client._get_api_key("openai/gpt-4o") == "oa-key"
-    assert client._get_api_key("anthropic/claude-3") == "an-key"
-    assert client._get_api_key("zhipu/glm-4") == "zp-key"
-    assert client._get_api_key("unknown/model") is None
+    assert resolve_api_key("deepseek/deepseek-chat", client.settings) == "ds-key"
+    assert resolve_api_key("openai/gpt-4o", client.settings) == "oa-key"
+    assert resolve_api_key("anthropic/claude-3", client.settings) == "an-key"
+    assert resolve_api_key("zhipu/glm-4", client.settings) == "zp-key"
+    assert resolve_api_key("unknown/model", client.settings) is None
 
 
 def test_cost_computation():
@@ -174,7 +174,12 @@ def _install_fake_litellm(
     monkeypatch: pytest.MonkeyPatch,
     side_effect: Any,
 ) -> list[dict[str, Any]]:
-    """注入伪造 litellm 模块到 sys.modules.
+    """注入伪造 litellm 模块到 src.llm.client 的命名空间.
+
+    直接 patch src.llm.client.litellm 引用 (而非 sys.modules["litellm"]),
+    因为 client.py 在 import 时已绑定 litellm 模块对象, 替换 sys.modules
+    不会影响已绑定的引用. 真实 litellm 在某些版本缺少 use_litellm_proxy 属性,
+    会触发 GetLLMProvider 异常, 故必须替换 client 模块内的 litellm 引用.
 
     side_effect(model, call_index) -> Exception (抛出) | _FakeResponse | _FakeStream.
     返回调用记录列表 (kwargs).
@@ -190,7 +195,8 @@ def _install_fake_litellm(
 
     fake = types.ModuleType("litellm")
     fake.acompletion = _fake_acompletion
-    monkeypatch.setitem(sys.modules, "litellm", fake)
+    # 直接 patch client 模块内的 litellm 引用 (而非 sys.modules)
+    monkeypatch.setattr("src.llm.client.litellm", fake)
     return calls
 
 

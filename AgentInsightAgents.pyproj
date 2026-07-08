@@ -44,14 +44,15 @@
   <ItemGroup>
     <Content Include="scripts\build-online.ps1" />
     <Content Include="scripts\init.sql" />
+    <Content Include="scripts\convert_bge_small_zh_to_onnx.py" />
+    <Content Include="scripts\prepare-nodejs-packages.ps1" />
+    <Content Include="scripts\prepare-nodejs-packages.sh" />
+    <Content Include="scripts\prepare-playwright-chromium.ps1" />
+    <Content Include="scripts\prepare-playwright-chromium.sh" />
   </ItemGroup>
   <!-- 前端测试页面 (AGENTS.md 第 14 章) -->
   <ItemGroup>
     <Content Include="static\index.html" />
-  </ItemGroup>
-  <!-- 模型下载工具 (被 scripts/build-offline.ps1 通过 volume 挂载引用) -->
-  <ItemGroup>
-    <Content Include="packages\dl_model.py" />
   </ItemGroup>
   <!-- 测试: 全量 Python 文件 (AGENTS.md 第 13 章测试分层) -->
   <ItemGroup>
@@ -97,8 +98,10 @@
     <Folder Include="tests\" />
     <Folder Include="tests\api\" />
     <Folder Include="tests\e2e\" />
+    <Folder Include="tests\exploratory\" />
     <Folder Include="tests\functional\" />
     <Folder Include="tests\manual\" />
+    <Folder Include="tests\performance\" />
     <Folder Include="tests\regression\" />
     <Folder Include="tests\unit\" />
   </ItemGroup>

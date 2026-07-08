@@ -12,9 +12,10 @@ AGENTS.md 用户需求 10: Token 优化核心.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
@@ -22,6 +23,7 @@ from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
 from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
+from src.rag.fastembed_client import FastEmbedClient, get_fastembed_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class ContextManager:
     _llm: LLMClient
     _compressor: SlidingWindowCompressor
     _written_compressor: WrittenContentCompressor
+    _fastembed: FastEmbedClient
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -44,6 +47,7 @@ class ContextManager:
         self._llm = get_llm_client()
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
+        self._fastembed = get_fastembed_client()
 
     async def compress_messages(
         self,
@@ -53,6 +57,17 @@ class ContextManager:
 
         AGENTS.md 第 6 章: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
         供后续节点 (writer/proofreader 等) 在写入会话前调用.
+
+        3.6.1 死代码修复: 本方法实现完整可用, 供 chat_agent.py 的 chat 方法
+        (或 multi_agent_builder.py 的 researcher 节点) 在写入会话前调用做长会话压缩.
+        典型调用方式:
+
+            from src.skills.researcher.context_manager import ContextManager
+
+            cm = ContextManager(settings)
+            # 写入 Checkpointer 前检查阈值 (AGENTS.md 第 6 章 CONTEXT_MAX_CHARS)
+            if total_chars > settings.compression_threshold:
+                messages = await cm.compress_messages(messages)
 
         V4-P1-04: 当上下文总字符数超过 compression_threshold 时, 切换为
         滑动窗口+摘要混合压缩 (保留最近 N 条原文, 远期 LLM 摘要), 避免
@@ -162,6 +177,11 @@ class ContextManager:
 
         对标 GPT Researcher ContextCompressor.async_get_context.
         关键优化: 小文档快速路径, 跳过 embedding 计算.
+
+        P0-3: TEI 熔断器开启时降级关键词匹配, 避免等待 90s timeout.
+        V4-P3 L2: 两层路由 (Fast Path <8K | BM25Filter >=8K).
+          性能: 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
+        注: EmbeddingsFilter 已移除 (TEI CPU 部署性能瓶颈), 全量由 BM25Filter 覆盖.
         """
         # 重置已写入内容记录 (P1-02), 每次新查询开始时清空
         self._written_compressor.reset()
@@ -181,35 +201,274 @@ class ContextManager:
                 return ""
 
             total_chars = sum(len(str(d.get("content", ""))) for d in documents)
-            chunk_threshold = self.settings.compression_threshold
 
-            # 小文档快速路径 (对标 GPT Researcher 关键优化)
-            if total_chars < chunk_threshold and len(documents) <= max_results:
-                context = "\n\n".join(str(d.get("content", "")) for d in documents[:max_results])
-                span.update(output={"context_len": len(context), "fast_path": True})
+            # P0-3: TEI 熔断器开启时走关键词匹配降级 (避免 90s timeout 雪崩)
+            if self._embeddings.is_circuit_open():
+                logger.warning(
+                    "TEI 熔断器开启, context-compress 降级关键词匹配 (doc_count=%d)",
+                    len(documents),
+                )
+                context = self._keyword_fallback(query, documents, max_results)
+                span.update(
+                    output={
+                        "context_len": len(context),
+                        "fast_path": False,
+                        "fallback": "keyword",
+                    }
+                )
                 return context
 
-            # 大文档: 用 embedding 相似度过滤
-            compressed = await self._embeddings_filter(
-                query,
-                documents,
-                max_results,
+            # ━━━━━━━━━━━ Layer 1: Fast Path (< 8K 字符, 零计算) ━━━━━━━━━━━
+            if (
+                total_chars < self.settings.bm25_filter_char_threshold
+                and len(documents) <= max_results
+            ):
+                context = "\n\n".join(
+                    str(d.get("content", "")) for d in documents[:max_results]
+                )
+                span.update(
+                    output={"context_len": len(context), "fast_path": True, "layer": "fast"}
+                )
+                return context
+
+            # ━━━━━━━━━━━ Layer 2: BM25 + Embeddings 两阶段检索 (>= 8K 字符) ━━━━━━━━━━━
+            # V4-P3 L2: 两阶段检索
+            #   BM25 先召回 Top-50 (粗筛, 快), 再根据 chunk 数决定是否精排:
+            #   - 总 chunk 数 <= 30 → 直接返回 BM25 结果 (精排候选太少, 没必要)
+            #   - 总 chunk 数 > 30 → Embeddings 从 Top-50 中再选 Top-20 (精排, 准)
+            if self.settings.bm25_filter_enabled:
+                bm25_results = await self._bm25_filter(
+                    query,
+                    documents,
+                    max_results=self.settings.bm25_filter_top_k_for_rerank,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+
+                total_chunks = len(bm25_results)
+                if total_chunks <= self.settings.embeddings_rerank_chunk_threshold:
+                    context = await self._post_filter_compress(
+                        bm25_results,
+                        user_id=user_id,
+                        session_id=session_id,
+                        span=span,
+                        layer="bm25",
+                    )
+                    return context
+
+                reranked = await self._embeddings_rerank(
+                    query,
+                    bm25_results,
+                    max_results=self.settings.embeddings_rerank_top_k,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                context = await self._post_filter_compress(
+                    reranked,
+                    user_id=user_id,
+                    session_id=session_id,
+                    span=span,
+                    layer="bm25+embeddings",
+                )
+                return context
+
+            # bm25_filter_enabled=False 时降级关键词匹配 (不调 EmbeddingsFilter)
+            context = self._keyword_fallback(query, documents, max_results)
+            span.update(
+                output={
+                    "context_len": len(context),
+                    "fast_path": False,
+                    "fallback": "keyword",
+                }
+            )
+            return context
+
+    async def _post_filter_compress(
+        self,
+        compressed: list[str],
+        *,
+        user_id: str | None,
+        session_id: str | None,
+        span: Any,
+        layer: str,
+    ) -> str:
+        """后处理: 去重 + Word Limit 截断."""
+        # WrittenContentCompressor 跨子主题去重 (P1-02)
+        deduped: list[str] = []
+        for chunk in compressed:
+            if await self._written_compressor.should_keep(chunk):
+                deduped.append(chunk)
+
+        # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
+        context = self._truncate_by_words(deduped, self.settings.max_context_words)
+        span.update(
+            output={"context_len": len(context), "fast_path": False, "layer": layer}
+        )
+        return context
+
+    async def _embeddings_rerank(
+        self,
+        query: str,
+        documents: list[str],
+        max_results: int,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[str]:
+        """Embeddings 精排: 从 BM25 候选中再选 Top-K (两阶段检索第二阶段).
+
+        使用 FastEmbed 本地模型 (bge-small-zh-v1.5, 512维), 不依赖远程 TEI.
+
+        Args:
+            query: 查询文本
+            documents: BM25 粗筛后的候选内容列表
+            max_results: 精排后返回数量
+            user_id: 用户 ID (仅用于 trace)
+            session_id: 会话 ID (仅用于 trace)
+
+        Returns:
+            精排后的内容字符串列表, 按 Embeddings 相似度降序.
+            FastEmbed 失败时降级返回原 BM25 结果前 N 条.
+        """
+        if not documents:
+            return []
+
+        try:
+            async with trace_retriever(
+                name="embeddings-rerank",
+                input={"query": query[:100], "candidate_count": len(documents)},
+                metadata={
+                    "retriever_type": "fastembed",
+                    "user_id": user_id,
+                    "session_id": session_id,
+                },
                 user_id=user_id,
                 session_id=session_id,
+            ) as span:
+                query_emb = await self._fastembed.embed_text(query)
+                doc_embs = await self._fastembed.embed_texts(documents)
+
+                similarities: list[tuple[float, str]] = []
+                for doc, emb in zip(documents, doc_embs, strict=False):
+                    sim = self._cosine_similarity(query_emb, emb)
+                    similarities.append((sim, doc))
+
+                similarities.sort(key=lambda x: x[0], reverse=True)
+                result = [doc for _, doc in similarities[:max_results]]
+
+                span.update(
+                    output={"matched": len(result)},
+                    metadata={
+                        "candidate_count": len(documents),
+                        "retriever_type": "fastembed",
+                        "top_score": float(similarities[0][0]) if similarities else 0.0,
+                    },
+                )
+                return result
+        except Exception as e:  # noqa: BLE001
+            logger.warning("FastEmbed 精排失败, 降级返回 BM25 结果: %s", e)
+            return documents[:max_results]
+
+    @staticmethod
+    def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+        """计算两个向量的余弦相似度."""
+        if not vec1 or not vec2:
+            return 0.0
+        dot = sum(a * b for a, b in zip(vec1, vec2, strict=False))
+        norm1 = (sum(x * x for x in vec1)) ** 0.5
+        norm2 = (sum(x * x for x in vec2)) ** 0.5
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        return dot / (norm1 * norm2)
+
+    async def _bm25_filter(
+        self,
+        query: str,
+        documents: list[dict[str, Any]],
+        max_results: int,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[str]:
+        """BM25Filter 关键词过滤 (V4-P3 L2, 替代 EmbeddingsFilter 中段路由).
+
+        本地 jieba+BM25Okapi, 零网络调用, 10-200ms 响应.
+        超时或异常降级关键词匹配 (与 _embeddings_filter 降级策略对齐).
+        """
+        if not documents:
+            return []
+
+        from src.rag.bm25_filter import BM25Filter
+
+        try:
+            filt = BM25Filter(self.settings)
+            return await asyncio.wait_for(
+                filt.filter(
+                    query,
+                    documents,
+                    max_results=max_results,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
+                timeout=self.settings.bm25_filter_timeout,
             )
+        except TimeoutError:
+            logger.warning(
+                "BM25Filter %.1fs 超时, 降级关键词匹配 (doc_count=%d)",
+                self.settings.bm25_filter_timeout,
+                len(documents),
+            )
+            return self._keyword_fallback_split(query, documents, max_results)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BM25Filter 失败, 降级关键词匹配: %s", e)
+            return self._keyword_fallback_split(query, documents, max_results)
 
-            # WrittenContentCompressor 跨子主题去重 (P1-02)
-            # 作为 EmbeddingsFilter 之后的补充步骤, 不替换原有逻辑
-            deduped: list[str] = []
-            for chunk in compressed:
-                if await self._written_compressor.should_keep(chunk):
-                    deduped.append(chunk)
+    @staticmethod
+    def _keyword_fallback(
+        query: str,
+        documents: list[dict[str, Any]],
+        max_results: int,
+    ) -> str:
+        """P0-3: TEI 故障降级路径 — 关键词匹配 + 字符长度排序.
 
-            # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
-            context = self._truncate_by_words(deduped, self.settings.max_context_words)
+        无 embedding 依赖, 用 jieba 分词计算 query 与各 document 的关键词重叠度,
+        按重叠度 + 字符长度排序取 Top-K. 精度低于 embedding 相似度, 但远优于
+        无限等待 TEI timeout (P95 450s → <2s).
 
-            span.update(output={"context_len": len(context), "fast_path": False})
-            return context
+        Args:
+            query: 用户查询
+            documents: 文档列表 [{"content": "...", ...}, ...]
+            max_results: 返回文档数上限
+
+        Returns:
+            拼接后的上下文字符串 (\\n\\n 分隔).
+        """
+        try:
+            import jieba
+
+            query_keywords = set(jieba.cut(query))
+            # 去除单字符停用词 (粗略)
+            query_keywords = {w for w in query_keywords if len(w.strip()) >= 2}
+        except ImportError:
+            # jieba 未安装时用空格分词降级
+            query_keywords = {w for w in query.split() if len(w) >= 2}
+
+        scored: list[tuple[int, int, str]] = []
+        for doc in documents:
+            content = str(doc.get("content", ""))
+            try:
+                import jieba
+
+                doc_keywords = set(jieba.cut(content[:2000]))
+                doc_keywords = {w for w in doc_keywords if len(w.strip()) >= 2}
+            except ImportError:
+                doc_keywords = {w for w in content[:2000].split() if len(w) >= 2}
+            overlap = len(query_keywords & doc_keywords)
+            scored.append((overlap, len(content), content))
+
+        # 排序: 关键词重叠度优先, 同分按字符长度优先 (内容更丰富的优先)
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return "\n\n".join(c for _, _, c in scored[:max_results])
 
     async def _embeddings_filter(
         self,
@@ -220,14 +479,21 @@ class ContextManager:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """EmbeddingsFilter 相似度过滤.
+        """EmbeddingsFilter 相似度过滤 (V4-P3 暂停使用, 保留代码供未来重新启用).
 
         V2-P1 优化 (对标 GPTR context/compression.py EmbeddingsFilter):
         - 旧版: 私有方法 + _split_documents 仅按 \\n\\n 一次切分 (硬切)
         - V2: 调用独立 EmbeddingsFilter 类, 递归分块 (\\n\\n → \\n → 空格 → 字符),
           保证语义完整性, 与 GPTR RecursiveCharacterTextSplitter 对齐.
 
+        P0-3: 加 15s asyncio.wait_for timeout, 超时降级关键词匹配.
+              TEI 故障时 EmbeddingsFilter 内部 embed_texts 会触发熔断器 fast-fail
+              (EmbeddingsCircuitOpenError), 此处一并降级.
+
         按 similarity_threshold (默认 0.35) 过滤文档块.
+
+        V4-P3: 暂停使用 (TEI CPU 部署性能瓶颈), 主路由改为 BM25Filter.
+               保留代码供未来 TEI GPU 部署或外部 Embeddings 服务时重新启用.
         """
         if not documents:
             return []
@@ -237,16 +503,59 @@ class ContextManager:
 
         try:
             filt = EmbeddingsFilter(self.settings, self._embeddings)
-            return await filt.filter(
-                query,
-                documents,
-                max_results=max_results,
-                user_id=user_id,
-                session_id=session_id,
+            # P0-3: 15s timeout, 超时降级 (避免 TEI 卡 90s timeout 拖累 context-compress)
+            return await asyncio.wait_for(
+                filt.filter(
+                    query,
+                    documents,
+                    max_results=max_results,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
+                timeout=15.0,
             )
+        except TimeoutError:
+            logger.warning(
+                "EmbeddingsFilter 15s 超时, 降级关键词匹配 (doc_count=%d)", len(documents)
+            )
+            return self._keyword_fallback_split(query, documents, max_results)
         except Exception as e:  # noqa: BLE001
-            logger.warning("EmbeddingsFilter 失败, 降级返回原文: %s", e)
-            return [str(d.get("content", "")) for d in documents[:max_results]]
+            # P0-3: TEI 熔断或 EmbeddingsFilter 异常时降级
+            logger.warning("EmbeddingsFilter 失败, 降级关键词匹配: %s", e)
+            return self._keyword_fallback_split(query, documents, max_results)
+
+    @staticmethod
+    def _keyword_fallback_split(
+        query: str,
+        documents: list[dict[str, Any]],
+        max_results: int,
+    ) -> list[str]:
+        """P0-3: BM25Filter 失败降级 — 关键词匹配返回 list[str] (兼容原签名).
+
+        与 _keyword_fallback 类似但返回 list[str] (每个元素为单个文档内容),
+        供 BM25Filter 超时/异常降级时按 list 处理.
+        """
+        try:
+            import jieba
+
+            query_keywords = {w for w in jieba.cut(query) if len(w.strip()) >= 2}
+        except ImportError:
+            query_keywords = {w for w in query.split() if len(w) >= 2}
+
+        scored: list[tuple[int, int, str]] = []
+        for doc in documents:
+            content = str(doc.get("content", ""))
+            try:
+                import jieba
+
+                doc_keywords = {w for w in jieba.cut(content[:2000]) if len(w.strip()) >= 2}
+            except ImportError:
+                doc_keywords = {w for w in content[:2000].split() if len(w) >= 2}
+            overlap = len(query_keywords & doc_keywords)
+            scored.append((overlap, len(content), content))
+
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [c for _, _, c in scored[:max_results]]
 
     @staticmethod
     def _split_documents(
@@ -274,18 +583,6 @@ class ContextManager:
                         if chunk:
                             chunks.append({"content": chunk, "source": doc.get("url", "")})
         return chunks
-
-    @staticmethod
-    def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-        """余弦相似度."""
-        if not vec_a or not vec_b or len(vec_a) != len(vec_b):
-            return 0.0
-        dot = sum(a * b for a, b in zip(vec_a, vec_b, strict=False))
-        norm_a = sum(a * a for a in vec_a) ** 0.5
-        norm_b = sum(b * b for b in vec_b) ** 0.5
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return cast(float, dot / (norm_a * norm_b))
 
     @staticmethod
     def _cosine_similarity_batch(
@@ -337,50 +634,6 @@ class ContextManager:
             result.append(text)
             word_count += len(words)
         return "\n\n".join(result)
-
-    async def get_similar_written_contents(
-        self,
-        query: str,
-        written_sections: list[dict[str, str]],
-        *,
-        max_results: int = 10,
-        user_id: str | None = None,
-        session_id: str | None = None,
-    ) -> list[str]:
-        """跨子主题去重 (对标 WrittenContentCompressor).
-
-        从已写章节里找相似内容, 避免重复.
-        """
-        if not written_sections:
-            return []
-
-        try:
-            # 嵌入查询与已写章节
-            texts = [query] + [s.get("content", "") for s in written_sections]
-            vectors = await self._embeddings.embed_texts(
-                texts,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if not vectors or len(vectors) < 2:
-                return []
-
-            query_vec = vectors[0]
-            section_vecs = vectors[1:]
-
-            # 相似度阈值 0.5 (对标 GPT Researcher WrittenContentCompressor)
-            threshold = 0.5
-            scored: list[tuple[float, str]] = []
-            for i, sec_vec in enumerate(section_vecs):
-                score = self._cosine_similarity(query_vec, sec_vec)
-                if score >= threshold:
-                    scored.append((score, written_sections[i].get("content", "")))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return [content for _, content in scored[:max_results]]
-        except Exception as e:  # noqa: BLE001
-            logger.warning("WrittenContent 去重失败: %s", e)
-            return []
 
 
 class SlidingWindowCompressor:

@@ -37,7 +37,8 @@ class CrossRefSearcher(BaseSearcher):
         super().__init__(settings)
         self.base_url = "https://api.crossref.org/works"
         # mailto 用于 polite pool, 提高配额
-        self.mailto = getattr(settings, "crossref_mailto", "") or ""
+        # P0-2: 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+        self.mailto = settings.crossref_mailto or ""
 
     async def search(
         self,

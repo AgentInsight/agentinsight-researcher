@@ -6,10 +6,11 @@
 # 依赖顺序: postgres → redis → qdrant → embeddings → agent (rerank 可选)
 # 所有环境变量统一从 .env 加载 (env_file + compose 插值), compose 文件不含硬编码
 # rerank 容器通过 profile 控制, 默认不启动; 启用: docker compose --profile rerank up -d
+# 镜像版本/TEI 服务端配置等 compose-only 参数已硬编码 (V4 简化: 从 .env 移除)
 
 services:
   postgres:
-    image: docker.io/postgres:${POSTGRES_VERSION:-17}
+    image: docker.io/postgres:17
     restart: always
     env_file:
       - .env
@@ -26,7 +27,7 @@ services:
       - agentinsight-net
 
   redis:
-    image: docker.io/redis:${REDIS_VERSION:-8}
+    image: docker.io/redis:8
     restart: always
     env_file:
       - .env
@@ -35,7 +36,7 @@ services:
       $${REDIS_AUTH:+--requirepass \"$$REDIS_AUTH\"}
       --maxmemory-policy noeviction"
     ports:
-      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
+      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -47,22 +48,22 @@ services:
       - agentinsight-net
 
   qdrant:
-    image: qdrant/qdrant:${QDRANT_VERSION:-v1.18.0}
+    image: qdrant/qdrant:v1.18.0
     restart: always
     env_file:
       - .env
     environment:
-      QDRANT__LOG_LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
-      QDRANT__SERVICE__GRPC_PORT: ${QDRANT_GRPC_PORT:-6334}
-      QDRANT__SERVICE__HTTP_PORT: ${QDRANT_HTTP_PORT:-6333}
+      QDRANT__LOG_LEVEL: INFO
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__STATIC_API_KEY: ${QDRANT_API_KEY:-}
     ports:
-      - "${QDRANT_HTTP_PORT:-6333}:${QDRANT_HTTP_PORT:-6333}"
-      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:${QDRANT_GRPC_PORT:-6334}"
+      - "6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/$${QDRANT_HTTP_PORT:-6333}' || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -74,26 +75,27 @@ services:
     # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取
     # 生产联网模式: 模型权重由 TEI 容器首次启动时从 HuggingFace 下载到命名卷 embeddings_models 缓存
     # (AGENTS.md 第 12 章允许生产联网模式联网下载; 不挂载本地 packages/models/, 与离线模式区分)
-    image: ${TEI_IMAGE:-tei-embedding}:${TEI_TAG:-cpu-1.9}
+    image: tei-embedding:cpu-1.9
     restart: always
     env_file:
       - .env
     environment:
-      MODEL_ID: ${EMBEDDINGS_MODEL_PATH:-/data/bge-large-zh-v1.5}
-      DTYPE: ${EMBEDDINGS_DTYPE:-float32}
-      MAX_BATCH_TOKENS: ${EMBEDDINGS_MAX_BATCH_TOKENS:-16384}
+      # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
+      MODEL_ID: /data/bge-large-zh-v1.5
+      DTYPE: float32
+      MAX_BATCH_TOKENS: 16384
       MAX_CLIENT_BATCH_SIZE: ${EMBEDDINGS_MAX_CLIENT_BATCH_SIZE:-4}
       MAX_CONCURRENT_REQUESTS: ${EMBEDDINGS_TEI_MAX_CONCURRENT:-16}
-      AUTO_TRUNCATE: ${EMBEDDINGS_AUTO_TRUNCATE:-true}
-      PORT: "${EMBEDDINGS_PORT:-8088}"
+      AUTO_TRUNCATE: "true"
+      PORT: "8088"
       API_KEY: ${EMBEDDINGS_API_KEY:-}
     ports:
-      - "${EMBEDDINGS_PORT:-8088}:${EMBEDDINGS_PORT:-8088}"
+      - "8088:8088"
     volumes:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - embeddings_models:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${EMBEDDINGS_PORT:-8088}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -107,25 +109,26 @@ services:
     # 同时需在 .env 设置 RERANK_ENABLED=true
     # 生产联网模式: 模型权重由 TEI 容器首次启动时从 HuggingFace 下载到命名卷 rerank_models 缓存
     profiles: ["rerank"]
-    image: ${TEI_IMAGE:-tei-embedding}:${TEI_TAG:-cpu-1.9}
+    image: tei-embedding:cpu-1.9
     restart: always
     env_file:
       - .env
     environment:
-      MODEL_ID: ${RERANK_MODEL_PATH:-/data/bge-reranker-v2-m3}
-      DTYPE: ${RERANK_DTYPE:-float16}
-      MAX_BATCH_TOKENS: ${RERANK_MAX_BATCH_TOKENS:-16384}
-      MAX_CLIENT_BATCH_SIZE: ${RERANK_MAX_CLIENT_BATCH_SIZE:-32}
-      MAX_CONCURRENT_REQUESTS: ${RERANK_MAX_CONCURRENT_REQUESTS:-512}
-      PORT: "${RERANK_PORT:-8089}"
+      # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
+      MODEL_ID: /data/bge-reranker-v2-m3
+      DTYPE: float16
+      MAX_BATCH_TOKENS: 16384
+      MAX_CLIENT_BATCH_SIZE: 32
+      MAX_CONCURRENT_REQUESTS: 512
+      PORT: "8089"
       API_KEY: ${RERANK_API_KEY:-}
     ports:
-      - "${RERANK_PORT:-8089}:${RERANK_PORT:-8089}"
+      - "8089:8089"
     volumes:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - rerank_models:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${RERANK_PORT:-8089}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -142,10 +145,13 @@ services:
     env_file:
       - .env
     ports:
-      - "${AGENT_PORT:-8066}:${AGENT_PORT:-8066}"
+      - "8066:8066"
     volumes:
       - session_data:/app/data/sessions
       - uploads_data:/tmp/uploads
+      # FastEmbed ONNX 模型文件 (bge-small-zh-v1.5, 上下文压缩精排用)
+      # 生产联网模式: 模型文件已在 Dockerfile 中 COPY 到镜像内
+      # 如需外部挂载覆盖: ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
     depends_on:
       redis:
         condition: service_healthy

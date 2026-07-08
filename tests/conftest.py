@@ -81,7 +81,15 @@ def _is_agent_reachable() -> bool:
 
 
 # 需要容器栈运行的测试 marker (AGENTS.md 第 13 章)
-_SERVICE_DEPENDENT_MARKS = {"functional", "regression", "api", "e2e", "performance"}
+# exploratory: 探索性测试 (边界/降级场景), 同样依赖容器栈
+_SERVICE_DEPENDENT_MARKS = {
+    "functional",
+    "regression",
+    "api",
+    "e2e",
+    "performance",
+    "exploratory",
+}
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

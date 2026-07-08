@@ -39,7 +39,7 @@ def create_revision_guard(
 
     专用于 reviewer → reviser → reviewer 评审-修订循环的条件边路由.
     返回 "accept" (通过) 或 "revise" (需修订), 由调用方映射到具体节点:
-        reviewer: {"accept": "visualizer", "revise": "reviser"}
+        reviewer: {"accept": "publisher", "revise": "reviser"}
 
     守卫: revision_count >= max_revisions 时强制 accept, 防止无限循环.
     revision_count 由 reviser 节点每次返回 1 累加 (Annotated[int, operator.add] reducer).

@@ -423,35 +423,66 @@ th {{ background: #f8f9fa; font-weight: 600; }}
         sources: list[dict[str, Any]] | None = None,
         agent_role_server: str = "",
         research_mode: str = "",
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """一次报告生成多种格式 (P2-01).
 
         返回 dict, key 为格式名 (markdown/html/pdf_path/docx/json/latex/epub),
         value 为对应内容 (字符串/字节/文件路径).
+
+        P1-4: 改用 asyncio.gather 并行执行多种格式导出, 延迟不再随格式数线性增长;
+        return_exceptions=True 隔离单个格式失败, 不影响其他格式.
+        每个 publish() 内部已有 trace_chain 包裹, 并行后仍保留追踪能力.
+
+        接入主流程: routes.py 的 download_report 端点可接收 formats=list[str] 参数,
+        调用此方法批量导出. user_id/session_id 透传给 publish() 用于 trace_chain.
         """
-        results: dict[str, Any] = {}
+        # 格式名 → 结果 key 映射; pdf 取 path 字段, 其他取 content 字段
+        fmt_to_key = {
+            "markdown": "markdown",
+            "html": "html",
+            "pdf": "pdf_path",
+            "docx": "docx",
+            "json": "json",
+            "latex": "latex",
+            "epub": "epub",
+        }
+
+        # 过滤未知格式 (与原逻辑一致, 跳过并 warning)
+        valid_formats: list[str] = []
         for fmt in formats:
             fmt_lower = fmt.lower()
-            if fmt_lower == "markdown":
-                results["markdown"] = report_md
-            elif fmt_lower == "html":
-                results["html"] = await asyncio.to_thread(self._md_to_html, report_md)
-            elif fmt_lower == "pdf":
-                results["pdf_path"] = await self._md_to_pdf(report_md)
-            elif fmt_lower == "docx":
-                results["docx"] = await asyncio.to_thread(self._to_docx, report_md, title=title)
-            elif fmt_lower == "json":
-                results["json"] = self._to_json(
-                    report_md,
-                    title=title,
-                    sources=sources or [],
-                    agent_role_server=agent_role_server,
-                    research_mode=research_mode,
-                )
-            elif fmt_lower == "latex":
-                results["latex"] = await asyncio.to_thread(self._to_latex, report_md)
-            elif fmt_lower == "epub":
-                results["epub"] = await asyncio.to_thread(self._to_epub, report_md, title=title)
+            if fmt_lower in fmt_to_key:
+                valid_formats.append(fmt_lower)
             else:
                 logger.warning("未知导出格式: %s (跳过)", fmt)
+
+        # 并行调用 publish(), 每个调用内部 trace_chain 包裹保留
+        gathered = await asyncio.gather(
+            *[
+                self.publish(
+                    report_md,
+                    output_format=fmt,
+                    title=title,
+                    sources=sources,
+                    agent_role_server=agent_role_server,
+                    research_mode=research_mode,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                for fmt in valid_formats
+            ],
+            return_exceptions=True,
+        )
+
+        # 按 key 组织结果; 单格式异常隔离, 仅 warning 不影响其他格式
+        results: dict[str, Any] = {}
+        for fmt, outcome in zip(valid_formats, gathered, strict=False):
+            if isinstance(outcome, BaseException):
+                logger.warning("格式 %s 导出失败: %s", fmt, outcome)
+                continue
+            key = fmt_to_key[fmt]
+            # pdf 格式返回文件路径, 其他格式返回 content
+            results[key] = outcome.get("path") if fmt == "pdf" else outcome.get("content")
         return results

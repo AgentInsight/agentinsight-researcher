@@ -33,7 +33,8 @@ async def get_redis_client(settings: Settings | None = None) -> aioredis.Redis |
     if _client is not None:
         return _client
     settings = settings or get_settings()
-    redis_url = getattr(settings, "redis_url", None) or None
+    # P0-2: 所有字段均已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+    redis_url = settings.redis_url or None
     if not redis_url:
         return None
 
@@ -41,9 +42,9 @@ async def get_redis_client(settings: Settings | None = None) -> aioredis.Redis |
         if _client is not None:
             return _client
         try:
-            redis_auth = getattr(settings, "redis_auth", None) or None
-            max_connections = getattr(settings, "redis_max_connections", 10) or 10
-            socket_timeout = getattr(settings, "redis_socket_timeout", 5.0) or 5.0
+            redis_auth = settings.redis_auth or None
+            max_connections = settings.redis_max_connections or 10
+            socket_timeout = settings.redis_socket_timeout or 5.0
             _client = aioredis.from_url(
                 redis_url,
                 encoding="utf-8",

@@ -28,7 +28,6 @@ import httpx
 import pytest
 
 from tests.performance.conftest import (
-    AGENT_URL,
     make_http_client,
 )
 
@@ -77,9 +76,7 @@ def test_health_endpoint_latency(agent_url: str, perf_thresholds: dict[str, floa
         elapsed_ms = (time.perf_counter() - start) * 1000
 
     assert r.status_code == 200, f"/health 非 200: {r.status_code}"
-    assert elapsed_ms < threshold_ms, (
-        f"/health 延迟 {elapsed_ms:.1f}ms 超过阈值 {threshold_ms}ms"
-    )
+    assert elapsed_ms < threshold_ms, f"/health 延迟 {elapsed_ms:.1f}ms 超过阈值 {threshold_ms}ms"
     print(f"\n[health] {elapsed_ms:.1f}ms (阈值 {threshold_ms}ms)")
 
 
@@ -127,9 +124,7 @@ def test_agent_discovery_latency(agent_url: str, perf_thresholds: dict[str, floa
         r = client.get(f"{agent_url}/.well-known/agent-discovery.json")
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-    assert r.status_code == 200, (
-        f"/.well-known/agent-discovery.json 非 200: {r.status_code}"
-    )
+    assert r.status_code == 200, f"/.well-known/agent-discovery.json 非 200: {r.status_code}"
     data = r.json()
     assert "name" in data, f"agent-discovery 缺少 name 字段: {data}"
     assert elapsed_ms < threshold_ms, (
@@ -141,9 +136,7 @@ def test_agent_discovery_latency(agent_url: str, perf_thresholds: dict[str, floa
 # ========== 短查询 (chitchat, 不走 graph) 延迟 ==========
 
 
-def test_short_query_first_token_latency(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_short_query_first_token_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证短查询流式首块延迟 < 3s (短查询保护不走 graph).
 
     P0-Future-06: 短查询直接返回 reply, 不走任何 graph.
@@ -173,9 +166,7 @@ def test_short_query_first_token_latency(
     print(f"\n[short_query_first_token] {first_chunk_time:.3f}s (阈值 {threshold_s}s)")
 
 
-def test_short_query_total_latency(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_short_query_total_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证短查询总延迟 P95 < 10s (短查询保护不走 graph).
 
     P0-Future-06: 短查询直接返回 reply, 不走任何 graph.
@@ -194,9 +185,7 @@ def test_short_query_total_latency(
                 json=_chat_payload("你好", stream=False, session_id=sid),
             )
             elapsed = time.perf_counter() - start
-            assert r.status_code == 200, (
-                f"短查询 #{i} 非 200: {r.status_code} {r.text}"
-            )
+            assert r.status_code == 200, f"短查询 #{i} 非 200: {r.status_code} {r.text}"
             elapsed_list.append(elapsed)
 
     # 计算 P95 (对 5 个样本, P95 = 排序后第 95 百分位 = 最大值)
@@ -220,9 +209,7 @@ def test_short_query_total_latency(
 # ========== 研究查询首块延迟 (含意图分类, 不含完整研究) ==========
 
 
-def test_stream_first_chunk_latency(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_stream_first_chunk_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证研究查询流式首块延迟 < 5s (含意图分类, 不含完整研究).
 
     研究查询走 researcher graph, 但首块 {"role":"assistant"} 在 graph 执行前 yield.

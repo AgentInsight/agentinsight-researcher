@@ -87,9 +87,7 @@ async def test_deep_researcher_recursive_exploration(
             ],
         }
 
-    async def mock_generate_sub_queries(
-        query: str, breadth: int, **kwargs: Any
-    ) -> list[str]:
+    async def mock_generate_sub_queries(query: str, breadth: int, **kwargs: Any) -> list[str]:
         return [f"{query}-sub{i}" for i in range(breadth)]
 
     researcher._research_sub_query = mock_research_sub_query  # type: ignore[method-assign]
@@ -316,14 +314,10 @@ async def test_deep_researcher_handles_sub_query_failure(
             return {"context": "", "sources": []}
         return {
             "context": f"ctx-{sq}",
-            "sources": [
-                {"url": f"https://example.com/{sq}", "title": sq, "snippet": "..."}
-            ],
+            "sources": [{"url": f"https://example.com/{sq}", "title": sq, "snippet": "..."}],
         }
 
-    async def mock_generate_sub_queries(
-        query: str, breadth: int, **kwargs: Any
-    ) -> list[str]:
+    async def mock_generate_sub_queries(query: str, breadth: int, **kwargs: Any) -> list[str]:
         return ["good-query", "fail-query"]
 
     researcher._research_sub_query = mock_research_sub_query  # type: ignore[method-assign]

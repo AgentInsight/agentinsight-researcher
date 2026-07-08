@@ -166,6 +166,13 @@ class QueryIntent(StrEnum):
     OFF_TOPIC = "off_topic"  # 离题/闲聊 (问候/身份/娱乐/常识/私人问题) → 直接返回离题回复语
 
 
+# P1-8: llm_classify_fallback 字符串 → QueryIntent 映射 (字典查表取代 if-else)
+# 默认 OFF_TOPIC (业界标准: 走最轻路径); 仅 "research" 显式映射, 其他值兜底 OFF_TOPIC
+_FALLBACK_INTENT_MAP: dict[str, QueryIntent] = {
+    "research": QueryIntent.RESEARCH,
+}
+
+
 @dataclass
 class _RuleResult:
     """规则层分类结果(内部)."""
@@ -381,10 +388,10 @@ class QueryIntentClassifier:
 
         默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程).
         可通过 settings.llm_classify_fallback 配置为 "research" 覆盖.
+
+        P1-8: 字典查表取代 if-else (分支优化方案).
         """
-        if self.settings.llm_classify_fallback == "research":
-            return QueryIntent.RESEARCH
-        return QueryIntent.OFF_TOPIC
+        return _FALLBACK_INTENT_MAP.get(self.settings.llm_classify_fallback, QueryIntent.OFF_TOPIC)
 
     async def _classify_with_cache(self, query: str, has_report: bool) -> tuple[QueryIntent, str]:
         """带 Redis 缓存的 LLM 分类 (P1).

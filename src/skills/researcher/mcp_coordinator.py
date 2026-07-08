@@ -104,6 +104,49 @@ async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, An
         return []
 
 
+async def conduct_mcp_if_enabled(
+    settings: Settings,
+    sub_query: str,
+    user_id: str | None,
+    session_id: str | None,
+) -> list[str]:
+    """MCP 工具调用公共入口 (P1-5 DRY 收敛).
+
+    取代 deep_research.py:373 和 research_conductor.py:649 的重复 28 行 MCP 调用块.
+    两处原逻辑均为: if mcp_strategy != "disabled": try get_mcp + get_user_mcp_configs +
+    conduct_research + 拼接 context, except 降级 warn.
+
+    Args:
+        settings: 全局配置 (含 mcp_strategy / agent_name)
+        sub_query: 子查询 (MCP 工具调用的输入)
+        user_id: 用户 ID (None 时降级空字符串)
+        session_id: 会话 ID (用于 trace)
+
+    Returns:
+        MCP 上下文列表 (空列表表示未启用/失败/无配置). 调用方可直接 if mcp_contexts: 拼接.
+    """
+    if settings.mcp_strategy == "disabled":
+        return []
+
+    try:
+        mcp = get_mcp_coordinator()
+        mcp_configs = await get_user_mcp_configs(user_id or "", settings.agent_name)
+        if not mcp_configs:
+            return []
+
+        contexts = await mcp.conduct_research(
+            sub_query,
+            strategy=settings.mcp_strategy,
+            mcp_configs=mcp_configs,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return contexts or []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("MCP 工具调用失败 (不阻断): %s", e)
+        return []
+
+
 class MCPCoordinator:
     """MCP 协调器.
 
@@ -243,18 +286,15 @@ class MCPCoordinator:
                         logger.warning("MCP 配置 %s: stdio 模式缺少 command, 跳过", name)
                         continue
                     # args/env_vars 可能是 JSONB 字符串或已解析的 list/dict
+                    # 3.1.2: env_vars 接入 safe_json_parse_dict (含 json_repair + regex 兜底)
+                    from src.common.json_utils import safe_json_parse, safe_json_parse_dict
+
                     args = cfg.get("args")
                     if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except (json.JSONDecodeError, TypeError):
-                            args = None
+                        args = safe_json_parse(args, fallback=None)
                     env_vars = cfg.get("env_vars")
                     if isinstance(env_vars, str):
-                        try:
-                            env_vars = json.loads(env_vars)
-                        except (json.JSONDecodeError, TypeError):
-                            env_vars = None
+                        env_vars = safe_json_parse_dict(env_vars)
                     server_configs[name] = {
                         "command": command,
                         "args": args or [],
@@ -537,6 +577,42 @@ class MCPCoordinator:
         return [tool for _, tool in scored[:max_tools]]
 
     def clear_cache(self) -> None:
-        """清空缓存."""
+        """清空 MCPCoordinator 实例级缓存 (fast 策略复用缓存).
+
+        P1-04: MCP 配置 CRUD (create/update/delete/clone) 后应调用此方法失效缓存,
+        避免用户修改 MCP 配置后命中过期缓存. 同时清空模块级 _MCP_CACHE (TTL 缓存)
+        与 _client_cache (MultiServerMCPClient 缓存), 确保下次 conduct_research 重新加载.
+
+        调用时机:
+        - mcp_routes.create_mcp_config 后
+        - mcp_routes.update_mcp_config 后 (含 enabled 切换)
+        - mcp_routes.delete_mcp_config 后
+        - mcp_routes.clone_system_mcp_config 后
+
+        注: 模块级 _MCP_CACHE 按 (query, tool_name, tool_args) 哈希, 无法按 user_id
+        精细清理, 全量清空以失效所有用户的工具调用结果缓存 (TTL 兜底, 影响有限).
+        """
+        # 实例级缓存 (fast 策略复用)
         self._cache = None
         self._cache_query = None
+        # MultiServerMCPClient 缓存 (避免配置变更后复用旧客户端)
+        self._client_cache.clear()
+        # 模块级 TTL 缓存 (工具调用结果, 全量清空)
+        _MCP_CACHE.clear()
+
+
+# ========== 全局单例 (P1-5: 供 conduct_mcp_if_enabled 公共方法使用) ==========
+_mcp_coordinator_instance: MCPCoordinator | None = None
+
+
+def get_mcp_coordinator() -> MCPCoordinator:
+    """获取全局 MCPCoordinator 单例 (P1-5).
+
+    复用全局 LLMClient 单例, 避免重复构造导致 step_costs 累计丢失.
+    deep_research / research_conductor 通过 conduct_mcp_if_enabled 共享同一实例,
+    fast 策略缓存跨调用方复用 (同一 query 不重复调用 MCP 工具).
+    """
+    global _mcp_coordinator_instance
+    if _mcp_coordinator_instance is None:
+        _mcp_coordinator_instance = MCPCoordinator()
+    return _mcp_coordinator_instance

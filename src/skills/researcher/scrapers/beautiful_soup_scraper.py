@@ -53,7 +53,8 @@ class BeautifulSoupScraper(BaseScraper):
                     )
                     html = html[:max_html_size]
 
-                soup = BeautifulSoup(html, "lxml", from_encoding=response.encoding)
+                # str (Unicode) 输入时不应传 from_encoding, 否则 bs4 发出 UserWarning
+                soup = BeautifulSoup(html, "lxml")
 
                 # 提取标题
                 title = ""
@@ -71,7 +72,7 @@ class BeautifulSoupScraper(BaseScraper):
                 image_urls: list[str] = []
                 for img in soup.find_all("img", limit=20):
                     src = img.get("src") or img.get("data-src")
-                    if src and src.startswith("http"):
+                    if isinstance(src, str) and src.startswith("http"):
                         image_urls.append(src)
 
                 return {

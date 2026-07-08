@@ -41,6 +41,10 @@ _SECTION_FAILURE_PLACEHOLDER = "[此章节生成失败, 请重试]"
 # V4-P1-03: LLM 调用单章节重试次数 (失败后再试 1 次)
 _LLM_RETRY_TIMES = 1
 
+# P1-1: 短报告 FAST tier 阈值 — word_limit <= 此值时优先用 FAST tier (低延迟),
+# 失败回退 SMART tier. 默认 2000 字 (FAST tier fast_token_limit=3000 足以覆盖).
+_FAST_TIER_WORD_THRESHOLD: int = 2000
+
 # V4-P2-01: 报告风格预设描述 (用于 detailed_report 内联 prompt 注入,
 # 与 prompts.py DefaultPromptFamily._STYLE_PROMPTS 保持一致)
 _REPORT_STYLE_DESCRIPTIONS: dict[str, str] = {
@@ -251,18 +255,51 @@ class ReportGenerator:
                 prompt += f"\n\n{lang_instruction}"
 
             messages = [{"role": "user", "content": prompt}]
+            # P1-1: 短报告 (word_limit <= _FAST_TIER_WORD_THRESHOLD) 优先用 FAST tier
+            # (低延迟), 失败回退 SMART tier; 长报告直接用 SMART tier (支持 2k+ 字长响应).
             # V4-P1-03: LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
-            report_md = await self._achat_with_retry(
-                messages,
-                tier=LLMTier.SMART,
-                temperature=0.4,
-                max_tokens=self.settings.smart_token_limit,
-                user_id=user_id,
-                session_id=session_id,
-                span_name="writer-llm",
-                step="writer",
-                fallback=_SECTION_FAILURE_PLACEHOLDER,
-            )
+            use_fast_tier = word_limit <= _FAST_TIER_WORD_THRESHOLD
+            if use_fast_tier:
+                report_md = await self._achat_with_retry(
+                    messages,
+                    tier=LLMTier.FAST,
+                    temperature=0.4,
+                    max_tokens=self.settings.fast_token_limit,
+                    user_id=user_id,
+                    session_id=session_id,
+                    span_name="writer-llm-fast",
+                    step="writer",
+                    fallback=_SECTION_FAILURE_PLACEHOLDER,
+                )
+                # P1-1: FAST tier 失败 (返回占位文本) 时回退 SMART tier
+                if report_md == _SECTION_FAILURE_PLACEHOLDER:
+                    logger.info(
+                        "P1-1: FAST tier 失败, 回退 SMART tier (word_limit=%d)",
+                        word_limit,
+                    )
+                    report_md = await self._achat_with_retry(
+                        messages,
+                        tier=LLMTier.SMART,
+                        temperature=0.4,
+                        max_tokens=self.settings.smart_token_limit,
+                        user_id=user_id,
+                        session_id=session_id,
+                        span_name="writer-llm",
+                        step="writer",
+                        fallback=_SECTION_FAILURE_PLACEHOLDER,
+                    )
+            else:
+                report_md = await self._achat_with_retry(
+                    messages,
+                    tier=LLMTier.SMART,
+                    temperature=0.4,
+                    max_tokens=self.settings.smart_token_limit,
+                    user_id=user_id,
+                    session_id=session_id,
+                    span_name="writer-llm",
+                    step="writer",
+                    fallback=_SECTION_FAILURE_PLACEHOLDER,
+                )
 
             # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
             report_md = self._normalize_markdown(report_md)
@@ -386,24 +423,25 @@ class ReportGenerator:
             references = self._build_references(sources)
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
-            # 步骤 2: LLM 生成子主题 (3-5 个)
-            subtopics = await self._generate_subtopics(
-                query,
-                combined_context,
-                role_persona=role_persona,
-                user_id=user_id,
-                session_id=session_id,
-            )
-
-            # 步骤 3: 写引言
-            introduction = await self._write_introduction(
-                query,
-                combined_context,
-                references,
-                role_persona=role_persona,
-                tone=tone,
-                user_id=user_id,
-                session_id=session_id,
+            # 步骤 2+3: P1-2 子主题生成与引言并行 (两者均只依赖 query/contexts/
+            # references/role_persona, 无数据依赖, 并行可节省引言 LLM 调用延迟 ~2-3s)
+            subtopics, introduction = await asyncio.gather(
+                self._generate_subtopics(
+                    query,
+                    combined_context,
+                    role_persona=role_persona,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
+                self._write_introduction(
+                    query,
+                    combined_context,
+                    references,
+                    role_persona=role_persona,
+                    tone=tone,
+                    user_id=user_id,
+                    session_id=session_id,
+                ),
             )
 
             # 步骤 4: V4-P0-02 子主题并行嵌套研究 + 去重 + 写章节

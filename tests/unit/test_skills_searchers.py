@@ -199,7 +199,7 @@ def test_register_searcher_adds_to_registry() -> None:
 
     registry = get_registered_searchers()
     assert "test_custom_searcher" in registry
-    assert registry["test_custom_searcher"] is _TestSearcher
+    assert registry["test_custom_searcher"]["class"] is _TestSearcher
 
 
 def test_register_searcher_returns_class_unchanged() -> None:
@@ -225,4 +225,4 @@ def test_register_searcher_overrides_existing() -> None:
         name = "v2"
 
     registry = get_registered_searchers()
-    assert registry["test_override"] is _TestSearcher2
+    assert registry["test_override"]["class"] is _TestSearcher2

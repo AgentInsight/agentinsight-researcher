@@ -16,7 +16,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import asyncpg
 import pytest
 
 from src.config.settings import Settings
@@ -108,7 +107,9 @@ class TestReportStoreDsn:
             _env_file=None,
         )
         store = ReportStore(settings)
-        dsn = store._dsn()
+        # _dsn() 已弃用, 用 pytest.warns 显式捕获 DeprecationWarning 避免 warning 噪声
+        with pytest.warns(DeprecationWarning, match="deprecated since P0-4"):
+            dsn = store._dsn()
         assert dsn == "postgresql://user:pass@host:5432/db"
         assert "asyncpg" not in dsn
 
@@ -116,7 +117,8 @@ class TestReportStoreDsn:
         """_dsn() 以 postgresql:// 开头."""
         settings = Settings(_env_file=None)
         store = ReportStore(settings)
-        dsn = store._dsn()
+        with pytest.warns(DeprecationWarning, match="deprecated since P0-4"):
+            dsn = store._dsn()
         assert dsn.startswith("postgresql://")
 
     def test_postgres_dsn_has_asyncpg_prefix(self) -> None:
@@ -180,13 +182,34 @@ def _make_settings() -> Settings:
     )
 
 
-def _install_mock_connect(monkeypatch: pytest.MonkeyPatch, mock_conn: _MockConn) -> None:
-    """注入 mock asyncpg.connect."""
+class _MockPool:
+    """伪造 asyncpg.Pool (P0-4: report_store 改用 get_pool 连接池)."""
 
-    async def _mock_connect(_dsn: str) -> _MockConn:
-        return mock_conn
+    def __init__(self, conn: _MockConn) -> None:
+        self._conn = conn
 
-    monkeypatch.setattr(asyncpg, "connect", _mock_connect)
+    def acquire(self) -> Any:
+        """返回 async context manager, yield 伪造连接."""
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _acquire() -> Any:
+            yield self._conn
+
+        return _acquire()
+
+
+def _install_mock_pool(monkeypatch: pytest.MonkeyPatch, mock_conn: _MockConn) -> None:
+    """注入 mock get_pool (P0-4: report_store 通过 get_pool 获取连接池, 不再直连).
+
+    mock get_pool 返回 _MockPool, 其 acquire() yield _MockConn.
+    """
+
+    async def _mock_get_pool(_settings: Any = None) -> _MockPool:
+        return _MockPool(mock_conn)
+
+    monkeypatch.setattr("src.memory.report_store.get_pool", _mock_get_pool)
 
 
 class TestSaveReport:
@@ -196,7 +219,7 @@ class TestSaveReport:
         """save_report 成功返回 report_id 字符串."""
         rid = uuid.uuid4()
         mock_conn = _MockConn(fetchrow_result={"report_id": rid})
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         report_id = await store.save_report(
@@ -210,7 +233,6 @@ class TestSaveReport:
             agent_role="financial_analyst",
         )
         assert report_id == str(rid)
-        assert mock_conn.closed is True
         # 验证 fetchrow 被调用 (INSERT ... RETURNING)
         assert len(mock_conn.fetchrow_calls) == 1
         query, args = mock_conn.fetchrow_calls[0]
@@ -221,7 +243,7 @@ class TestSaveReport:
     async def test_no_row_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """save_report 无 RETURNING 行时返回空字符串."""
         mock_conn = _MockConn(fetchrow_result=None)
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         report_id = await store.save_report(
@@ -258,7 +280,7 @@ class TestGetReport:
                 "updated_at": now,
             }
         )
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         result = await store.get_report(str(rid))
@@ -266,17 +288,15 @@ class TestGetReport:
         assert result["report_id"] == str(rid)
         assert result["sources"] == [{"title": "src1"}]
         assert result["created_at"] == now.isoformat()
-        assert mock_conn.closed is True
 
     async def test_not_found_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """get_report 未找到时返回 None."""
         mock_conn = _MockConn(fetchrow_result=None)
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         result = await store.get_report(str(uuid.uuid4()))
         assert result is None
-        assert mock_conn.closed is True
 
 
 class TestListReports:
@@ -302,13 +322,12 @@ class TestListReports:
                 }
             ]
         )
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         results = await store.list_reports(session_id="sess-1", limit=10, offset=0)
         assert len(results) == 1
         assert results[0]["report_id"] == str(rid)
-        assert mock_conn.closed is True
         # 验证查询含 session_id 过滤
         query, args = mock_conn.fetch_calls[0]
         assert "WHERE session_id = $1" in query
@@ -317,7 +336,7 @@ class TestListReports:
     async def test_by_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_reports 按 user_id 过滤."""
         mock_conn = _MockConn(fetch_result=[])
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         results = await store.list_reports(user_id="user-1", limit=5, offset=0)
@@ -329,7 +348,7 @@ class TestListReports:
     async def test_by_session_and_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_reports 同时按 session_id 和 user_id 过滤 (AND 条件, 数据隔离)."""
         mock_conn = _MockConn(fetch_result=[])
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         results = await store.list_reports(
@@ -342,7 +361,7 @@ class TestListReports:
     async def test_no_filter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_reports 无过滤时返回全部 (无 WHERE 子句)."""
         mock_conn = _MockConn(fetch_result=[])
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         results = await store.list_reports(limit=20, offset=0)
@@ -357,19 +376,18 @@ class TestDeleteReport:
     async def test_success_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """delete_report 删除成功 (DELETE 1) 返回 True."""
         mock_conn = _MockConn(execute_result="DELETE 1")
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         result = await store.delete_report(str(uuid.uuid4()))
         assert result is True
-        assert mock_conn.closed is True
         query, _ = mock_conn.execute_calls[0]
         assert "DELETE FROM research_reports" in query
 
     async def test_not_found_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """delete_report 报告不存在 (DELETE 0) 返回 False."""
         mock_conn = _MockConn(execute_result="DELETE 0")
-        _install_mock_connect(monkeypatch, mock_conn)
+        _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
         result = await store.delete_report(str(uuid.uuid4()))

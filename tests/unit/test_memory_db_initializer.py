@@ -94,7 +94,13 @@ class TestInitDatabase:
         assert mock_conn.closed is True
 
     async def test_dsn_replaces_asyncpg_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DSN 替换: postgresql+asyncpg:// → postgresql://."""
+        """DSN 替换: postgresql+asyncpg:// → postgresql://.
+
+        init_database 调用 asyncpg.connect 两次:
+        1. 连维护库 (postgres) 检查/创建目标数据库
+        2. 连目标库 (db) 执行 init.sql
+        两次 DSN 均应为 postgresql:// 前缀 (非 postgresql+asyncpg://).
+        """
         captured_dsn: list[str] = []
         mock_conn = _MockConn()
 
@@ -112,9 +118,14 @@ class TestInitDatabase:
             _env_file=None,
         )
         await init_database(settings)
-        assert len(captured_dsn) == 1
-        assert captured_dsn[0] == "postgresql://user:pass@host:5432/db"
-        assert "asyncpg" not in captured_dsn[0]
+        # 两次连接: 维护库 + 目标库
+        assert len(captured_dsn) == 2
+        # 所有 DSN 均为 postgresql:// 前缀
+        for dsn in captured_dsn:
+            assert dsn.startswith("postgresql://")
+            assert "asyncpg" not in dsn
+        # 第二次连接到目标库 (db) 执行 init.sql
+        assert captured_dsn[1] == "postgresql://user:pass@host:5432/db"
 
     async def test_execute_exception_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """conn.execute 抛异常时返回 False (不阻断启动)."""

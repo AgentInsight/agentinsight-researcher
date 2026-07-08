@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 # 优先 ddgs 新包名 (v8+), 回退 duckduckgo_search 旧包名 (v6/v7)
@@ -16,6 +17,10 @@ from typing import Any
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
+
+# P1-5: DuckDuckGo 搜索超时保护 (秒)
+# settings 暂无 search_timeout 字段, 使用常量; 网络挂起时强制降级返回空列表, 避免研究流程卡死
+DUCKDUCKGO_TIMEOUT = 30
 
 # DDGS 可能为 None (两个包都未安装时), 需显式声明联合类型以满足 mypy strict
 DDGS: type[Any] | None
@@ -73,7 +78,7 @@ class DuckDuckGoSearcher(BaseSearcher):
                 return []
             try:
                 # ddgs 是同步库, 用 asyncio.to_thread 包装
-                import asyncio
+                # P1-5: 用 asyncio.wait_for 包裹, 防止网络挂起导致整个研究流程卡死
 
                 def _sync_search() -> list[dict[str, Any]]:
                     results: list[dict[str, Any]] = []
@@ -97,8 +102,27 @@ class DuckDuckGoSearcher(BaseSearcher):
                                 )
                     return results
 
-                results = await asyncio.to_thread(_sync_search)
-                results = self._filter_by_domains(results, query_domains)
+                try:
+                    raw_results = await asyncio.wait_for(
+                        asyncio.to_thread(_sync_search),
+                        timeout=DUCKDUCKGO_TIMEOUT,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "DuckDuckGo 搜索超时 (>%ds), 降级返回空列表: query=%r",
+                        DUCKDUCKGO_TIMEOUT,
+                        query[:100],
+                    )
+                    span.update(
+                        metadata={
+                            "tool_name": "duckduckgo",
+                            "success": False,
+                            "error": f"timeout after {DUCKDUCKGO_TIMEOUT}s",
+                            "timeout": True,
+                        }
+                    )
+                    return []
+                results = self._filter_by_domains(raw_results, query_domains)
                 span.update(
                     output={"results_count": len(results)},
                     metadata={"tool_name": "duckduckgo", "success": True},

@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # ========== 图像生成 (P2-06 报告配图, deepseek-v4-flash) ==========
     # 用户明确要求: 用 deepseek-v4-flash (非 gemini). 通过 LiteLLM aimage_generation 调用.
     # 注意: deepseek-v4-flash 图像生成能力假设支持, 实际以官方文档为准.
-    image_generation_enabled: bool = False  # 默认关闭, 启用后报告生成配图
+    image_generation_enabled: bool = True  # 默认启用, 报告生成配图
     image_model: str = "deepseek/deepseek-v4-flash"  # LiteLLM 路由前缀 (复用 deepseek_api_key)
     image_size: str = "1024x1024"
     image_quality: str = "standard"
@@ -95,7 +95,6 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     qdrant_collection: str = "agents"
     qdrant_vector_size: int = 1024
-    qdrant_distance: str = "Cosine"
 
     # Qdrant HNSW 索引参数调优 (P0-03)
     qdrant_hnsw_m: int = 32  # HNSW 图连接数 (默认 16, 中文建议 32)
@@ -106,7 +105,6 @@ class Settings(BaseSettings):
     # ========== Embeddings (AGENTS.md 第 1/7 章, 远程 TEI) ==========
     embeddings_base_url: str = "http://embeddings:8088"
     embeddings_model: str = "BAAI/bge-large-zh-v1.5"
-    embeddings_dimension: int = 1024
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
     embeddings_max_client_batch_size: int = (
         4  # 客户端单次 TEI 请求上限 (P0-1 修复: 16→4, 匹配 TEI CPU max_batch_requests=4)
@@ -114,6 +112,10 @@ class Settings(BaseSettings):
     # P0-1 根因: 16 texts/请求 → TEI 内部分 4 推理批次 → 占 4 permits; Semaphore(3) × 4 = 12 permits 需求 > 4 可用 → 429
     # 修复: 4 texts/请求 → 1 推理批次 → 1 permit; Semaphore(3) × 1 = 3 permits < 4 可用 → 无 429
     embeddings_max_concurrent: int = 3  # 客户端并发限流 (3 HTTP 请求 × 1 permit = 3, 留 1 余量)
+    # TEI 服务端并发 (compose 插值用, 与客户端 embeddings_max_concurrent 不同)
+    # embeddings_max_concurrent: 客户端 HTTP 请求并发 (业务代码读取)
+    # embeddings_tei_max_concurrent: TEI 服务端 MAX_CONCURRENT_REQUESTS (compose 插值, 业务代码不读取)
+    embeddings_tei_max_concurrent: int = 16
     # P1-04: 429 重试配置 (指数退避)
     embeddings_max_retries: int = 3
     embeddings_retry_base_delay: float = 0.5  # 基础延迟 (秒), 实际 = base * 2^attempt
@@ -129,7 +131,7 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_db: str = "agents"
-    postgres_user: str = "agentinsight"
+    postgres_user: str = "agis"
     postgres_password: str | None = None
     postgres_connection_pool_size: int = 10
     # P2-6: PostgresSaver AsyncConnectionPool 连接池 min/max 配置化 (按负载调整)
@@ -157,6 +159,9 @@ class Settings(BaseSettings):
     # ========== Redis (AGENTS.md 第 1/6 章) ==========
     redis_url: str = "redis://redis:6379/0"
     redis_auth: str | None = None  # Redis 鉴权密码 (与 docker-compose REDIS_AUTH 对齐)
+    # Redis 连接池调优 (V4-P0: socket_timeout/max_connections 从 .env 暴露, 业务代码读取)
+    redis_socket_timeout: float = 5.0  # 命令执行超时 (秒), 超时抛 ConnectionError
+    redis_max_connections: int = 50  # 连接池上限 (高并发场景调优)
     # Redis 缓存 LRU 淘汰 (P1-03)
     redis_cache_max_size: int = 1000  # LRU 最大缓存条目数 (超过时淘汰最久未访问)
     redis_cache_lru_enabled: bool = True  # 是否启用 LRU 淘汰 (默认 True, 关闭则仅 TTL)
@@ -164,7 +169,7 @@ class Settings(BaseSettings):
     # ========== 可观测性 (AGENTS.md 第 10 章) ==========
     agentinsight_public_key: str | None = None
     agentinsight_secret_key: str | None = None
-    agentinsight_host: str = "https://agentinsight.goldebridge.com"
+    agentinsight_host: str = "https://agent.goldebridge.com"
     tracing_embedding_sample_rate: float = 0.5
 
     # ========== 用户身份解析 (AGENTS.md 第 8 章) ==========
@@ -208,6 +213,35 @@ class Settings(BaseSettings):
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
 
+    # ========== L2 BM25 分层过滤 (V4-P3 两层方案, 已移除 EmbeddingsFilter) ==========
+    # 两层路由: <8K Fast Path | >=8K BM25Filter (全量覆盖, 含 >50K 超长上下文)
+    # 性能: 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速)
+    # 零新依赖 (rank-bm25 + jieba 已声明)
+    bm25_filter_enabled: bool = True  # 默认启用, 替代 EmbeddingsFilter 全量路由
+    bm25_filter_char_threshold: int = 8000  # < 此值走 Fast Path 不压缩 (环境变量: BM25_FILTER_CHAR_THRESHOLD)
+    bm25_filter_char_upper: int = 50000  # [已弃用] EmbeddingsFilter 已移除, 保留配置供向后兼容
+    bm25_filter_top_k: int = 20  # 返回 Top-K (与 embeddings_filter_top_k 对齐)
+    bm25_filter_top_k_for_rerank: int = 50  # BM25 粗筛返回数量 (供 Embeddings 精排用, 环境变量: BM25_FILTER_TOP_K_FOR_RERANK)
+    bm25_filter_score_threshold: float = 0.0  # BM25 分数阈值 (0.0=仅过滤零分; BM25 分数无上界, 不可与 cosine 阈值复用)
+    bm25_filter_chunk_size: int = 1000  # 分块大小 (与 embeddings_filter_chunk_size 一致)
+    bm25_filter_chunk_overlap: int = 100  # 分块 overlap
+    bm25_filter_timeout: float = 5.0  # 本地计算超时 (秒, 远快于 EmbeddingsFilter 15s)
+
+    # ========== Embeddings 精排 (两阶段检索) ==========
+    # 总 chunk 数 > embeddings_rerank_chunk_threshold 时, 启用 Embeddings 精排:
+    #   BM25 先召回 bm25_filter_top_k_for_rerank 个候选, Embeddings 从中再选 embeddings_rerank_top_k 个
+    # 总 chunk 数 <= embeddings_rerank_chunk_threshold 时, 直接返回 BM25 结果
+    embeddings_rerank_top_k: int = 20  # Embeddings 精排后返回 Top-K (环境变量: EMBEDDINGS_RERANK_TOP_K)
+    embeddings_rerank_chunk_threshold: int = 30  # 启用精排的 chunk 数量阈值 (环境变量: EMBEDDINGS_RERANK_CHUNK_THRESHOLD)
+
+    # ========== FastEmbed 本地 Embeddings (上下文压缩用) ==========
+    # 用于 Embeddings 精排和 EmbeddingsFilter, 不依赖远程 TEI 服务
+    # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
+    fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
+    fastembed_model_path: str = "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
+    fastembed_max_length: int = 512  # 最大序列长度
+
     # ========== 搜索引擎 (用户需求 5, 中文优先) ==========
     bocha_api_key: str | None = None
     tavily_api_key: str | None = None
@@ -233,6 +267,9 @@ class Settings(BaseSettings):
     searx_url: str = "http://localhost:8080"  # SearXNG 自托管实例 URL (无需 Key)
     openalex_email: str = ""  # OpenAlex polite pool 邮箱 (可选, 无需 Key)
     max_search_results_per_query: int = 5
+    # 自定义搜索引擎 (searchers/custom.py 读取): endpoint + 查询参数名
+    custom_retriever_endpoint: str | None = None  # 自定义检索端点 URL, 留空则不启用
+    custom_retriever_arg: str = "query"  # 自定义检索端点的查询参数名 (默认 query)
 
     # ========== 抓取 (GPT Researcher 模式) ==========
     max_scraper_workers: int = 15
@@ -251,8 +288,6 @@ class Settings(BaseSettings):
     # Firecrawl (P1-Future-08)
     firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.dev"
-    # nodriver (P1-Future-08)
-    nodriver_enabled: bool = False  # 默认关闭, 需要时手动启用
 
     # ========== Token 优化 (GPT Researcher 模式) ==========
     similarity_threshold: float = 0.35
@@ -266,7 +301,7 @@ class Settings(BaseSettings):
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
     deep_research_adaptive: bool = False  # 自适应深度开关 (V4-P2-02, 默认关闭)
-    curate_sources: bool = False
+    curate_sources: bool = True
 
     # ========== V2 对齐 GPTR 优化 (V2-P0/P1) ==========
     # WrittenContentCompressor 跨子主题去重阈值 (对标 GPTR WrittenContentCompressor threshold=0.5)
@@ -385,6 +420,8 @@ class Settings(BaseSettings):
         "basic_report", "detailed_report", "deep_research", "summary", "subtopics"
     ] = "basic_report"
     total_words: int = 1200
+    # P2-05: 报告语言 (zh|en|ja|ko|fr), 默认 zh; report_generator._get_language_instruction 读取
+    report_language: str = "zh"
     # P1-02: 引用格式风格 (APA/MLA/Chicago/GB7714), 默认 APA.
     # 在 report_generator._format_sources 中读取, 代码层实现真实格式化 (优于 GPTR 仅 LLM 生成).
     report_format_style: Literal["APA", "MLA", "Chicago", "GB7714"] = "APA"
@@ -448,6 +485,8 @@ class Settings(BaseSettings):
     upload_dir: str = "/tmp/uploads"
     max_upload_size_mb: int = 50
     allowed_upload_extensions: str = "pdf,docx,md,txt,html,csv,xlsx,pptx"
+    # Azure Blob Storage 连接串 (document_loader 读取, 留空则不启用 Azure 加载)
+    azure_storage_connection_string: str | None = None
 
     # ========== AG2 框架 (P2-Future-06, 可选) ==========
     ag2_enabled: bool = False  # AG2 框架开关 (默认关闭, 启用后可用 AG2 替代 LangGraph)

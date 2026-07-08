@@ -31,9 +31,7 @@ import pytest
 
 from tests.performance.conftest import (
     AGENT_URL,
-    EMBEDDINGS_URL,
     QDRANT_COLLECTION,
-    QDRANT_URL,
     embeddings_auth_headers,
     make_async_http_client,
     make_http_client,
@@ -61,9 +59,7 @@ def _unique_session_id(prefix: str = "perf_thr") -> str:
 # ========== Embeddings (TEI 直连) 延迟 ==========
 
 
-def test_embeddings_single_latency(
-    embeddings_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_embeddings_single_latency(embeddings_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证单条文本嵌入延迟 < 2s (TEI /embed 单条).
 
     AGENTS.md 第 7 章: Embeddings bge-large-zh-v1.5, 固定 1024 维.
@@ -84,9 +80,7 @@ def test_embeddings_single_latency(
     vectors = r.json()
     assert isinstance(vectors, list) and len(vectors) == 1
     assert len(vectors[0]) == VECTOR_DIM, f"维度非 {VECTOR_DIM}: {len(vectors[0])}"
-    assert elapsed < threshold_s, (
-        f"单条嵌入延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
-    )
+    assert elapsed < threshold_s, f"单条嵌入延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
     print(f"\n[embeddings_single] {elapsed:.3f}s (阈值 {threshold_s}s)")
 
 
@@ -126,9 +120,7 @@ def test_embeddings_batch_10_latency(
     assert isinstance(vectors, list) and len(vectors) == len(texts)
     for i, vec in enumerate(vectors):
         assert len(vec) == VECTOR_DIM, f"第 {i} 个向量维度非 {VECTOR_DIM}: {len(vec)}"
-    assert elapsed < threshold_s, (
-        f"批量 10 条嵌入延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
-    )
+    assert elapsed < threshold_s, f"批量 10 条嵌入延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
     print(f"\n[embeddings_batch_10] {elapsed:.3f}s (阈值 {threshold_s}s)")
 
 
@@ -167,11 +159,7 @@ def test_qdrant_search_latency(
         "vector": query_vector,
         "limit": 5,
         "with_payload": False,
-        "filter": {
-            "must": [
-                {"key": "namespace", "match": {"value": test_namespace}}
-            ]
-        },
+        "filter": {"must": [{"key": "namespace", "match": {"value": test_namespace}}]},
     }
 
     with make_http_client(timeout=QDRANT_TIMEOUT) as client:
@@ -187,18 +175,11 @@ def test_qdrant_search_latency(
     # 集合不存在时跳过 (Agent 未启动), 由 conftest 的 service-dependent 跳过兜底
     if r.status_code == 404:
         pytest.skip(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在, 跳过搜索延迟测试")
-    assert r.status_code == 200, (
-        f"Qdrant 搜索非 200: {r.status_code} {r.text}"
-    )
+    assert r.status_code == 200, f"Qdrant 搜索非 200: {r.status_code} {r.text}"
     result = r.json()
     assert "result" in result, f"Qdrant 响应缺少 result 字段: {result}"
-    assert elapsed < threshold_s, (
-        f"Qdrant 搜索延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
-    )
-    print(
-        f"\n[qdrant_search] {elapsed:.3f}s (阈值 {threshold_s}s) "
-        f"hits={len(result['result'])}"
-    )
+    assert elapsed < threshold_s, f"Qdrant 搜索延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
+    print(f"\n[qdrant_search] {elapsed:.3f}s (阈值 {threshold_s}s) hits={len(result['result'])}")
 
 
 # ========== 并发短查询 (POST /v1/chat/completions) ==========
@@ -224,9 +205,7 @@ async def _run_short_query_async(
     return elapsed, r.status_code, sid
 
 
-def test_concurrent_short_queries_5(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_concurrent_short_queries_5(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 5 个并发短查询全部在 15s 内完成.
 
     P0-Future-06: 短查询不走 graph, 应支持并发.
@@ -245,10 +224,8 @@ def test_concurrent_short_queries_5(
     total_elapsed = time.perf_counter() - start
 
     # 验证全部成功
-    for i, (elapsed, status, sid) in enumerate(results):
-        assert status == 200, (
-            f"并发短查询 #{i} (sid={sid}) 非 200: {status}"
-        )
+    for i, (_elapsed, status, sid) in enumerate(results):
+        assert status == 200, f"并发短查询 #{i} (sid={sid}) 非 200: {status}"
 
     max_elapsed = max(elapsed for elapsed, _, _ in results)
     assert total_elapsed < threshold_s, (
@@ -262,9 +239,7 @@ def test_concurrent_short_queries_5(
     )
 
 
-def test_concurrent_short_queries_10(
-    agent_url: str, perf_thresholds: dict[str, float]
-) -> None:
+def test_concurrent_short_queries_10(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 10 个并发短查询全部在 30s 内完成.
 
     P0-Future-06: 短查询不走 graph, 应支持并发.
@@ -272,8 +247,16 @@ def test_concurrent_short_queries_10(
     """
     threshold_s = perf_thresholds["concurrent_10_s"]
     queries = [
-        "你好", "嗨", "在吗", "你是谁", "能帮我什么",
-        "请问", "hello", "hi", "你好啊", "在不在",
+        "你好",
+        "嗨",
+        "在吗",
+        "你是谁",
+        "能帮我什么",
+        "请问",
+        "hello",
+        "hi",
+        "你好啊",
+        "在不在",
     ]
 
     async def run_all() -> list[tuple[float, int, str]]:
@@ -285,10 +268,8 @@ def test_concurrent_short_queries_10(
     results = asyncio.run(run_all())
     total_elapsed = time.perf_counter() - start
 
-    for i, (elapsed, status, sid) in enumerate(results):
-        assert status == 200, (
-            f"并发短查询 #{i} (sid={sid}) 非 200: {status}"
-        )
+    for i, (_elapsed, status, sid) in enumerate(results):
+        assert status == 200, f"并发短查询 #{i} (sid={sid}) 非 200: {status}"
 
     max_elapsed = max(elapsed for elapsed, _, _ in results)
     assert total_elapsed < threshold_s, (

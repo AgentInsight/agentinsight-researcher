@@ -529,17 +529,22 @@ async def test_global_rate_limiter_is_singleton() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scrape_with_fallback_bs_to_playwright() -> None:
-    """测试 BS 抓取内容过短时降级到 Playwright.
+async def test_scrape_with_fallback_tf_to_bsm_to_playwright() -> None:
+    """测试 Trafilatura 内容过短时降级到 BS+markdownify 再到 Playwright.
 
-    BS 返回 content="short" (len < min_content_length=100),
-    scraper_mode="auto" → 触发 Playwright 降级.
-    Playwright 返回更长内容 → 使用 Playwright 结果.
+    Trafilatura 返回 content="short" → BS+markdownify 返回 content="short"
+    → Playwright 返回更长内容 → 使用 Playwright 结果.
     """
     url = "https://example.com"
-    bs_result = {
+    tf_result = {
         "url": url,
         "content": "short",  # len=5 < 100, 触发降级
+        "title": "",
+        "image_urls": [],
+    }
+    bsm_result = {
+        "url": url,
+        "content": "short",  # len=5 < 100, 继续降级
         "title": "",
         "image_urls": [],
     }
@@ -558,11 +563,15 @@ async def test_scrape_with_fallback_bs_to_playwright() -> None:
             return_value=mock_settings,
         ),
         patch(
-            "src.skills.researcher.scrapers.beautiful_soup_scraper.BeautifulSoupScraper"
-        ) as mock_bs_cls,
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper"
+        ) as mock_tf_cls,
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper"
+        ) as mock_bsm_cls,
         patch("src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper") as mock_pw_cls,
     ):
-        mock_bs_cls.return_value.scrape = AsyncMock(return_value=bs_result)
+        mock_tf_cls.return_value.scrape = AsyncMock(return_value=tf_result)
+        mock_bsm_cls.return_value.scrape = AsyncMock(return_value=bsm_result)
         mock_pw_cls.return_value.scrape = AsyncMock(return_value=pw_result)
 
         result = await scrape_with_fallback(url)
@@ -570,21 +579,23 @@ async def test_scrape_with_fallback_bs_to_playwright() -> None:
     # 返回 Playwright 结果 (内容更长)
     assert result == pw_result
     assert "Playwright rendered full content" in result["content"]
-    # BS 被调用
-    mock_bs_cls.return_value.scrape.assert_awaited_once()
+    # Trafilatura 被调用
+    mock_tf_cls.return_value.scrape.assert_awaited_once()
+    # BS+markdownify 被调用
+    mock_bsm_cls.return_value.scrape.assert_awaited_once()
     # Playwright 被调用 (降级触发)
     mock_pw_cls.return_value.scrape.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_scrape_with_fallback_lightweight_mode() -> None:
-    """测试 lightweight 模式不触发 Playwright 降级.
+    """测试 lightweight 模式不触发 BS+markdownify/Playwright 降级.
 
-    scraper_mode="lightweight" → BS 内容过短时直接返回 BS 结果,
-    不导入/调用 PlaywrightScraper (适合离线最小化部署).
+    scraper_mode="lightweight" → Trafilatura 内容过短时直接返回 TF 结果,
+    不导入/调用 BS+markdownify/PlaywrightScraper (适合离线最小化部署).
     """
     url = "https://example.com"
-    bs_result = {
+    tf_result = {
         "url": url,
         "content": "short",  # len=5 < 100
         "title": "",
@@ -599,35 +610,41 @@ async def test_scrape_with_fallback_lightweight_mode() -> None:
             return_value=mock_settings,
         ),
         patch(
-            "src.skills.researcher.scrapers.beautiful_soup_scraper.BeautifulSoupScraper"
-        ) as mock_bs_cls,
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper"
+        ) as mock_tf_cls,
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper"
+        ) as mock_bsm_cls,
         patch("src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper") as mock_pw_cls,
     ):
-        mock_bs_cls.return_value.scrape = AsyncMock(return_value=bs_result)
+        mock_tf_cls.return_value.scrape = AsyncMock(return_value=tf_result)
 
         result = await scrape_with_fallback(url)
 
-    # 返回 BS 结果 (未降级)
-    assert result == bs_result
+    # 返回 Trafilatura 结果 (未降级)
+    assert result == tf_result
     assert result["content"] == "short"
-    # BS 被调用
-    mock_bs_cls.return_value.scrape.assert_awaited_once()
+    # Trafilatura 被调用
+    mock_tf_cls.return_value.scrape.assert_awaited_once()
+    # BS+markdownify 未被调用 (lightweight 模式跳过降级)
+    mock_bsm_cls.return_value.scrape.assert_not_called()
     # Playwright 未被调用 (lightweight 模式跳过降级)
     mock_pw_cls.return_value.scrape.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_scrape_with_fallback_bs_sufficient_no_fallback() -> None:
-    """测试 BS 抓取内容足够长时不触发 Playwright 降级.
+async def test_scrape_with_fallback_tf_sufficient_no_fallback() -> None:
+    """测试 Trafilatura 抓取内容足够长时不触发 BS/Playwright 降级.
 
-    BS 返回 content len >= min_content_length (100) → 直接返回 BS 结果.
+    Trafilatura 返回 content len >= min_content_length (100) → 直接返回 TF 结果.
     """
     url = "https://example.com"
-    bs_result = {
+    tf_result = {
         "url": url,
-        "content": "This is sufficiently long content from BeautifulSoup. " * 5,  # > 100
-        "title": "BS Title",
+        "content": "This is sufficiently long content from Trafilatura. " * 5,  # > 100
+        "title": "TF Title",
         "image_urls": [],
+        "content_type": "markdown",
     }
 
     mock_settings = Settings(_env_file=None, scraper_mode="auto")
@@ -638,17 +655,21 @@ async def test_scrape_with_fallback_bs_sufficient_no_fallback() -> None:
             return_value=mock_settings,
         ),
         patch(
-            "src.skills.researcher.scrapers.beautiful_soup_scraper.BeautifulSoupScraper"
-        ) as mock_bs_cls,
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper"
+        ) as mock_tf_cls,
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper"
+        ) as mock_bsm_cls,
         patch("src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper") as mock_pw_cls,
     ):
-        mock_bs_cls.return_value.scrape = AsyncMock(return_value=bs_result)
+        mock_tf_cls.return_value.scrape = AsyncMock(return_value=tf_result)
 
         result = await scrape_with_fallback(url)
 
-    assert result == bs_result
-    mock_bs_cls.return_value.scrape.assert_awaited_once()
-    # BS 内容足够, 不触发降级
+    assert result == tf_result
+    mock_tf_cls.return_value.scrape.assert_awaited_once()
+    # TF 内容足够, 不触发降级
+    mock_bsm_cls.return_value.scrape.assert_not_called()
     mock_pw_cls.return_value.scrape.assert_not_called()
 
 

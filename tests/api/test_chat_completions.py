@@ -17,6 +17,7 @@ AGENTS.md 第 13/14 章硬约束:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import uuid
@@ -42,8 +43,17 @@ def _chat_payload(
     stream: bool = False,
     session_id: str | None = None,
     report_type: str | None = None,
+    multi_agent: bool | None = None,
+    agent_role: str | None = None,
+    uploaded_files: list[str] | None = None,
+    org_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict[str, object]:
-    """构造 /v1/chat/completions 请求体."""
+    """构造 /v1/chat/completions 请求体.
+
+    新增参数 (multi_agent/agent_role/uploaded_files/org_id/project_id) 仅在非 None 时
+    加入 payload, 保证向后兼容 (现有用例不受影响).
+    """
     payload: dict[str, object] = {
         "model": "agentinsight-researcher",
         "messages": [{"role": "user", "content": query}],
@@ -52,6 +62,16 @@ def _chat_payload(
     }
     if report_type is not None:
         payload["report_type"] = report_type
+    if multi_agent is not None:
+        payload["multi_agent"] = multi_agent
+    if agent_role is not None:
+        payload["agent_role"] = agent_role
+    if uploaded_files is not None:
+        payload["uploaded_files"] = uploaded_files
+    if org_id is not None:
+        payload["org_id"] = org_id
+    if project_id is not None:
+        payload["project_id"] = project_id
     return payload
 
 
@@ -243,3 +263,277 @@ def test_session_id_header_in_stream() -> None:
             # 消费流以避免连接泄漏
             for _ in r.iter_lines():
                 break
+
+
+# ========== 错误码补充场景 (422 Pydantic 校验 + 字段类型错误) ==========
+
+
+@pytest.mark.api
+def test_invalid_stream_type_returns_422() -> None:
+    """验证 stream 字段非布尔值: stream="yes" → 422 (Pydantic 校验失败).
+
+    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": "yes",  # 非 bool, Pydantic 应拒绝
+            },
+        )
+    assert r.status_code == 422, f"stream='yes' 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_invalid_content_type_returns_422() -> None:
+    """验证 content 字段非字符串: content=123 → 422 (Pydantic 校验失败)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": 12345}],  # 非字符串
+                "stream": False,
+            },
+        )
+    assert r.status_code == 422, f"content=12345 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_invalid_messages_type_returns_422() -> None:
+    """验证 messages 非列表: messages="not-a-list" → 422."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": "not-a-list",
+                "stream": False,
+            },
+        )
+    assert r.status_code == 422, (
+        f"messages='not-a-list' 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_invalid_model_name_returns_200_or_400() -> None:
+    """验证未知 model 名称: model="unknown-model" → 200 或 400.
+
+    AGENTS.md 第 14 章: OpenAI 兼容端点, model 字段用于路由.
+    实现可能: (a) 不校验 model 直接走默认 (200), (b) 校验 model 不在白名单 (400).
+    两种行为均可接受, 不应返回 5xx.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "unknown-model-xyz",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+            },
+        )
+    assert r.status_code < 500, f"未知 model 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_mixed_roles_messages_returns_200() -> None:
+    """验证混合 system + user + assistant 消息: → 200 (含上下文)."""
+    sid = _unique_session_id()
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [
+                    {"role": "system", "content": "你是研究助手"},
+                    {"role": "user", "content": "你好"},
+                    {"role": "assistant", "content": "您好, 有什么可以帮您?"},
+                    {"role": "user", "content": "请问"},
+                ],
+                "stream": False,
+                "session_id": sid,
+            },
+        )
+    assert r.status_code == 200, f"混合角色消息应返回 200, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_invalid_report_type_handled_gracefully() -> None:
+    """验证未知 report_type: report_type="unknown_type" → 不应 5xx 崩溃.
+
+    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    未知 report_type 应降级为默认值或返回 4xx, 不应崩溃.
+    """
+    sid = _unique_session_id()
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+                "session_id": sid,
+                "report_type": "unknown_type_xyz",
+            },
+        )
+    assert r.status_code < 500, f"未知 report_type 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_long_session_id_handled() -> None:
+    """验证超长 session_id (1K 字符) 不应崩溃.
+
+    AGENTS.md 第 6 章: thread_id 做会话隔离键, 不应限制长度.
+    """
+    long_sid = "test_long_" + "x" * 1000
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+                "session_id": long_sid,
+            },
+        )
+    assert r.status_code < 500, f"超长 session_id 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+# ========== 扩展场景: report_type 路由 / multi_agent / SELF_HOST / uploaded_files / agent_role ==========
+
+
+@pytest.mark.api
+def test_chat_completions_report_type_basic_report() -> None:
+    """验证 report_type=basic_report 路由: 短查询 + 显式 report_type → 200.
+
+    AGENTS.md 第 5/7 章: report_type=basic_report 走 basic 研究模式 (research_mode=basic).
+    短查询触发 short_query_reply (ChitchatResponder), 但 report_type 字段应被接受不报错.
+    完整 basic_report 研究流程由 e2e 测试覆盖 (test_full_research_chain_non_stream).
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, report_type="basic_report"),
+        )
+    assert r.status_code == 200, (
+        f"report_type=basic_report 应返回 200, 实际: {r.status_code} {r.text[:200]}"
+    )
+    data = r.json()
+    assert data["object"] == "chat.completion", f"object 非 chat.completion: {data['object']}"
+
+
+@pytest.mark.api
+def test_chat_completions_report_type_detailed_report() -> None:
+    """验证 report_type=detailed_report 路由: 短查询 + 显式 report_type → 200.
+
+    AGENTS.md 第 5/7 章: report_type=detailed_report 走 basic 研究模式 (非 deep_research).
+    短查询触发 short_query_reply, 但 report_type 字段应被接受不报错.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, report_type="detailed_report"),
+        )
+    assert r.status_code == 200, (
+        f"report_type=detailed_report 应返回 200, 实际: {r.status_code} {r.text[:200]}"
+    )
+    data = r.json()
+    assert data["object"] == "chat.completion"
+
+
+@pytest.mark.api
+def test_chat_completions_multi_agent_true() -> None:
+    """验证 multi_agent=True 路由: 短查询 + multi_agent=True → 200.
+
+    AGENTS.md 第 5 章: multi_agent=True 走 multi_agent_graph (Supervisor 模式, P0-02).
+    短查询触发 short_query_reply (不走图), 但 multi_agent 字段应被接受不报错.
+    完整 multi_agent 研究流程由 e2e 测试覆盖.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, multi_agent=True),
+        )
+    assert r.status_code == 200, (
+        f"multi_agent=True 应返回 200, 实际: {r.status_code} {r.text[:200]}"
+    )
+    data = r.json()
+    assert data["object"] == "chat.completion"
+
+
+@pytest.mark.api
+def test_chat_completions_self_host_false_missing_token_returns_401() -> None:
+    """验证 SELF_HOST=False 缺 token 返回 401 (org_id 触发点数校验).
+
+    AGENTS.md 第 8 章: SELF_HOST=False 时强制校验 JWT Token, 缺 token 返回 401.
+    服务端默认 SELF_HOST=True (跳过校验, 返回 200), 此时跳过本用例.
+    仅当服务端配置 SELF_HOST=False 时才验证 401 行为.
+
+    路由逻辑 (routes.py): not settings.self_host and (org_id or project_id) and not token → 401.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, org_id="test-org-api-check"),
+        )
+    # SELF_HOST=True (默认) → 跳过校验 → 200 (短查询响应)
+    # SELF_HOST=False → 缺 token → 401
+    if r.status_code == 200:
+        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
+    assert r.status_code == 401, (
+        f"SELF_HOST=False 缺 token 应返回 401, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_chat_completions_uploaded_files_context_load() -> None:
+    """验证 uploaded_files 加载已上传文件上下文: 上传文件 → 引用 file_id → 200.
+
+    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离, file_id 三级分键.
+    短查询触发 short_query_reply (不走研究图, 不实际加载文件上下文),
+    但 uploaded_files 字段应被 Pydantic 接受不报错.
+    实际文件上下文加载 (research 分支) 由 e2e 测试覆盖 (test_file_upload_then_chat).
+    """
+    # 步骤 1: 上传文件获取 file_id
+    file_content = b"Python async programming: asyncio, async/await, coroutine\n"
+    files = {"file": ("test_uploaded_context.txt", io.BytesIO(file_content), "text/plain")}
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r_upload = client.post(f"{AGENT_URL}/v1/files", files=files)
+    assert r_upload.status_code == 201, f"文件上传失败: {r_upload.status_code} {r_upload.text[:200]}"
+    file_id = r_upload.json()["file_id"]
+
+    # 步骤 2: 携带 uploaded_files 提问
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, uploaded_files=[file_id]),
+        )
+    assert r.status_code == 200, (
+        f"uploaded_files 请求应返回 200, 实际: {r.status_code} {r.text[:200]}"
+    )
+    data = r.json()
+    assert data["object"] == "chat.completion"
+
+
+@pytest.mark.api
+def test_chat_completions_agent_role_override() -> None:
+    """验证 agent_role 覆盖 (GPTR Config 层): 注入行业 persona → 200.
+
+    AGENTS.md 第 7 章: agent_role 对标 GPTR AGENT_ROLE 配置, 优先级高于 LLM 动态生成
+    (AgentCreator). 行业适配采用 GPTR 风格 4 层机制, 不使用行业分类器.
+    短查询触发 short_query_reply, 但 agent_role 字段应被接受不报错.
+    实际 agent_role 覆盖效果由 e2e 测试覆盖.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, agent_role="金融行业研究分析师"),
+        )
+    assert r.status_code == 200, (
+        f"agent_role 注入应返回 200, 实际: {r.status_code} {r.text[:200]}"
+    )
+    data = r.json()
+    assert data["object"] == "chat.completion"

@@ -8,16 +8,29 @@ AGENTS.md 第 7 章硬约束:
 - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等生成
 - payload 必须含 content + metadata + namespace (用户私有额外含 user_id)
 - 检索时必须显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
+
+用户需求 (2026-07-06): 检验 embeddings+qdrant 是否有私有数据的命名空间,
+如果没有, 把结果保存在内存或缓存里, 之后不再调用 embeddings+qdrant 做数据查询,
+确保系统采用最少次的 embeddings+qdrant 调用.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# ========== namespace 可用性缓存 (用户需求: 最少次 embeddings+qdrant 调用) ==========
+# 缓存 namespace -> has_data 的布尔结果, TTL 10 分钟
+# 避免每次请求都调 Qdrant count (即使 exact=False 也有网络 RTT)
+# 参考 AgentInsightService VectorRetriever.available 的 _check_interval 机制
+_NAMESPACE_CACHE_TTL: int = 600  # 10 分钟 (秒)
+_namespace_cache: dict[str, tuple[bool, float]] = {}  # key=namespace, value=(has_data, timestamp)
 
 
 class QdrantManager:
@@ -168,6 +181,11 @@ class QdrantManager:
         AGENTS.md 第 7 章: 按 payload namespace 字段过滤统计.
         用于"私有数据搜索前先判断有没有数据"的需求.
 
+        P1-2 修复: exact=True → exact=False
+        - exact=True 触发全量扫描, 大集合上延迟可达数百毫秒甚至秒级
+        - exact=False 使用 HNSW 索引/元数据统计, 毫秒级响应
+        - 仅用于"是否存在数据"的存在性判断, 近似计数足够
+
         Args:
             namespace: 要统计的 namespace 名称
 
@@ -185,7 +203,7 @@ class QdrantManager:
             result = await self._client.count(
                 collection_name=self.settings.qdrant_collection,
                 count_filter=count_filter,
-                exact=True,
+                exact=False,  # P1-2 修复: 近似计数, 毫秒级响应 (存在性判断足够)
             )
             return int(result.count)
         except Exception as e:  # noqa: BLE001
@@ -197,9 +215,39 @@ class QdrantManager:
 
         用户需求: "私有数据搜索的时候先判断有没有私有数据,
         先判断有没有对应命名空间, 再看命名空间里面有没有数据".
+
+        新需求 (2026-07-06): 结果缓存在内存中 (TTL 10 分钟),
+        避免每次请求都调 Qdrant count (减少网络 RTT).
+        如果缓存命中且结果为 False (无数据), 直接返回, 不调 Qdrant.
+        如果缓存命中且结果为 True (有数据), 直接返回, 不调 Qdrant.
+        缓存过期或未命中时才调 Qdrant count.
         """
+        # 检查内存缓存
+        cached = _namespace_cache.get(namespace)
+        if cached is not None:
+            has_data, ts = cached
+            if time.time() - ts < _NAMESPACE_CACHE_TTL:
+                logger.debug(
+                    "namespace %s 可用性缓存命中: has_data=%s (缓存年龄 %.0fs)",
+                    namespace,
+                    has_data,
+                    time.time() - ts,
+                )
+                return has_data
+
+        # 缓存未命中或过期, 调 Qdrant count
         count = await self.count_points_in_namespace(namespace)
-        return count > 0
+        has_data = count > 0
+        # 写入缓存
+        _namespace_cache[namespace] = (has_data, time.time())
+        logger.info(
+            "namespace %s 可用性检查完成: has_data=%s (count=%d, 已缓存 %ds)",
+            namespace,
+            has_data,
+            count,
+            _NAMESPACE_CACHE_TTL,
+        )
+        return has_data
 
     async def has_user_private_data(self, user_id: str) -> bool:
         """判断用户是否有私有数据 (先检查 namespace 有数据).
@@ -268,8 +316,11 @@ class QdrantManager:
             collection_name=self.settings.qdrant_collection,
             points=qdrant_points,
         )
+        # 写入成功后更新 namespace 可用性缓存 (有数据 → True)
+        # 避免下一次 namespace_has_data 调用 Qdrant count
+        _namespace_cache[namespace] = (True, time.time())
         logger.debug(
-            "Qdrant 写入 %d 点 (namespace=%s, user_id=%s)",
+            "Qdrant 写入 %d 点 (namespace=%s, user_id=%s, 已更新可用性缓存=True)",
             len(qdrant_points),
             namespace,
             user_id,
@@ -301,7 +352,9 @@ class QdrantManager:
             collection_name=self.settings.qdrant_collection,
             points_selector=FilterSelector(filter=query_filter),
         )
-        logger.debug("Qdrant 删除 namespace=%s 下所有点", namespace)
+        # 删除成功后失效 namespace 可用性缓存 (下次查询重新 count)
+        _namespace_cache.pop(namespace, None)
+        logger.debug("Qdrant 删除 namespace=%s 下所有点 (已失效可用性缓存)", namespace)
 
     async def search(
         self,
@@ -314,6 +367,10 @@ class QdrantManager:
         """向量检索.
 
         AGENTS.md 第 7 章: 必须显式传 namespace 列表, 禁止全集合扫描.
+        AGENTS.md 第 7 章: score_threshold 仅 rerank 启用时生效, 向量检索阶段不应套用
+            rerank 的 0.3 阈值 (会提前裁剪 RRF 候选集, 降低召回). 调用方未显式传
+            score_threshold 时, 此处不再 fallback 到 settings.score_threshold,
+            让 RRF + Rerank 阶段做最终筛选.
 
         P0-修复2: 入口自保 ensure_collection, 避免新环境首次检索 404.
         """
@@ -328,7 +385,10 @@ class QdrantManager:
         ]
         query_filter = Filter(should=should_conditions)  # type: ignore[arg-type]  # qdrant Filter.should 期望 list[FieldCondition|...], list 不变性导致 list[FieldCondition] 不兼容
 
-        threshold = score_threshold or self.settings.score_threshold
+        # P0 阈值误用修复: score_threshold=None 时不应用阈值 (让 RRF + Rerank 筛选);
+        # 仅当调用方显式传值 (如 rerank 启用场景) 才传入. 不再 fallback 到
+        # settings.score_threshold, 避免向量阶段提前过滤 cosine < 0.3 的文档.
+        threshold = score_threshold
 
         # qdrant-client ≥1.18: AsyncQdrantClient.search 已移除, 改用 query_points
         # - 参数 query_vector → query
@@ -352,6 +412,83 @@ class QdrantManager:
             }
             for point in results.points
         ]
+
+    async def scroll_all_by_namespace(
+        self,
+        namespace: str,
+        *,
+        batch_size: int = 1000,
+        max_points: int = 100_000,
+    ) -> list[dict[str, Any]]:
+        """scroll 拉取 namespace 内所有点的 content (用于 BM25 语料构建).
+
+        AGENTS.md 第 7 章: 按 payload namespace 字段过滤, 仅返回 content/metadata/
+        namespace 三键 (与 upsert_points 写入 payload 一致). 不返回向量 (节省网络带宽).
+
+        P0 BM25 断点修复: HybridRetriever._ensure_bm25_corpus 调用此方法填充 BM25 语料,
+        替代旧的"无任何调用方"路径. 语料缓存到 Redis (带版本号), 文档新增/删除时
+        通过 invalidate_bm25_cache 失效缓存.
+
+        Args:
+            namespace: 要拉取的 namespace.
+            batch_size: 单次 scroll 批量大小 (qdrant scroll limit, 默认 1000).
+            max_points: 安全上限, 防止异常大集合压垮内存 (默认 10 万).
+
+        Returns:
+            文档列表, 每项为 {"content": str, "metadata": dict, "namespace": str};
+            集合不存在或异常返回空列表 (降级, 不阻断检索).
+        """
+        from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        await self._ensure_collection_once()
+
+        count_filter = Filter(
+            must=[
+                FieldCondition(key="namespace", match=MatchValue(value=namespace)),
+            ],
+        )
+
+        all_docs: list[dict[str, Any]] = []
+        offset: int | None = None
+        try:
+            while True:
+                # qdrant-client scroll: 返回 (points, next_offset), next_offset=None 表示已到底
+                points, offset = await self._client.scroll(
+                    collection_name=self.settings.qdrant_collection,
+                    scroll_filter=count_filter,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for p in points:
+                    payload = p.payload or {}
+                    all_docs.append(
+                        {
+                            "content": payload.get("content", ""),
+                            "metadata": payload.get("metadata", {}),
+                            "namespace": payload.get("namespace", namespace),
+                        }
+                    )
+                # 安全上限: 防止异常大集合压垮内存
+                if len(all_docs) >= max_points:
+                    logger.warning(
+                        "BM25 语料拉取达到安全上限 max_points=%d (namespace=%s), 截断",
+                        max_points,
+                        namespace,
+                    )
+                    break
+                if offset is None:
+                    break
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "scroll_all_by_namespace 失败 (namespace=%s), 返回已拉取的 %d 条: %s",
+                namespace,
+                len(all_docs),
+                e,
+            )
+        return all_docs
 
     async def close(self) -> None:
         """关闭客户端."""

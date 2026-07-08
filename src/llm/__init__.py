@@ -9,7 +9,6 @@ from src.llm.token_budget import (
     StepCost,
     TokenBudgetAllocator,
     get_token_budget_allocator,
-    reset_token_budget_allocator,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "StepCost",
     "TokenBudgetAllocator",
     "get_token_budget_allocator",
-    "reset_token_budget_allocator",
 ]

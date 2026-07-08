@@ -46,7 +46,8 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
         # 方案 E: 自动检测已下载的完整 Chrome (而非 headless shell)
         # Playwright 1.61+ 默认查找 chromium_headless_shell-*/chrome-headless-shell
         # 但离线模式可能只下载了完整 Chrome (chromium-*/chrome-linux64/chrome)
-        browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
+        # P0-1: 统一走 Settings SSOT, 不再绕过 settings 直接读 os.environ
+        browsers_path = settings.playwright_browsers_path or "/opt/pw-browsers"
         chrome_path = f"{browsers_path}/chromium-1228/chrome-linux64/chrome"
         # ASYNC240: 异步函数内不应使用阻塞的 os.path.exists
         if await asyncio.to_thread(os.path.exists, chrome_path):
@@ -143,11 +144,24 @@ class PlaywrightScraper(BaseScraper):
                     own_browser = True
 
                 page = await browser.new_page()
-                await page.goto(self.url, wait_until="networkidle", timeout=30000)
+                # P1-3: 用 domcontentloaded 替代 networkidle (避免长网络请求拖到 30s timeout)
+                # networkidle 等待所有网络请求完成, 慢页面会触发 30s timeout;
+                # domcontentloaded 在 DOM 解析完成即返回, 后续用 wait_for_selector 兜底.
+                await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
 
-                # 滚动到底部触发懒加载
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(2000)
+                # P1-3: 短等待 + 智能检测 (替代固定 2s 等待)
+                # 1. 等 body 出现 (5s 超时, 大多数页面 <1s)
+                # 2. 滚动触发懒加载 (不等固定时间, 500ms 足够触发)
+                # 3. 超时也继续, 已有 domcontentloaded 内容
+                try:
+                    await page.wait_for_selector("body", timeout=5000)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(500)
+                except Exception as wait_e:  # noqa: BLE001
+                    logger.debug(
+                        "Playwright wait_for_selector/scroll 超时 (不阻断, 用已有 DOM): %s",
+                        wait_e,
+                    )
 
                 content = await page.inner_text("body")
                 title = await page.title()

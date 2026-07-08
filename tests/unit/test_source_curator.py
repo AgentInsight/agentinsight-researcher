@@ -134,8 +134,7 @@ async def test_source_curator_curate_sources_deduplicates(
     # LLM 仅返回 index 1 和 3 的评分 (跳过重复的 index 2)
     mock_llm.achat.return_value = LLMResponse(
         content=(
-            '[{"index": 1, "score": 7, "reason": "..."}, '
-            '{"index": 3, "score": 6, "reason": "..."}]'
+            '[{"index": 1, "score": 7, "reason": "..."}, {"index": 3, "score": 6, "reason": "..."}]'
         ),
         model="test",
     )

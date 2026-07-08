@@ -469,23 +469,26 @@ async def test_classify_with_cache_redis_failure_degrades_to_llm(
     classifier_with_mock_deps: QueryIntentClassifier,
 ) -> None:
     """测试 Redis 不可用时降级为直接走 LLM (不阻断主流程, P1)."""
-    # Mock Redis: ping 抛异常 (连接失败)
-    with patch("src.skills.researcher.query_classifier.aioredis.from_url") as mock_from_url:
-        mock_redis = AsyncMock()
-        mock_redis.ping = AsyncMock(side_effect=Exception("Redis 连接失败"))
-        mock_from_url.return_value = mock_redis
+    # Mock Redis: get 抛异常 (连接失败/读失败), 模拟 Redis 不可用
+    # 直接设置 _redis + _redis_initialized, 跳过 get_redis_client 调用
+    # (源码已从 aioredis.from_url 重构为 src.common.redis_client.get_redis_client)
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(side_effect=Exception("Redis 连接失败"))
+    mock_redis.setex = AsyncMock()
+    classifier_with_mock_deps._redis = mock_redis
+    classifier_with_mock_deps._redis_initialized = True
 
-        # Mock LLM 返回 "research"
-        mock_response = MagicMock()
-        mock_response.content = '{"intent": "research"}'
-        classifier_with_mock_deps._llm.achat = AsyncMock(return_value=mock_response)
+    # Mock LLM 返回 "research"
+    mock_response = MagicMock()
+    mock_response.content = '{"intent": "research"}'
+    classifier_with_mock_deps._llm.achat = AsyncMock(return_value=mock_response)
 
-        intent, source = await classifier_with_mock_deps._classify_with_cache(
-            "分析量子计算", has_report=False
-        )
+    intent, source = await classifier_with_mock_deps._classify_with_cache(
+        "分析量子计算", has_report=False
+    )
 
-        assert intent == QueryIntent.RESEARCH
-        assert source == "llm"
+    assert intent == QueryIntent.RESEARCH
+    assert source == "llm"
 
 
 # ========== classify (集成规则层 + LLM 层) ==========

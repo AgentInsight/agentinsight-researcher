@@ -22,7 +22,7 @@ AGENTS.md 第 13 章: 单元测试不依赖外部服务 (use_checkpointer=False 
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -80,9 +80,7 @@ class TestBuildRevisionSubgraph:
     def test_build_revision_subgraph_uses_max_revisions(self) -> None:
         """验证子图用 settings.max_revisions 创建守卫 (达上限强制 accept)."""
         settings = Settings(_env_file=None, max_revisions=5)
-        with patch(
-            "src.graph.multi_agent_builder.create_revision_guard"
-        ) as mock_guard:
+        with patch("src.graph.multi_agent_builder.create_revision_guard") as mock_guard:
             mock_guard.return_value = lambda state: "accept"
             build_revision_subgraph(settings)
             mock_guard.assert_called_once_with(5)
@@ -133,7 +131,6 @@ class TestBuildMultiAgentGraph:
         assert "writer" in node_names
         assert "fact_checker" in node_names
         assert "revision" in node_names  # 子图作为节点
-        assert "visualizer" in node_names
         assert "publisher" in node_names
 
         # 2. 边验证
@@ -147,9 +144,8 @@ class TestBuildMultiAgentGraph:
         # fact_checker 条件边: accept → revision, revise → writer
         assert ("fact_checker", "revision") in edges
         assert ("fact_checker", "writer") in edges
-        # revision → visualizer → publisher
-        assert ("revision", "visualizer") in edges
-        assert ("visualizer", "publisher") in edges
+        # revision → publisher
+        assert ("revision", "publisher") in edges
         # publisher → __end__
         assert ("publisher", "__end__") in edges
 
@@ -161,9 +157,7 @@ class TestBuildMultiAgentGraph:
         iteration_count 由 fact_checker 节点累加, 达上限强制 accept.
         """
         settings = Settings(_env_file=None, graph_max_iterations=7)
-        with patch(
-            "src.graph.multi_agent_builder.create_fact_check_guard"
-        ) as mock_guard:
+        with patch("src.graph.multi_agent_builder.create_fact_check_guard") as mock_guard:
             mock_guard.return_value = lambda state: "accept"
             await build_multi_agent_graph(settings, use_checkpointer=False)
             mock_guard.assert_called_once_with(7)
@@ -172,9 +166,7 @@ class TestBuildMultiAgentGraph:
     async def test_build_researcher_graph_max_revisions_guard(self) -> None:
         """验证 max_revisions 守卫正确传递给子图 create_revision_guard."""
         settings = Settings(_env_file=None, max_revisions=4)
-        with patch(
-            "src.graph.multi_agent_builder.create_revision_guard"
-        ) as mock_guard:
+        with patch("src.graph.multi_agent_builder.create_revision_guard") as mock_guard:
             mock_guard.return_value = lambda state: "accept"
             await build_multi_agent_graph(settings, use_checkpointer=False)
             mock_guard.assert_called_once_with(4)
@@ -204,9 +196,7 @@ class TestBuildMultiAgentGraph:
             new_callable=AsyncMock,
             return_value=mock_checkpointer,
         ):
-            graph = await build_multi_agent_graph(
-                settings, use_checkpointer=True
-            )
+            graph = await build_multi_agent_graph(settings, use_checkpointer=True)
             assert graph.checkpointer is mock_checkpointer
 
     @pytest.mark.asyncio

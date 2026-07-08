@@ -7,12 +7,15 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from server import app
 from src.config.settings import Settings
+from src.skills.researcher.query_classifier import QueryIntent
 
 
 def test_models_endpoint():
@@ -28,15 +31,36 @@ def test_models_endpoint():
 
 def test_chat_completions_non_stream():
     """测试 /v1/chat/completions 非流式响应."""
-    client = TestClient(app)
-    response = client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "agentinsight-researcher",
-            "messages": [{"role": "user", "content": "研究中国新能源汽车行业"}],
-            "stream": False,
-        },
+    # mock 研究流水线 (意图分类 + 图执行), 避免 .env 存在时触发真实 LLM 调用挂起
+    mock_classifier = MagicMock()
+    mock_classifier.classify = AsyncMock(return_value=QueryIntent.RESEARCH)
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(
+        return_value={
+            "report_md": "测试报告内容",
+            "sources": [],
+            "curated_sources": [],
+            "total_tokens": 10,
+            "token_logs": [{"prompt_tokens": 5, "completion_tokens": 5}],
+        }
     )
+    with (
+        patch("src.api.routes._has_report", new=AsyncMock(return_value=False)),
+        patch(
+            "src.api.routes.get_query_intent_classifier",
+            return_value=mock_classifier,
+        ),
+        patch("src.api.routes._get_graph", new=AsyncMock(return_value=mock_graph)),
+    ):
+        client = TestClient(app)
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "研究中国新能源汽车行业"}],
+                "stream": False,
+            },
+        )
     assert response.status_code == 200
     data = response.json()
     assert data["object"] == "chat.completion"
@@ -49,31 +73,49 @@ def test_chat_completions_non_stream():
 
 def test_chat_completions_stream():
     """测试 /v1/chat/completions 流式 SSE 响应."""
-    client = TestClient(app)
-    with client.stream(
-        "POST",
-        "/v1/chat/completions",
-        json={
-            "model": "agentinsight-researcher",
-            "messages": [{"role": "user", "content": "研究 AI 行业"}],
-            "stream": True,
-        },
-    ) as response:
-        assert response.status_code == 200
-        assert "text/event-stream" in response.headers["content-type"]
+    # mock 研究流水线 (意图分类 + 图执行), 避免 .env 存在时触发真实 LLM 调用挂起
+    mock_classifier = MagicMock()
+    mock_classifier.classify = AsyncMock(return_value=QueryIntent.RESEARCH)
 
-        chunks = []
-        for line in response.iter_lines():
-            if line.startswith("data: "):
-                payload = line[6:]
-                if payload == "[DONE]":
-                    break
-                chunks.append(json.loads(payload))
+    async def _fake_astream(*args: Any, **kwargs: Any) -> Any:
+        yield {"report_generator": {"report_md": "测试报告内容"}}
 
-        # 应有首块(role) + 内容块 + 末块(finish_reason)
-        assert len(chunks) >= 3
-        assert chunks[0]["choices"][0]["delta"]["role"] == "assistant"
-        assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    mock_graph = MagicMock()
+    mock_graph.astream = _fake_astream
+
+    with (
+        patch("src.api.routes._has_report", new=AsyncMock(return_value=False)),
+        patch(
+            "src.api.routes.get_query_intent_classifier",
+            return_value=mock_classifier,
+        ),
+        patch("src.api.routes._get_graph", new=AsyncMock(return_value=mock_graph)),
+    ):
+        client = TestClient(app)
+        with client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "研究 AI 行业"}],
+                "stream": True,
+            },
+        ) as response:
+            assert response.status_code == 200
+            assert "text/event-stream" in response.headers["content-type"]
+
+            chunks = []
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    chunks.append(json.loads(payload))
+
+    # 应有首块(role) + 内容块 + 末块(finish_reason)
+    assert len(chunks) >= 3
+    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
 
 def test_chat_completions_empty_messages():

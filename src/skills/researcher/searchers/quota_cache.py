@@ -34,7 +34,8 @@ class QuotaCache:
         self._settings = settings
         self._redis: Any | None = None
         # redis_url 优先从 settings 读取, 不存在则禁用
-        self._redis_url = getattr(settings, "redis_url", None) or None
+        # P0-2: 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+        self._redis_url = settings.redis_url or None
         self._enabled = bool(self._redis_url)
 
     async def _get_redis(self) -> Any | None:

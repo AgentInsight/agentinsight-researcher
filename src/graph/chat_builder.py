@@ -64,13 +64,18 @@ async def build_chat_graph(
     graph.set_entry_point("chat")
     graph.add_edge("chat", END)
 
+    # 分支优化 P-Checkpointer: get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
+    checkpointer = None
     if use_checkpointer:
         from src.memory.checkpointer import get_checkpointer
 
-        checkpointer = await get_checkpointer(settings)
-        compiled = graph.compile(checkpointer=checkpointer)
-    else:
-        compiled = graph.compile()
+        try:
+            checkpointer = await get_checkpointer(settings)
+        except RuntimeError as e:
+            logger.warning("Checkpointer 初始化失败, Chat graph 以无持久化模式编译: %s", e)
+            checkpointer = None
+
+    compiled = graph.compile(checkpointer=checkpointer)
 
     logger.info("Chat graph 已构建 (单节点, P2-Future-03)")
     return compiled

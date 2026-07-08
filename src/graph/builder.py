@@ -111,11 +111,16 @@ async def build_researcher_graph(
     # 达到上限时强制跳转 publisher 终止 (AGENTS.md 第 5 章: max_iterations 硬上限).
 
     # 编译图 (可选挂 Checkpointer)
+    # 分支优化 P-Checkpointer: get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
     checkpointer = None
     if use_checkpointer:
         from src.memory.checkpointer import get_checkpointer
 
-        checkpointer = await get_checkpointer(settings)
+        try:
+            checkpointer = await get_checkpointer(settings)
+        except RuntimeError as e:
+            logger.warning("Checkpointer 初始化失败, 图以无持久化模式编译: %s", e)
+            checkpointer = None
 
     compiled = graph.compile(checkpointer=checkpointer)
     logger.info("研究智能体 LangGraph 图已构建 (checkpointer=%s)", type(checkpointer).__name__)

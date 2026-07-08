@@ -84,21 +84,12 @@ def safe_json_parse(text: str, fallback: Any = None) -> Any:
     return fallback
 
 
-def safe_json_parse_list(text: str, fallback: list[Any] | None = None) -> list[Any]:
-    """安全解析为 list, 非列表时返回 fallback."""
-    if fallback is None:
-        fallback = []
-    result = safe_json_parse(text, fallback=fallback)
-    if isinstance(result, list):
-        return result
-    if isinstance(result, dict):
-        # 单对象转单元素列表
-        return [result]
-    return fallback
-
-
 def safe_json_parse_dict(text: str, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
-    """安全解析为 dict, 非字典时返回 fallback."""
+    """安全解析为 dict, 非字典时返回 fallback.
+
+    接入主流程: mcp_coordinator._execute_mcp 解析 env_vars (JSONB 字段) 时调用,
+    替代裸 json.loads, 提升一致性与容错能力 (含 json_repair + regex 兜底).
+    """
     if fallback is None:
         fallback = {}
     result = safe_json_parse(text, fallback=fallback)
