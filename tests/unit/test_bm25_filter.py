@@ -1,19 +1,18 @@
-"""BM25Filter 单元测试 (V4-P3 L2 方案).
+"""BM25Filter 单元测试 (V4-P3 两层路由 L2 方案).
 
 测试覆盖:
 1. 基本过滤: query 与 chunks 关键词重叠, BM25 打分排序
 2. 空输入: documents=[] 返回 []
 3. 降级路径: 异常时返回原文前 N 条
 4. 分词缓存: 重复文本命中缓存
-5. 三层路由阈值: 8K-50K 走 BM25Filter
+5. 两层路由阈值: >=8K 走 BM25Filter (含 >50K 超长上下文, 全量覆盖)
 6. trace_retriever span 集成
 
-对标 test_v2_gptr_alignment.py::TestEmbeddingsFilter 测试模式.
+对标 test_v2_gptr_alignment.py::TestRecursiveSplit 测试模式.
 """
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -100,7 +99,7 @@ class TestBM25FilterDegrade:
 
     @pytest.mark.asyncio
     async def test_filter_exception_returns_original(self, bm25_filter, sample_documents):
-        """异常时应降级返回原文前 N 条 (与 EmbeddingsFilter 降级策略对齐)."""
+        """异常时应降级返回原文前 N 条 (与旧 EmbeddingsFilter 降级策略对齐, 类已删除)."""
         with patch.object(
             bm25_filter, "_split_documents_recursive", side_effect=RuntimeError("mock error")
         ):
@@ -133,8 +132,8 @@ class TestBM25FilterTokenCache:
 
     def test_get_tokens_different_text(self, bm25_filter):
         """不同文本应产生不同分词."""
-        tokens1 = bm25_filter._get_tokens("人工智能")
-        tokens2 = bm25_filter._get_tokens("机器学习")
+        bm25_filter._get_tokens("人工智能")
+        bm25_filter._get_tokens("机器学习")
         # 缓存应有两个条目
         assert len(bm25_filter._token_cache) == 2
 

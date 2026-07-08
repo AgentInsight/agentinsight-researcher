@@ -41,8 +41,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, cast
-from urllib.parse import urlparse
+from typing import Any
 
 from src.config.settings import Settings, get_settings
 
@@ -290,6 +289,85 @@ class LocalDocumentLoader(DocumentLoader):
             html = f.read()
         soup = BeautifulSoup(html, "html.parser")
         return soup.get_text(separator="\n", strip=True)
+
+
+# ========== AzureBlobLoader (Azure Blob Storage, 可选依赖) ==========
+
+
+class AzureBlobLoader(DocumentLoader):
+    """从 Azure Blob Storage 加载文档 (可选, 需 azure-storage-blob).
+
+    对标 GPT Researcher document/azure.py.
+    支持 source 形态:
+    - azure://container/blob
+    - https://<account>.blob.core.windows.net/<container>/<blob>
+
+    azure-storage-blob 未安装时记录告警并返回空列表.
+    """
+
+    async def load(self, source: str) -> list[Document]:
+        """从 Azure Blob 加载文档, 返回 list[Document]."""
+        try:
+            from azure.storage.blob import BlobServiceClient
+        except ImportError:
+            logger.warning("azure-storage-blob 未安装, AzureBlobLoader 无法加载: %s", source)
+            return []
+
+        try:
+            container_name, blob_name = self._parse_source(source)
+        except ValueError as e:
+            logger.warning("AzureBlobLoader source 解析失败 %s: %s", source, e)
+            return []
+
+        try:
+            conn_str = self.settings.azure_storage_connection_string
+            if not conn_str:
+                logger.warning(
+                    "azure_storage_connection_string 未配置, AzureBlobLoader 无法加载: %s",
+                    source,
+                )
+                return []
+            client = BlobServiceClient.from_connection_string(conn_str)
+            blob_client = client.get_blob_client(container=container_name, blob=blob_name)
+            downloader = await asyncio.to_thread(blob_client.download_blob)
+            content = await asyncio.to_thread(downloader.readall)
+            text = content.decode("utf-8", errors="ignore")
+            return [
+                Document(
+                    page_content=text,
+                    metadata={
+                        "source": source,
+                        "container": container_name,
+                        "blob": blob_name,
+                        "content_type": "azure_blob",
+                    },
+                )
+            ]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("AzureBlobLoader 加载失败 %s: %s", source, e)
+            return []
+
+    @staticmethod
+    def _parse_source(source: str) -> tuple[str, str]:
+        """解析 source 为 (container, blob).
+
+        支持:
+        - azure://container/blob
+        - https://<account>.blob.core.windows.net/<container>/<blob>
+        """
+        if source.startswith("azure://"):
+            path = source[len("azure://") :]
+        elif "blob.core.windows.net" in source:
+            # https://<account>.blob.core.windows.net/<container>/<blob>
+            after_netloc = source.split("blob.core.windows.net/", 1)[-1]
+            path = after_netloc
+        else:
+            raise ValueError(f"不支持的 Azure Blob source 形态: {source}")
+
+        parts = path.split("/", 1)
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"Azure Blob source 缺少 container/blob: {source}")
+        return parts[0], parts[1]
 
 
 # ========== 工厂函数 ==========

@@ -237,10 +237,8 @@ async def test_multi_session_parallel_isolation() -> None:
     results = await asyncio.gather(*[_query(sid) for sid in sids])
 
     # 验证每个会话返回各自的 session_id (隔离)
-    for sid, returned_sid in zip(sids, results):
-        assert returned_sid == sid, (
-            f"并行会话隔离失效: 期望={sid}, 返回={returned_sid}"
-        )
+    for sid, returned_sid in zip(sids, results, strict=False):
+        assert returned_sid == sid, f"并行会话隔离失效: 期望={sid}, 返回={returned_sid}"
     _log(f"并行会话隔离验证通过: {len(sids)} 个会话各自隔离")
 
 

@@ -17,7 +17,7 @@
 import argparse
 import os
 
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoModel, AutoTokenizer
 
 
 def convert_to_onnx(model_name: str, output_dir: str) -> None:

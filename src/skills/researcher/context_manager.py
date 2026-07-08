@@ -4,10 +4,14 @@
 AGENTS.md 用户需求 10: Token 优化核心.
 
 核心优化:
-1. EmbeddingsFilter: 按 similarity_threshold (默认 0.35) 过滤文档块
-2. 小文档快速路径: 低于 COMPRESSION_THRESHOLD (8000 字符) 跳过压缩
-3. 跨子主题去重: WrittenContentCompressor 已写章节相似度过滤
+1. 两层路由: Fast Path (<8K) 跳过压缩 | BM25Filter (>=8K) 本地分词过滤
+2. 可选 FastEmbed 精排: BM25 召回 chunk 数 > 30 时, 用本地 bge-small-zh-v1.5 精排
+3. 跨子主题去重: WrittenContentCompressor 已写章节相似度过滤 (FastEmbed, 本地)
 4. Word Limit: MAX_CONTEXT_WORDS (25000) 截断
+
+AGENTS.md 第 7 章硬约束:
+- 远程 TEI Embeddings (bge-large-zh-v1.5, 1024维) 仅用于私有数据 Qdrant 索引/检索
+- 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import numpy as np
 
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
-from src.observability.tracing import trace_chain
+from src.observability.tracing import trace_chain, trace_embedding, trace_retriever
 from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 from src.rag.fastembed_client import FastEmbedClient, get_fastembed_client
 
@@ -35,6 +39,8 @@ class ContextManager:
     """
 
     settings: Settings
+    # _embeddings 仅用于 is_circuit_open() 探测 TEI 健康状态 (Qdrant 索引/检索共用 TEI);
+    # 上下文压缩不再调用远程 TEI embed_texts, 全部走 FastEmbed (本地 bge-small-zh).
     _embeddings: EmbeddingsClient
     _llm: LLMClient
     _compressor: SlidingWindowCompressor
@@ -178,10 +184,15 @@ class ContextManager:
         对标 GPT Researcher ContextCompressor.async_get_context.
         关键优化: 小文档快速路径, 跳过 embedding 计算.
 
-        P0-3: TEI 熔断器开启时降级关键词匹配, 避免等待 90s timeout.
-        V4-P3 L2: 两层路由 (Fast Path <8K | BM25Filter >=8K).
-          性能: 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
-        注: EmbeddingsFilter 已移除 (TEI CPU 部署性能瓶颈), 全量由 BM25Filter 覆盖.
+        两层路由架构:
+        - Layer 1 Fast Path: <8K 字符, 直接拼接原文 (零计算)
+        - Layer 2 BM25 + 可选 FastEmbed 精排: >=8K 字符
+          * BM25 先召回 Top-50 (粗筛, 本地 jieba+BM25Okapi, ~50ms)
+          * 总 chunk 数 <= 30 → 直接返回 BM25 结果 (跳过 Embeddings)
+          * 总 chunk 数 > 30 → FastEmbed 从 Top-50 中再选 Top-20 (精排, 本地 bge-small-zh)
+
+        P0-3: TEI 熔断器开启时 (Qdrant 索引/检索也会受影响) 降级关键词匹配.
+        V4-P3 L2: 性能 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
         """
         # 重置已写入内容记录 (P1-02), 每次新查询开始时清空
         self._written_compressor.reset()
@@ -223,19 +234,17 @@ class ContextManager:
                 total_chars < self.settings.bm25_filter_char_threshold
                 and len(documents) <= max_results
             ):
-                context = "\n\n".join(
-                    str(d.get("content", "")) for d in documents[:max_results]
-                )
+                context = "\n\n".join(str(d.get("content", "")) for d in documents[:max_results])
                 span.update(
                     output={"context_len": len(context), "fast_path": True, "layer": "fast"}
                 )
                 return context
 
-            # ━━━━━━━━━━━ Layer 2: BM25 + Embeddings 两阶段检索 (>= 8K 字符) ━━━━━━━━━━━
-            # V4-P3 L2: 两阶段检索
+            # ━━━━━━━━━━━ Layer 2: BM25 + 可选 FastEmbed 精排 (>= 8K 字符) ━━━━━━━━━━━
+            # 两阶段检索 (全部本地, 无远程 TEI 调用):
             #   BM25 先召回 Top-50 (粗筛, 快), 再根据 chunk 数决定是否精排:
             #   - 总 chunk 数 <= 30 → 直接返回 BM25 结果 (精排候选太少, 没必要)
-            #   - 总 chunk 数 > 30 → Embeddings 从 Top-50 中再选 Top-20 (精排, 准)
+            #   - 总 chunk 数 > 30 → FastEmbed 从 Top-50 中再选 Top-20 (精排, 准)
             if self.settings.bm25_filter_enabled:
                 bm25_results = await self._bm25_filter(
                     query,
@@ -268,11 +277,11 @@ class ContextManager:
                     user_id=user_id,
                     session_id=session_id,
                     span=span,
-                    layer="bm25+embeddings",
+                    layer="bm25+fastembed",
                 )
                 return context
 
-            # bm25_filter_enabled=False 时降级关键词匹配 (不调 EmbeddingsFilter)
+            # bm25_filter_enabled=False 时降级关键词匹配 (不调远程 TEI)
             context = self._keyword_fallback(query, documents, max_results)
             span.update(
                 output={
@@ -301,9 +310,7 @@ class ContextManager:
 
         # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
         context = self._truncate_by_words(deduped, self.settings.max_context_words)
-        span.update(
-            output={"context_len": len(context), "fast_path": False, "layer": layer}
-        )
+        span.update(output={"context_len": len(context), "fast_path": False, "layer": layer})
         return context
 
     async def _embeddings_rerank(
@@ -315,7 +322,7 @@ class ContextManager:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """Embeddings 精排: 从 BM25 候选中再选 Top-K (两阶段检索第二阶段).
+        """FastEmbed 精排: 从 BM25 候选中再选 Top-K (两阶段检索第二阶段).
 
         使用 FastEmbed 本地模型 (bge-small-zh-v1.5, 512维), 不依赖远程 TEI.
 
@@ -327,7 +334,7 @@ class ContextManager:
             session_id: 会话 ID (仅用于 trace)
 
         Returns:
-            精排后的内容字符串列表, 按 Embeddings 相似度降序.
+            精排后的内容字符串列表, 按 FastEmbed 相似度降序.
             FastEmbed 失败时降级返回原 BM25 结果前 N 条.
         """
         if not documents:
@@ -379,7 +386,7 @@ class ContextManager:
         norm2 = (sum(x * x for x in vec2)) ** 0.5
         if norm1 == 0 or norm2 == 0:
             return 0.0
-        return dot / (norm1 * norm2)
+        return float(dot / (norm1 * norm2))
 
     async def _bm25_filter(
         self,
@@ -390,10 +397,10 @@ class ContextManager:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """BM25Filter 关键词过滤 (V4-P3 L2, 替代 EmbeddingsFilter 中段路由).
+        """BM25Filter 关键词过滤 (L2 主路径, 本地 jieba+BM25Okapi).
 
-        本地 jieba+BM25Okapi, 零网络调用, 10-200ms 响应.
-        超时或异常降级关键词匹配 (与 _embeddings_filter 降级策略对齐).
+        本地计算, 零网络调用, 10-200ms 响应.
+        超时或异常降级关键词匹配.
         """
         if not documents:
             return []
@@ -469,60 +476,6 @@ class ContextManager:
         # 排序: 关键词重叠度优先, 同分按字符长度优先 (内容更丰富的优先)
         scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
         return "\n\n".join(c for _, _, c in scored[:max_results])
-
-    async def _embeddings_filter(
-        self,
-        query: str,
-        documents: list[dict[str, Any]],
-        max_results: int,
-        *,
-        user_id: str | None = None,
-        session_id: str | None = None,
-    ) -> list[str]:
-        """EmbeddingsFilter 相似度过滤 (V4-P3 暂停使用, 保留代码供未来重新启用).
-
-        V2-P1 优化 (对标 GPTR context/compression.py EmbeddingsFilter):
-        - 旧版: 私有方法 + _split_documents 仅按 \\n\\n 一次切分 (硬切)
-        - V2: 调用独立 EmbeddingsFilter 类, 递归分块 (\\n\\n → \\n → 空格 → 字符),
-          保证语义完整性, 与 GPTR RecursiveCharacterTextSplitter 对齐.
-
-        P0-3: 加 15s asyncio.wait_for timeout, 超时降级关键词匹配.
-              TEI 故障时 EmbeddingsFilter 内部 embed_texts 会触发熔断器 fast-fail
-              (EmbeddingsCircuitOpenError), 此处一并降级.
-
-        按 similarity_threshold (默认 0.35) 过滤文档块.
-
-        V4-P3: 暂停使用 (TEI CPU 部署性能瓶颈), 主路由改为 BM25Filter.
-               保留代码供未来 TEI GPU 部署或外部 Embeddings 服务时重新启用.
-        """
-        if not documents:
-            return []
-
-        # V2-P1: 委托给独立 EmbeddingsFilter 类 (递归分块 + 相似度过滤)
-        from src.rag.embeddings_filter import EmbeddingsFilter
-
-        try:
-            filt = EmbeddingsFilter(self.settings, self._embeddings)
-            # P0-3: 15s timeout, 超时降级 (避免 TEI 卡 90s timeout 拖累 context-compress)
-            return await asyncio.wait_for(
-                filt.filter(
-                    query,
-                    documents,
-                    max_results=max_results,
-                    user_id=user_id,
-                    session_id=session_id,
-                ),
-                timeout=15.0,
-            )
-        except TimeoutError:
-            logger.warning(
-                "EmbeddingsFilter 15s 超时, 降级关键词匹配 (doc_count=%d)", len(documents)
-            )
-            return self._keyword_fallback_split(query, documents, max_results)
-        except Exception as e:  # noqa: BLE001
-            # P0-3: TEI 熔断或 EmbeddingsFilter 异常时降级
-            logger.warning("EmbeddingsFilter 失败, 降级关键词匹配: %s", e)
-            return self._keyword_fallback_split(query, documents, max_results)
 
     @staticmethod
     def _keyword_fallback_split(
@@ -720,12 +673,12 @@ class WrittenContentCompressor:
       与 GPTR WrittenContentCompressor 对齐)
     - 多查询并集去重 (对标 GPTR current_subtopic + draft_section_titles 并集)
 
-    用 EmbeddingsClient 对已写入内容做相似度去重,
-    避免重复内容进入上下文.
+    用 FastEmbed (本地 bge-small-zh-v1.5, 512维) 对已写入内容做相似度去重,
+    避免重复内容进入上下文. 不依赖远程 TEI 服务 (TEI 仅用于私有数据 Qdrant 索引).
     """
 
     settings: Settings
-    _embeddings: EmbeddingsClient
+    _fastembed: FastEmbedClient
     threshold: float
     # V2-P1: chunk 级去重, 替代旧版整篇 content 比对
     _written_embeddings: list[list[float]]
@@ -740,7 +693,7 @@ class WrittenContentCompressor:
         similarity_threshold: float | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embeddings = get_embeddings_client()
+        self._fastembed = get_fastembed_client()
         # V2-P1: 阈值走 settings (优先级: 参数 > settings > 默认 0.5)
         self.threshold = (
             similarity_threshold
@@ -757,13 +710,17 @@ class WrittenContentCompressor:
     ) -> tuple[list[str], list[list[float]]]:
         """锁外计算 content 的 chunk embeddings (P4 修复: 缩小锁粒度).
 
-        在锁外完成网络 I/O (embed_texts), 利用 _chunk_cache 缓存单条 chunk 的
+        在锁外完成本地 FastEmbed I/O, 利用 _chunk_cache 缓存单条 chunk 的
         embedding, 避免同一 chunk 在不同 content 中重复嵌入. 返回 (chunks,
         content_embs) 供 check_and_update 在锁内做 numpy 相似度比对.
 
         拆分动机: 旧版 should_keep 在 dedup_lock 内部调用 embed_texts, 使并行
         退化为串行 (P50=176s). 现将 embed_texts 移到锁外, 锁仅保护
         _written_embeddings / _written_chunks 的并发修改.
+
+        AGENTS.md 第 7/10 章硬约束:
+        - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 禁用远程 TEI
+        - 高频 embedding 调用必带 trace_embedding span (含 model/usage_details)
 
         Args:
             content: 待判断的内容字符串
@@ -776,12 +733,12 @@ class WrittenContentCompressor:
         if not content.strip():
             return [], []
 
-        # V2-P1: chunk 级切分 (与 EmbeddingsFilter 同款递归分块, chunk_size=1000)
-        from src.rag.embeddings_filter import EmbeddingsFilter
+        # V2-P1: chunk 级切分 (复用 embeddings_filter.recursive_split, chunk_size=1000)
+        from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
 
-        chunks = EmbeddingsFilter._recursive_split(
+        chunks = recursive_split(
             content,
-            separators=["\n\n", "\n", " ", ""],
+            separators=DEFAULT_SEPARATORS,
             chunk_size=self.settings.embeddings_filter_chunk_size,
             chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
         )
@@ -802,15 +759,33 @@ class WrittenContentCompressor:
                 miss_chunks.append(chunk)
 
         if miss_chunks:
-            try:
-                miss_embs = await self._embeddings.embed_texts(miss_chunks)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
-                return [], []
-            for idx, chunk, emb in zip(miss_indices, miss_chunks, miss_embs, strict=True):
-                content_embs[idx] = emb
-                cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                self._chunk_cache[cache_key] = emb
+            # 方案 B: 包裹 trace_embedding span, 便于在可观测后端独立查看去重 embedding 指标
+            # (FastEmbed 内部 embed_texts 已有自己的 fastembed-embed span; 此处外层
+            #  span 提供"去重场景"语义, 与精排场景区分, 便于 profiling)
+            async with trace_embedding(
+                name="written-content-dedup-embed",
+                input={
+                    "text_count": len(miss_chunks),
+                    "total_chars": sum(len(t) for t in miss_chunks),
+                },
+                model=self.settings.fastembed_model_name,
+            ) as span:
+                try:
+                    miss_embs = await self._fastembed.embed_texts(miss_chunks)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("WrittenContentCompressor embedding 失败, 保留内容: %s", e)
+                    span.update(metadata={"error": str(e), "degraded": True})
+                    return [], []
+                for idx, chunk, emb in zip(miss_indices, miss_chunks, miss_embs, strict=True):
+                    content_embs[idx] = emb
+                    cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+                    self._chunk_cache[cache_key] = emb
+                # 估算 token 数 (粗略: 字符数 / 3, 与 FastEmbedClient 内部一致)
+                token_count = sum(len(t) for t in miss_chunks) // 3
+                span.update(
+                    output={"vector_count": len(miss_embs)},
+                    usage_details={"total_tokens": token_count},
+                )
 
         return chunks, content_embs
 

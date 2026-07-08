@@ -105,9 +105,7 @@ async def test_short_query_returns_fast_llm_response(
     """short_query + FAST_LLM 成功 → 返回 LLM 内容."""
     mock_llm.achat.return_value = _make_llm_response("你好, 我是研究助手")
 
-    result = await responder.respond_short_query(
-        "你好", user_id="u1", session_id="s1"
-    )
+    result = await responder.respond_short_query("你好", user_id="u1", session_id="s1")
 
     assert result == "你好, 我是研究助手"
     # 应调用 achat 且 tier=FAST

@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.config.settings import Settings
-from src.rag.embeddings_filter import EmbeddingsFilter
+from src.rag.embeddings_filter import cosine_similarity, recursive_split
 from src.skills.researcher.prompts import DefaultPromptFamily, EnglishPromptFamily
 
 # ========== 1. settings.py: V2 新增配置字段 ==========
@@ -174,16 +174,21 @@ class TestV2Prompts:
         assert "Err on the side of inclusion" in prompt
 
 
-# ========== 3. embeddings_filter.py: 独立 EmbeddingsFilter 类 ==========
+# ========== 3. embeddings_filter.py: 模块级递归分块工具 ==========
 
 
-class TestEmbeddingsFilter:
-    """V2-P1: 独立 EmbeddingsFilter 类验证."""
+class TestRecursiveSplit:
+    """V2-P1: recursive_split / cosine_similarity 模块级工具验证.
+
+    V4-P3 重构: 旧 `EmbeddingsFilter` 类已删除 (上下文压缩改用 FastEmbed),
+    保留 `recursive_split` / `cosine_similarity` 为模块级函数供 BM25Filter
+    与 WrittenContentCompressor 复用.
+    """
 
     def test_recursive_split_short_text(self) -> None:
         """短文本 (< chunk_size) 不切分."""
         text = "这是一段短文本"
-        result = EmbeddingsFilter._recursive_split(
+        result = recursive_split(
             text,
             separators=["\n\n", "\n", " ", ""],
             chunk_size=1000,
@@ -195,7 +200,7 @@ class TestEmbeddingsFilter:
         """长段落 (> chunk_size) 递归切分."""
         # 构造一个超过 chunk_size 但含 \n\n 的文本
         text = "段落1内容" * 200 + "\n\n" + "段落2内容" * 200
-        result = EmbeddingsFilter._recursive_split(
+        result = recursive_split(
             text,
             separators=["\n\n", "\n", " ", ""],
             chunk_size=1000,
@@ -211,7 +216,7 @@ class TestEmbeddingsFilter:
         """无 separator 可用时降级字符级硬切."""
         # 构造一个超长无空格无换行的字符串
         text = "字" * 2500
-        result = EmbeddingsFilter._recursive_split(
+        result = recursive_split(
             text,
             separators=["\n\n", "\n", " ", ""],
             chunk_size=1000,
@@ -226,33 +231,13 @@ class TestEmbeddingsFilter:
         """正交向量相似度为 0."""
         v1 = [1.0, 0.0, 0.0]
         v2 = [0.0, 1.0, 0.0]
-        assert EmbeddingsFilter._cosine_similarity(v1, v2) == 0.0
+        assert cosine_similarity(v1, v2) == 0.0
 
     def test_cosine_similarity_identical(self) -> None:
         """相同向量相似度为 1."""
         v = [1.0, 2.0, 3.0]
         # 浮点容差
-        assert abs(EmbeddingsFilter._cosine_similarity(v, v) - 1.0) < 1e-6
-
-    @pytest.mark.asyncio
-    async def test_filter_empty_documents(self) -> None:
-        """空文档列表返回空."""
-        settings = Settings()
-        filt = EmbeddingsFilter(settings)
-        result = await filt.filter("query", [])
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_filter_embeddings_failure_fallback(self) -> None:
-        """embedding 调用失败时降级返回原文前 N 条."""
-        settings = Settings()
-        filt = EmbeddingsFilter(settings)
-        # mock embeddings 抛异常
-        filt._embeddings = MagicMock()
-        filt._embeddings.embed_texts = AsyncMock(side_effect=Exception("network error"))
-        documents = [{"content": "内容1"}, {"content": "内容2"}]
-        result = await filt.filter("query", documents, max_results=5)
-        assert result == ["内容1", "内容2"]
+        assert abs(cosine_similarity(v, v) - 1.0) < 1e-6
 
 
 # ========== 4. context_manager.py: WrittenContentCompressor 阈值走 settings ==========

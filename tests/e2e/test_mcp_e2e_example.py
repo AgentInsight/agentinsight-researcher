@@ -292,9 +292,7 @@ async def test_mcp_research_flow_with_tool_call(
             },
         )
 
-    assert r_chat.status_code == 200, (
-        f"研究请求非 200: {r_chat.status_code} {r_chat.text[:300]}"
-    )
+    assert r_chat.status_code == 200, f"研究请求非 200: {r_chat.status_code} {r_chat.text[:300]}"
     data = r_chat.json()
 
     # 步骤 3: 验证报告结构
@@ -359,9 +357,7 @@ async def test_mcp_multi_server_concurrent(
             assert cid in config_id_set, f"配置 {cid} 未在列表中找到"
 
         # 步骤 3: 并发测试
-        test_tasks = [
-            client.post(f"{AGENT_URL}/v1/mcp/{cid}/test") for cid in config_ids
-        ]
+        test_tasks = [client.post(f"{AGENT_URL}/v1/mcp/{cid}/test") for cid in config_ids]
         test_responses = await asyncio.gather(*test_tasks)
 
     # 步骤 4: 验证独立结果
@@ -446,12 +442,12 @@ async def test_mcp_cache_cross_session_reuse() -> None:
     # 步骤 4: 验证主题一致 (同一 query 应产出相关结果)
     content_a_lower = content_a.lower()
     content_b_lower = content_b.lower()
-    assert any(
-        kw in content_a_lower for kw in ["python", "异步", "async"]
-    ), f"session_a 内容未包含主题关键词: {content_a[:200]}"
-    assert any(
-        kw in content_b_lower for kw in ["python", "异步", "async"]
-    ), f"session_b 内容未包含主题关键词: {content_b[:200]}"
+    assert any(kw in content_a_lower for kw in ["python", "异步", "async"]), (
+        f"session_a 内容未包含主题关键词: {content_a[:200]}"
+    )
+    assert any(kw in content_b_lower for kw in ["python", "异步", "async"]), (
+        f"session_b 内容未包含主题关键词: {content_b[:200]}"
+    )
 
     _log(
         f"跨会话缓存测试完成: a={elapsed_a:.1f}s, b={elapsed_b:.1f}s, "

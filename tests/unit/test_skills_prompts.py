@@ -12,7 +12,6 @@ import pytest
 from src.skills.researcher.prompts import (
     DefaultPromptFamily,
     EnglishPromptFamily,
-    PromptFamily,
     get_prompt_family,
 )
 
@@ -94,9 +93,6 @@ def test_default_mcp_tool_selection_prompt_non_empty(
     assert isinstance(prompt, str)
     assert len(prompt) > 0
     assert "3" in prompt
-
-
-
 
 
 def test_default_chat_prompt_non_empty(default_family: DefaultPromptFamily) -> None:
@@ -209,9 +205,6 @@ def test_english_mcp_tool_selection_prompt_non_empty(
     assert len(prompt) > 0
 
 
-
-
-
 def test_english_chat_prompt_non_empty(english_family: EnglishPromptFamily) -> None:
     prompt = english_family.chat_prompt("followup", "# Report", "role")
     assert isinstance(prompt, str)
@@ -251,6 +244,3 @@ def test_get_prompt_family_default_when_no_arg() -> None:
     """测试无参数时默认返回 DefaultPromptFamily."""
     family = get_prompt_family()
     assert isinstance(family, DefaultPromptFamily)
-
-
-

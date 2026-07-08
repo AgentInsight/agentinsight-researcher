@@ -13,7 +13,7 @@ AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,9 +36,7 @@ def _make_scraper_class_mock(
     """
 
     class _MockInstance:
-        def __init__(
-            self, url: str = "", session: object | None = None, *args, **kwargs
-        ) -> None:
+        def __init__(self, url: str = "", session: object | None = None, *args, **kwargs) -> None:
             self.url = url
             self.session = session
 
@@ -81,27 +79,28 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        bsm_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
-        pw_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        bsm_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
+        pw_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -130,24 +129,27 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        pw_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        pw_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -182,18 +184,23 @@ class TestScraperRouting:
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -219,21 +226,23 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        tf_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        tf_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.pymupdf_scraper.PyMuPDFScraper",
-            pdf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.pymupdf_scraper.PyMuPDFScraper",
+                pdf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/doc.pdf",
@@ -258,21 +267,23 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        tf_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        tf_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.arxiv_scraper.ArxivScraper",
-            arxiv_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.arxiv_scraper.ArxivScraper",
+                arxiv_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://arxiv.org/abs/1234.5678",
@@ -297,27 +308,28 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        tf_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
-        bsm_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        tf_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
+        bsm_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="playwright")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -361,18 +373,23 @@ class TestScraperRouting:
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -398,27 +415,28 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        bsm_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
-        pw_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        bsm_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
+        pw_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -444,21 +462,23 @@ class TestScraperRouting:
                 "image_urls": [],
             }
         )
-        bsm_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        bsm_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="auto")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -477,27 +497,28 @@ class TestScraperRouting:
         tf_mock = _make_scraper_class_mock(
             scrape_return={"content": "short", "title": "", "image_urls": []}
         )
-        bsm_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
-        pw_mock = _make_scraper_class_mock(
-            scrape_return={"content": "should-not-reach"}
-        )
+        bsm_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
+        pw_mock = _make_scraper_class_mock(scrape_return={"content": "should-not-reach"})
 
         custom_settings = _make_settings(scraper_mode="lightweight")
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",

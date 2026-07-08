@@ -1112,8 +1112,8 @@ def get_prompt_family(name: str = "default") -> PromptFamily:
     if name == "english":
         return EnglishPromptFamily()
 
-    from src.skills.researcher.searchers import SearchRegion, detect_region
     from src.config.settings import get_settings
+    from src.skills.researcher.searchers import SearchRegion, detect_region
 
     settings = get_settings()
     if settings.prompt_family == "english":

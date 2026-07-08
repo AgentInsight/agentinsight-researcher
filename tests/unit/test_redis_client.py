@@ -18,7 +18,6 @@ AGENTS.md 第 13 章: 单元测试不依赖外部服务 (aioredis 全部 mock).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -103,7 +102,6 @@ async def test_get_redis_client_creates_client_from_url() -> None:
 
     assert client is mock_redis
     mock_from.assert_called_once()
-    call_kwargs = mock_from.call_args.kwargs
     assert mock_from.call_args.args[0] == "redis://redis:6379/0"
     # ping 健康检查
     mock_redis.ping.assert_awaited_once()
@@ -199,9 +197,7 @@ async def test_get_redis_client_returns_none_on_from_url_exception() -> None:
     """from_url 抛异常 → 返回 None (降级无缓存)."""
     settings = _make_settings()
 
-    with patch.object(
-        redis_client_mod.aioredis, "from_url", side_effect=OSError("bad url")
-    ):
+    with patch.object(redis_client_mod.aioredis, "from_url", side_effect=OSError("bad url")):
         client = await get_redis_client(settings)
 
     assert client is None
@@ -287,7 +283,9 @@ async def test_get_redis_client_after_close_creates_new_instance() -> None:
     mock_redis2 = _make_mock_redis()
     settings = _make_settings()
 
-    with patch.object(redis_client_mod.aioredis, "from_url", side_effect=[mock_redis1, mock_redis2]):
+    with patch.object(
+        redis_client_mod.aioredis, "from_url", side_effect=[mock_redis1, mock_redis2]
+    ):
         client1 = await get_redis_client(settings)
         await close_redis_client()
         client2 = await get_redis_client(settings)

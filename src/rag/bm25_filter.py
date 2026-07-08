@@ -1,20 +1,22 @@
-"""BM25Filter 关键词过滤器 (V4-P3 L2 方案, 替代 EmbeddingsFilter 中段路由).
+"""BM25Filter 关键词过滤器 (V4-P3 L2 方案, 替代旧 EmbeddingsFilter 中段路由).
 
 对标 GPTR EmbeddingsFilter 的轻量替代方案, 针对本项目 TEI CPU 部署的性能瓶颈:
-- EmbeddingsFilter: 258 chunks × TEI 推理 = ~43 分钟 (Trace aac742d8 实测)
+- 旧 EmbeddingsFilter (已删除): 258 chunks × TEI 推理 = ~43 分钟 (Trace aac742d8 实测)
 - BM25Filter: 258 chunks × 本地 jieba+BM25 = ~2 秒 (1000× 加速)
 
 设计原则:
-1. 签名与 EmbeddingsFilter.filter 完全一致, 支持平滑替换
-2. 复用 EmbeddingsFilter._recursive_split 静态方法 (保证 chunk 级一致性)
+1. 签名与旧 EmbeddingsFilter.filter 完全一致, 支持平滑替换
+2. 复用 embeddings_filter.recursive_split 模块级函数 (保证 chunk 级一致性)
 3. 复用 retriever._get_tokens 模式 (jieba 分词 + LRU 缓存, 但实例独立)
 4. 零网络调用, 零 TEI 依赖, 纯本地 CPU 计算
-5. 降级策略与 EmbeddingsFilter 对齐 (失败返回原文前 N 条)
+5. 降级策略: 失败返回原文前 N 条
 
-三层路由策略 (context_manager.get_similar_content):
+两层路由策略 (context_manager.get_similar_content):
 - Layer 1 Fast Path: < 8K 字符, 直接拼接原文 (零计算)
-- Layer 2 BM25Filter: 8K-50K 字符, jieba+BM25Okapi 本地过滤 (主路径)
-- Layer 3 EmbeddingsFilter: > 50K 字符, TEI embedding 兜底 (高精度)
+- Layer 2 BM25Filter + 可选 FastEmbed 精排: >= 8K 字符
+  * BM25 先召回 Top-50 (粗筛, 本地 jieba+BM25Okapi)
+  * 总 chunk 数 <= 30 → 直接返回 BM25 结果 (跳过 Embeddings)
+  * 总 chunk 数 > 30 → FastEmbed 从 Top-50 中再选 Top-20 (精排, 本地 bge-small-zh)
 
 AGENTS.md 第 7 章: BM25 用 rank-bm25+jieba (已声明, 零新依赖).
 AGENTS.md 第 10 章: 检索节点必带 trace_retriever span (含 matched/candidate_count/retriever_type/top_score).
@@ -30,30 +32,30 @@ from rank_bm25 import BM25Okapi
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_retriever
-from src.rag.embeddings_filter import EmbeddingsFilter
+from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
 
 logger = logging.getLogger(__name__)
 
-# 递归分隔符 (与 EmbeddingsFilter 对齐, 保证 chunk 级一致性)
-_RECURSIVE_SEPARATORS: list[str] = ["\n\n", "\n", " ", ""]
+# 递归分隔符 (复用 embeddings_filter 模块级常量, 保证 chunk 级一致性)
+_RECURSIVE_SEPARATORS: list[str] = DEFAULT_SEPARATORS
 
 # 分词缓存上限 (与 HybridRetriever._get_tokens 一致)
 _TOKEN_CACHE_MAX_SIZE: int = 2000
 
 
 class BM25Filter:
-    """BM25 关键词过滤器 (L2 方案, 替代 EmbeddingsFilter 中段路由).
+    """BM25 关键词过滤器 (L2 方案, 替代旧 EmbeddingsFilter 中段路由).
 
     核心流程:
-    1. 递归分块 (复用 EmbeddingsFilter._recursive_split, chunk_size=1000, overlap=100)
+    1. 递归分块 (复用 embeddings_filter.recursive_split, chunk_size=1000, overlap=100)
     2. jieba 中文分词 + 实例级 LRU 缓存 (FIFO 淘汰, 上限 2000 条)
     3. BM25Okapi 语料构建 (显式传 k1=settings.bm25_k1, b=settings.bm25_b)
     4. BM25 打分 + Top-K 召回 (零网络调用)
 
-    对比 EmbeddingsFilter:
+    对比旧 EmbeddingsFilter (已删除):
     - 优势: 零网络调用, 10-200ms 响应 (vs 200-2000ms), 无 TEI 依赖
     - 劣势: 关键词匹配, 语义召回弱 (无法处理同义词/跨语言)
-    - 定位: 8K-50K 字符区段主路径, >50K 降级到 EmbeddingsFilter
+    - 定位: >=8K 字符区段主路径 (含 >50K 超长上下文, 全量覆盖)
 
     用法:
         filt = BM25Filter(settings)
@@ -81,7 +83,7 @@ class BM25Filter:
     ) -> list[str]:
         """按 BM25 分数过滤文档块, 返回 Top-K 内容列表.
 
-        签名与 EmbeddingsFilter.filter 完全一致, 支持平滑替换.
+        签名与旧 EmbeddingsFilter.filter 一致 (便于平滑替换).
 
         Args:
             query: 查询文本 (用于 BM25 打分)
@@ -93,7 +95,7 @@ class BM25Filter:
 
         Returns:
             过滤后的内容字符串列表, 按 BM25 分数降序.
-            失败时降级返回原文前 N 条 (与 EmbeddingsFilter 降级策略对齐).
+            失败时降级返回原文前 N 条.
         """
         if not documents:
             return []
@@ -110,7 +112,7 @@ class BM25Filter:
                 user_id=user_id,
                 session_id=session_id,
             ) as span:
-                # 1. 递归分块 (复用 EmbeddingsFilter 静态方法, 保证 chunk 级一致性)
+                # 1. 递归分块 (复用 embeddings_filter.recursive_split, 保证 chunk 级一致性)
                 chunks = self._split_documents_recursive(documents)
                 if not chunks:
                     span.update(
@@ -121,9 +123,7 @@ class BM25Filter:
                             "top_score": 0.0,
                         },
                     )
-                    return [
-                        str(d.get("content", "")) for d in documents[:max_results]
-                    ]
+                    return [str(d.get("content", "")) for d in documents[:max_results]]
 
                 # 2. jieba 分词 + 缓存
                 chunk_tokens = [self._get_tokens(c["content"]) for c in chunks]
@@ -138,9 +138,7 @@ class BM25Filter:
                             "top_score": 0.0,
                         },
                     )
-                    return [
-                        str(d.get("content", "")) for d in documents[:max_results]
-                    ]
+                    return [str(d.get("content", "")) for d in documents[:max_results]]
 
                 # 3. BM25 语料构建 (显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题)
                 bm25 = BM25Okapi(
@@ -185,9 +183,8 @@ class BM25Filter:
         self,
         documents: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
-        """递归分块 (复用 EmbeddingsFilter._recursive_split, 保证 chunk 级一致性).
+        """递归分块 (复用 embeddings_filter.recursive_split, 保证 chunk 级一致性).
 
-        与 EmbeddingsFilter._split_documents_recursive 实现对齐,
         chunk_size/chunk_overlap 走 bm25_filter_chunk_size/overlap 配置.
         """
         chunk_size = self.settings.bm25_filter_chunk_size
@@ -199,8 +196,8 @@ class BM25Filter:
             if not content:
                 continue
             source = doc.get("url", "")
-            # 复用 EmbeddingsFilter 静态方法 (与 WrittenContentCompressor 同款用法)
-            split_texts = EmbeddingsFilter._recursive_split(
+            # 复用模块级函数 (与 WrittenContentCompressor 同款用法)
+            split_texts = recursive_split(
                 content,
                 separators=_RECURSIVE_SEPARATORS,
                 chunk_size=chunk_size,

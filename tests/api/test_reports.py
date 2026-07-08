@@ -85,22 +85,14 @@ def test_download_report_markdown(generated_report_id: str) -> None:
             f"{AGENT_URL}/v1/reports/{generated_report_id}/download",
             params={"format": "markdown"},
         )
-    assert r.status_code == 200, (
-        f"下载 Markdown 报告非 200: {r.status_code} {r.text[:300]}"
-    )
+    assert r.status_code == 200, f"下载 Markdown 报告非 200: {r.status_code} {r.text[:300]}"
     # content-type 应含 text/markdown
     content_type = r.headers.get("content-type", "")
-    assert "text/markdown" in content_type, (
-        f"content-type 非 text/markdown: {content_type}"
-    )
+    assert "text/markdown" in content_type, f"content-type 非 text/markdown: {content_type}"
     # Content-Disposition 应为附件 (attachment)
     disposition = r.headers.get("content-disposition", "")
-    assert "attachment" in disposition, (
-        f"Content-Disposition 非 attachment: {disposition}"
-    )
-    assert "filename=" in disposition, (
-        f"Content-Disposition 缺少 filename: {disposition}"
-    )
+    assert "attachment" in disposition, f"Content-Disposition 非 attachment: {disposition}"
+    assert "filename=" in disposition, f"Content-Disposition 缺少 filename: {disposition}"
     # 响应体非空 (报告内容)
     assert r.content, "下载报告内容为空"
 

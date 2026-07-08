@@ -59,9 +59,7 @@ def mock_llm() -> MagicMock:
 
 
 @pytest.fixture()
-def coordinator(
-    test_settings: Settings, mock_llm: MagicMock
-) -> MCPCoordinator:
+def coordinator(test_settings: Settings, mock_llm: MagicMock) -> MCPCoordinator:
     """构造 MCPCoordinator 实例 (注入 mock LLM)."""
     return MCPCoordinator(settings=test_settings, llm=mock_llm)
 
@@ -134,24 +132,16 @@ class TestMCPCoordinatorEndToEnd:
         3. mock tool.ainvoke 返回 "real-mcp-result"
         4. 验证 contexts 含 "real-mcp-result"
         """
-        tool_a = _make_mock_tool(
-            "search_tool", "search the web", invoke_result="real-mcp-result"
-        )
-        tool_b = _make_mock_tool(
-            "calc_tool", "calculate", invoke_result="calc-result"
-        )
+        tool_a = _make_mock_tool("search_tool", "search the web", invoke_result="real-mcp-result")
+        tool_b = _make_mock_tool("calc_tool", "calculate", invoke_result="calc-result")
         mock_client = _make_mock_mcp_client([tool_a, tool_b])
 
         # LLM 返回选择 search_tool 的 JSON
         mock_llm.achat.return_value = MagicMock(
-            content=json.dumps(
-                [{"name": "search_tool", "args": {"query": "test query"}}]
-            )
+            content=json.dumps([{"name": "search_tool", "args": {"query": "test query"}}])
         )
 
-        with patch.object(
-            coordinator, "_get_or_create_client", return_value=mock_client
-        ):
+        with patch.object(coordinator, "_get_or_create_client", return_value=mock_client):
             contexts = await coordinator.conduct_research(
                 "test query",
                 strategy="fast",
@@ -182,14 +172,10 @@ class TestMCPCoordinatorEndToEnd:
         mock_client = _make_mock_mcp_client([tool])
 
         mock_llm.achat.return_value = MagicMock(
-            content=json.dumps(
-                [{"name": "data_source", "args": {"query": "市场规模"}}]
-            )
+            content=json.dumps([{"name": "data_source", "args": {"query": "市场规模"}}])
         )
 
-        with patch.object(
-            coordinator, "_get_or_create_client", return_value=mock_client
-        ):
+        with patch.object(coordinator, "_get_or_create_client", return_value=mock_client):
             contexts = await coordinator.conduct_research(
                 "分析 2024 年市场规模",
                 strategy="fast",
@@ -220,14 +206,10 @@ class TestMCPCoordinatorEndToEnd:
         mock_client = _make_mock_mcp_client([tool])
 
         mock_llm.achat.return_value = MagicMock(
-            content=json.dumps(
-                [{"name": "failing_tool", "args": {"query": "test"}}]
-            )
+            content=json.dumps([{"name": "failing_tool", "args": {"query": "test"}}])
         )
 
-        with patch.object(
-            coordinator, "_get_or_create_client", return_value=mock_client
-        ):
+        with patch.object(coordinator, "_get_or_create_client", return_value=mock_client):
             # 不应抛异常 (conduct_research 内部 try/except 兜底)
             contexts = await coordinator.conduct_research(
                 "test query",
@@ -241,9 +223,7 @@ class TestMCPCoordinatorEndToEnd:
         assert isinstance(contexts, list)
         assert contexts == []
 
-    async def test_mcp_no_configs_returns_empty(
-        self, coordinator: MCPCoordinator
-    ) -> None:
+    async def test_mcp_no_configs_returns_empty(self, coordinator: MCPCoordinator) -> None:
         """mcp_configs 为空 → conduct_research 早期返回 []."""
         contexts = await coordinator.conduct_research(
             "test query",
@@ -254,9 +234,7 @@ class TestMCPCoordinatorEndToEnd:
         )
         assert contexts == []
 
-    async def test_mcp_disabled_strategy_returns_empty(
-        self, coordinator: MCPCoordinator
-    ) -> None:
+    async def test_mcp_disabled_strategy_returns_empty(self, coordinator: MCPCoordinator) -> None:
         """strategy=disabled → conduct_research 直接返回 []."""
         contexts = await coordinator.conduct_research(
             "test query",
@@ -274,9 +252,7 @@ class TestMCPCoordinatorEndToEnd:
 class TestMCPResearchFlow:
     """验证 conduct_mcp_if_enabled 公共入口在研究流程中的行为."""
 
-    async def test_research_with_mcp_enabled(
-        self, test_settings: Settings
-    ) -> None:
+    async def test_research_with_mcp_enabled(self, test_settings: Settings) -> None:
         """启用 MCP (strategy=fast) + 有可用配置 → 返回 MCP contexts.
 
         mock get_user_mcp_configs 返回非空配置, mock MCPCoordinator.conduct_research
@@ -285,16 +261,17 @@ class TestMCPResearchFlow:
         test_settings.mcp_strategy = "fast"
 
         mock_coord = MagicMock()
-        mock_coord.conduct_research = AsyncMock(
-            return_value=["mcp-context-1", "mcp-context-2"]
-        )
+        mock_coord.conduct_research = AsyncMock(return_value=["mcp-context-1", "mcp-context-2"])
 
-        with patch(
-            "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
-            return_value=mock_coord,
-        ), patch(
-            "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
-            AsyncMock(return_value=_make_mcp_configs()),
+        with (
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
+                return_value=mock_coord,
+            ),
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
+                AsyncMock(return_value=_make_mcp_configs()),
+            ),
         ):
             contexts = await conduct_mcp_if_enabled(
                 test_settings,
@@ -313,21 +290,22 @@ class TestMCPResearchFlow:
         assert call_kwargs.kwargs.get("user_id") == "test-user"
         assert call_kwargs.kwargs.get("session_id") == "test-mcp-enabled-flow"
 
-    async def test_research_with_mcp_disabled(
-        self, test_settings: Settings
-    ) -> None:
+    async def test_research_with_mcp_disabled(self, test_settings: Settings) -> None:
         """禁用 MCP (strategy=disabled) → 早期返回 [], 不调用协调器."""
         test_settings.mcp_strategy = "disabled"
 
         mock_coord = MagicMock()
         mock_coord.conduct_research = AsyncMock(return_value=["should-not-reach"])
 
-        with patch(
-            "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
-            return_value=mock_coord,
-        ), patch(
-            "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
-            AsyncMock(return_value=_make_mcp_configs()),
+        with (
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
+                return_value=mock_coord,
+            ),
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
+                AsyncMock(return_value=_make_mcp_configs()),
+            ),
         ):
             contexts = await conduct_mcp_if_enabled(
                 test_settings,
@@ -350,12 +328,15 @@ class TestMCPResearchFlow:
         mock_coord = MagicMock()
         mock_coord.conduct_research = AsyncMock(return_value=["should-not-reach"])
 
-        with patch(
-            "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
-            return_value=mock_coord,
-        ), patch(
-            "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
-            AsyncMock(return_value=[]),  # 用户无配置
+        with (
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_mcp_coordinator",
+                return_value=mock_coord,
+            ),
+            patch(
+                "src.skills.researcher.mcp_coordinator.get_user_mcp_configs",
+                AsyncMock(return_value=[]),  # 用户无配置
+            ),
         ):
             contexts = await conduct_mcp_if_enabled(
                 test_settings,
@@ -377,14 +358,10 @@ class TestMCPResearchFlow:
         """
         from contextlib import asynccontextmanager
 
-        tool = _make_mock_tool(
-            "traced_tool", "traced tool", invoke_result="traced-result"
-        )
+        tool = _make_mock_tool("traced_tool", "traced tool", invoke_result="traced-result")
         mock_client = _make_mock_mcp_client([tool])
         mock_llm.achat.return_value = MagicMock(
-            content=json.dumps(
-                [{"name": "traced_tool", "args": {"query": "test"}}]
-            )
+            content=json.dumps([{"name": "traced_tool", "args": {"query": "test"}}])
         )
 
         span_calls: list[dict] = []
@@ -402,11 +379,12 @@ class TestMCPResearchFlow:
             span_calls.append({"_enter": True, "name": name, "kwargs": kwargs})
             yield _SpySpan()
 
-        with patch(
-            "src.skills.researcher.mcp_coordinator.trace_tool",
-            _spy_trace_tool,
-        ), patch.object(
-            coordinator, "_get_or_create_client", return_value=mock_client
+        with (
+            patch(
+                "src.skills.researcher.mcp_coordinator.trace_tool",
+                _spy_trace_tool,
+            ),
+            patch.object(coordinator, "_get_or_create_client", return_value=mock_client),
         ):
             contexts = await coordinator.conduct_research(
                 "test query",
@@ -454,13 +432,16 @@ class TestMCPResearchFlow:
             yield _SpySpan()
 
         # 直接 mock _execute_mcp 抛异常, 触发 conduct_research 的 except 分支
-        with patch(
-            "src.skills.researcher.mcp_coordinator.trace_tool",
-            _spy_trace_tool,
-        ), patch.object(
-            coordinator,
-            "_execute_mcp",
-            AsyncMock(side_effect=RuntimeError("conduct_research level failure")),
+        with (
+            patch(
+                "src.skills.researcher.mcp_coordinator.trace_tool",
+                _spy_trace_tool,
+            ),
+            patch.object(
+                coordinator,
+                "_execute_mcp",
+                AsyncMock(side_effect=RuntimeError("conduct_research level failure")),
+            ),
         ):
             contexts = await coordinator.conduct_research(
                 "test query",
@@ -474,9 +455,7 @@ class TestMCPResearchFlow:
         assert contexts == []
         # span.update 应记录 success=False
         update_calls = [c for c in span_calls if "_enter" not in c]
-        fail_updates = [
-            c for c in update_calls if c.get("metadata", {}).get("success") is False
-        ]
+        fail_updates = [c for c in update_calls if c.get("metadata", {}).get("success") is False]
         assert len(fail_updates) >= 1, "失败时 span 应记录 success=False"
 
     async def test_mcp_fast_strategy_caches_result(
@@ -486,19 +465,13 @@ class TestMCPResearchFlow:
 
         验证 V4-P1-01 fast 策略的缓存复用语义.
         """
-        tool = _make_mock_tool(
-            "cached_tool", "cached tool", invoke_result="cached-result"
-        )
+        tool = _make_mock_tool("cached_tool", "cached tool", invoke_result="cached-result")
         mock_client = _make_mock_mcp_client([tool])
         mock_llm.achat.return_value = MagicMock(
-            content=json.dumps(
-                [{"name": "cached_tool", "args": {"query": "test"}}]
-            )
+            content=json.dumps([{"name": "cached_tool", "args": {"query": "test"}}])
         )
 
-        with patch.object(
-            coordinator, "_get_or_create_client", return_value=mock_client
-        ):
+        with patch.object(coordinator, "_get_or_create_client", return_value=mock_client):
             # 第一次调用
             contexts1 = await coordinator.conduct_research(
                 "same query",

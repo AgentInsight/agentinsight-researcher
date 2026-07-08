@@ -116,9 +116,7 @@ class TestMCPStdioTransport:
             "command": None,  # 缺少 command
         }
 
-        with patch.object(
-            coordinator, "_get_or_create_client", return_value=None
-        ) as mock_factory:
+        with patch.object(coordinator, "_get_or_create_client", return_value=None) as mock_factory:
             result = await coordinator._execute_mcp("query", [config])
 
         # 所有配置均无效 → 返回空, 不构建 client

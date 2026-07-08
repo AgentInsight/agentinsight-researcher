@@ -111,9 +111,7 @@ def test_embeddings_api_key_auth_header() -> None:
     - embeddings_api_key 为空时, 不注入 Authorization 头
     """
     # 非空 API key: 应注入 Bearer
-    settings_with_key = Settings(
-        embeddings_api_key="tei-secret-key-123", _env_file=None
-    )
+    settings_with_key = Settings(embeddings_api_key="tei-secret-key-123", _env_file=None)
     client_with_key = EmbeddingsClient(settings_with_key)
     assert client_with_key._client.headers["authorization"] == "Bearer tei-secret-key-123"
 
@@ -134,14 +132,9 @@ def test_rerank_api_key_auth_header() -> None:
     验证 HybridRetriever 的 _rerank_client 在构造时正确注入鉴权头.
     """
     # 非空 rerank_api_key: _rerank_client headers 应含 Bearer
-    settings_with_key = Settings(
-        rerank_api_key="rerank-secret-456", _env_file=None
-    )
+    settings_with_key = Settings(rerank_api_key="rerank-secret-456", _env_file=None)
     retriever_with_key = HybridRetriever(settings_with_key)
-    assert (
-        retriever_with_key._rerank_client.headers["authorization"]
-        == "Bearer rerank-secret-456"
-    )
+    assert retriever_with_key._rerank_client.headers["authorization"] == "Bearer rerank-secret-456"
 
     # 空 rerank_api_key: 不应注入 Authorization 头
     settings_no_key = Settings(rerank_api_key=None, _env_file=None)
@@ -234,16 +227,14 @@ def test_vector_weight_bm25_weight_config_variation() -> None:
     def _fuse(vw: float, bw: float) -> list[dict[str, Any]]:
         settings = Settings(vector_weight=vw, bm25_weight=bw, rrf_k=k, _env_file=None)
         retriever = HybridRetriever(settings)
-        return retriever._rrf_fuse(
-            vector_results, bm25_results, vector_weight=vw, bm25_weight=bw
-        )
+        return retriever._rrf_fuse(vector_results, bm25_results, vector_weight=vw, bm25_weight=bw)
 
     # 默认配置 (0.7/0.3): vector 权重高, docB (vector rank 0) 应排第一
     fused_default = _fuse(0.7, 0.3)
     # docA = 0.7/(k+2) + 0.3/(k+1)  (vector rank 1, bm25 rank 0)
     # docB = 0.7/(k+1) + 0.3/(k+2)  (vector rank 0, bm25 rank 1)
-    expected_docA_default = 0.7 / (k + 2) + 0.3 / (k + 1)
-    expected_docB_default = 0.7 / (k + 1) + 0.3 / (k + 2)
+    expected_docA_default = 0.7 / (k + 2) + 0.3 / (k + 1)  # noqa: N806
+    expected_docB_default = 0.7 / (k + 1) + 0.3 / (k + 2)  # noqa: N806
     scores_default = {f["content"]: f["score"] for f in fused_default}
     assert abs(scores_default["docA"] - expected_docA_default) < 1e-9
     assert abs(scores_default["docB"] - expected_docB_default) < 1e-9
@@ -253,8 +244,8 @@ def test_vector_weight_bm25_weight_config_variation() -> None:
     # 反转配置 (0.3/0.7): bm25 权重高, docA (bm25 rank 0) 应排第一
     flipped = _fuse(0.3, 0.7)
     scores_flipped = {f["content"]: f["score"] for f in flipped}
-    expected_docA_flipped = 0.3 / (k + 2) + 0.7 / (k + 1)
-    expected_docB_flipped = 0.3 / (k + 1) + 0.7 / (k + 2)
+    expected_docA_flipped = 0.3 / (k + 2) + 0.7 / (k + 1)  # noqa: N806
+    expected_docB_flipped = 0.3 / (k + 1) + 0.7 / (k + 2)  # noqa: N806
     assert abs(scores_flipped["docA"] - expected_docA_flipped) < 1e-9
     assert abs(scores_flipped["docB"] - expected_docB_flipped) < 1e-9
     # docA 应排第一 (bm25 权重高, docA 在 bm25 中 rank 0) - 排序翻转
@@ -263,22 +254,20 @@ def test_vector_weight_bm25_weight_config_variation() -> None:
     # 平衡配置 (0.5/0.5): 两文档贡献对称, 分数应相同 (tie)
     balanced = _fuse(0.5, 0.5)
     scores_balanced = {f["content"]: f["score"] for f in balanced}
-    expected_docA_balanced = 0.5 / (k + 2) + 0.5 / (k + 1)
-    expected_docB_balanced = 0.5 / (k + 1) + 0.5 / (k + 2)
+    expected_docA_balanced = 0.5 / (k + 2) + 0.5 / (k + 1)  # noqa: N806
+    expected_docB_balanced = 0.5 / (k + 1) + 0.5 / (k + 2)  # noqa: N806
     assert abs(scores_balanced["docA"] - expected_docA_balanced) < 1e-9
     assert abs(scores_balanced["docB"] - expected_docB_balanced) < 1e-9
     # 平衡权重下两文档分数应相等 (对称场景)
     assert abs(scores_balanced["docA"] - scores_balanced["docB"]) < 1e-9
 
     # 三种配置下 docA 的融合分数应各不相同 (权重变化影响融合分数)
-    docA_scores = {
+    docA_scores = {  # noqa: N806
         scores_default["docA"],
         scores_flipped["docA"],
         scores_balanced["docA"],
     }
-    assert len(docA_scores) == 3, (
-        f"三种权重配置下 docA 应有 3 个不同融合分数, 实际: {docA_scores}"
-    )
+    assert len(docA_scores) == 3, f"三种权重配置下 docA 应有 3 个不同融合分数, 实际: {docA_scores}"
 
     # 验证 BM25Okapi 在不同权重下仍可正常构建 (jieba 分词 + 中文语料)
     docs = [

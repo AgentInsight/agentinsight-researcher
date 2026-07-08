@@ -641,9 +641,7 @@ def test_public_paths_docs_redoc_openapi(
     # 逐一验证公开路径不触发 JWT 校验 (不返回 401, 不调用 user_info API)
     for path in ("/docs", "/redoc", "/openapi.json", "/favicon.ico"):
         r = client.get(path)
-        assert r.status_code == 200, (
-            f"公开路径 {path} 应跳过 JWT 返回 200, 实际: {r.status_code}"
-        )
+        assert r.status_code == 200, f"公开路径 {path} 应跳过 JWT 返回 200, 实际: {r.status_code}"
     # 全部公开路径都不应调用 user_info API
     assert len(fake.calls) == 0, f"公开路径不应调用 user_info API, 实际调用: {len(fake.calls)}"
 

@@ -74,8 +74,8 @@ class TrafilaturaScraper(BaseScraper):
 
             title = ""
             try:
-                from trafilatura.settings import DEFAULT_CONFIG
                 import trafilatura.metadata as tm
+
                 metadata = tm.extract_metadata(html)
                 if metadata and metadata.title:
                     title = metadata.title
@@ -85,9 +85,14 @@ class TrafilaturaScraper(BaseScraper):
             image_urls: list[str] = []
             try:
                 import trafilatura.extractors as te
+
                 images = te.extract_images(html)
                 if images:
-                    image_urls = [img["url"] for img in images if "url" in img and img["url"].startswith("http")][:4]
+                    image_urls = [
+                        img["url"]
+                        for img in images
+                        if "url" in img and img["url"].startswith("http")
+                    ][:4]
             except Exception:
                 pass
 

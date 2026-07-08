@@ -67,12 +67,15 @@ def context_manager(
     mock_embeddings: MagicMock,
 ) -> ContextManager:
     """构造 ContextManager (注入 mock 依赖, 替换 _compressor 与 _written_compressor)."""
-    with patch(
-        "src.skills.researcher.context_manager.get_embeddings_client",
-        return_value=mock_embeddings,
-    ), patch(
-        "src.skills.researcher.context_manager.get_llm_client",
-        return_value=mock_llm,
+    with (
+        patch(
+            "src.skills.researcher.context_manager.get_embeddings_client",
+            return_value=mock_embeddings,
+        ),
+        patch(
+            "src.skills.researcher.context_manager.get_llm_client",
+            return_value=mock_llm,
+        ),
     ):
         cm = ContextManager(test_settings)
     # 替换 _compressor 与 _written_compressor 为 mock, 避免触发真实 LLM/embedding 调用
@@ -104,9 +107,7 @@ async def test_compress_messages_below_threshold_no_compress(
     messages = _make_messages(count=3, chars_per_msg=100)  # 总字符 ≈ 300 < 8000
 
     # 监视 _hybrid_compress, 确保不被调用
-    with patch.object(
-        context_manager, "_hybrid_compress", new=AsyncMock()
-    ) as mock_hybrid:
+    with patch.object(context_manager, "_hybrid_compress", new=AsyncMock()) as mock_hybrid:
         result = await context_manager.compress_messages(messages)
 
     mock_hybrid.assert_not_called()

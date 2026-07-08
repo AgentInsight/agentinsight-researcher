@@ -11,13 +11,11 @@ AGENTS.md 第 6 章硬约束:
 
 from __future__ import annotations
 
-import asyncio
 import time
-from typing import Any
 
 import pytest
 
-from src.config.settings import Settings, get_settings
+from src.config.settings import get_settings
 
 pytestmark = pytest.mark.unit
 
@@ -62,9 +60,7 @@ async def test_compress_messages_100k_chars_latency() -> None:
         total_chars = sum(len(m.get("content", "")) for m in messages)
 
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(
-            return_value=MagicMock(content="测试摘要内容")
-        )
+        mock_llm.achat = AsyncMock(return_value=MagicMock(content="测试摘要内容"))
 
         from src.skills.researcher.context_manager import ContextManager
 
@@ -77,13 +73,9 @@ async def test_compress_messages_100k_chars_latency() -> None:
 
         assert len(compressed) > 0, "压缩后消息列表为空"
         assert elapsed < 30.0, (
-            f"100K 字符消息压缩延迟 {elapsed:.3f}s 超过阈值 30s "
-            f"(原始字符数 {total_chars})"
+            f"100K 字符消息压缩延迟 {elapsed:.3f}s 超过阈值 30s (原始字符数 {total_chars})"
         )
-        print(
-            f"\n[compress_messages_100k] {total_chars} chars in {elapsed:.3f}s "
-            f"(阈值 30s)"
-        )
+        print(f"\n[compress_messages_100k] {total_chars} chars in {elapsed:.3f}s (阈值 30s)")
     finally:
         settings.compression_threshold = original_threshold
 
@@ -107,9 +99,7 @@ async def test_compress_messages_500k_chars_latency() -> None:
         total_chars = sum(len(m.get("content", "")) for m in messages)
 
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(
-            return_value=MagicMock(content="测试摘要内容")
-        )
+        mock_llm.achat = AsyncMock(return_value=MagicMock(content="测试摘要内容"))
 
         from src.skills.researcher.context_manager import ContextManager
 
@@ -122,13 +112,9 @@ async def test_compress_messages_500k_chars_latency() -> None:
 
         assert len(compressed) > 0, "压缩后消息列表为空"
         assert elapsed < 60.0, (
-            f"500K 字符消息压缩延迟 {elapsed:.3f}s 超过阈值 60s "
-            f"(原始字符数 {total_chars})"
+            f"500K 字符消息压缩延迟 {elapsed:.3f}s 超过阈值 60s (原始字符数 {total_chars})"
         )
-        print(
-            f"\n[compress_messages_500k] {total_chars} chars in {elapsed:.3f}s "
-            f"(阈值 60s)"
-        )
+        print(f"\n[compress_messages_500k] {total_chars} chars in {elapsed:.3f}s (阈值 60s)")
     finally:
         settings.compression_threshold = original_threshold
 
@@ -159,9 +145,7 @@ async def test_context_compression_memory_usage() -> None:
         messages = _generate_test_messages(100000)
 
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(
-            return_value=MagicMock(content="测试摘要内容")
-        )
+        mock_llm.achat = AsyncMock(return_value=MagicMock(content="测试摘要内容"))
 
         from src.skills.researcher.context_manager import ContextManager
 

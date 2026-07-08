@@ -452,9 +452,11 @@ async def test_embeddings_head_based_sampling() -> None:
 
     # 1. sample_rate=1.0: 不采样, 应创建实际 span (调用 start_as_current_observation)
     settings_full = Settings(tracing_embedding_sample_rate=1.0, _env_file=None)
-    with patch.object(tracing_module, "_get_client", return_value=mock_client), \
-         patch.object(tracing_module, "get_settings", return_value=settings_full), \
-         patch.object(tracing_module.random, "random", return_value=0.9):
+    with (
+        patch.object(tracing_module, "_get_client", return_value=mock_client),
+        patch.object(tracing_module, "get_settings", return_value=settings_full),
+        patch.object(tracing_module.random, "random", return_value=0.9),
+    ):
         tracer_full = AgentInsightTracer()
         async with tracer_full.trace_embedding(name="embed-test") as span:
             # sample_rate=1.0 不采样, span 应为实际 span (非 _NoopSpan)
@@ -467,23 +469,25 @@ async def test_embeddings_head_based_sampling() -> None:
     # 2. sample_rate=0.0: 全采样丢弃, 应 yield _NoopSpan (不创建实际 span)
     mock_client.reset_mock()
     settings_zero = Settings(tracing_embedding_sample_rate=0.0, _env_file=None)
-    with patch.object(tracing_module, "_get_client", return_value=mock_client), \
-         patch.object(tracing_module, "get_settings", return_value=settings_zero), \
-         patch.object(tracing_module.random, "random", return_value=0.9):
+    with (
+        patch.object(tracing_module, "_get_client", return_value=mock_client),
+        patch.object(tracing_module, "get_settings", return_value=settings_zero),
+        patch.object(tracing_module.random, "random", return_value=0.9),
+    ):
         tracer_zero = AgentInsightTracer()
         async with tracer_zero.trace_embedding(name="embed-test") as span:
-            assert isinstance(span, _NoopSpan), (
-                "sample_rate=0.0 时应降级 yield _NoopSpan"
-            )
+            assert isinstance(span, _NoopSpan), "sample_rate=0.0 时应降级 yield _NoopSpan"
     # 不应调用 start_as_current_observation (采样丢弃, 不创建 span)
     mock_client.start_as_current_observation.assert_not_called()
 
     # 3. 默认 sample_rate=0.5 + random.random()=0.6 (> 0.5): 应降级 _NoopSpan
     mock_client.reset_mock()
     settings_default = Settings(tracing_embedding_sample_rate=0.5, _env_file=None)
-    with patch.object(tracing_module, "_get_client", return_value=mock_client), \
-         patch.object(tracing_module, "get_settings", return_value=settings_default), \
-         patch.object(tracing_module.random, "random", return_value=0.6):
+    with (
+        patch.object(tracing_module, "_get_client", return_value=mock_client),
+        patch.object(tracing_module, "get_settings", return_value=settings_default),
+        patch.object(tracing_module.random, "random", return_value=0.6),
+    ):
         tracer_default = AgentInsightTracer()
         async with tracer_default.trace_embedding(name="embed-test") as span:
             assert isinstance(span, _NoopSpan), (
@@ -493,9 +497,11 @@ async def test_embeddings_head_based_sampling() -> None:
 
     # 4. 默认 sample_rate=0.5 + random.random()=0.3 (<= 0.5): 应创建实际 span
     mock_client.reset_mock()
-    with patch.object(tracing_module, "_get_client", return_value=mock_client), \
-         patch.object(tracing_module, "get_settings", return_value=settings_default), \
-         patch.object(tracing_module.random, "random", return_value=0.3):
+    with (
+        patch.object(tracing_module, "_get_client", return_value=mock_client),
+        patch.object(tracing_module, "get_settings", return_value=settings_default),
+        patch.object(tracing_module.random, "random", return_value=0.3),
+    ):
         tracer_default2 = AgentInsightTracer()
         async with tracer_default2.trace_embedding(name="embed-test") as span:
             # 应进入实际 span 分支 (非 _NoopSpan)

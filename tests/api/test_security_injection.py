@@ -730,9 +730,7 @@ def test_pydantic_validation_external_input_boundary() -> None:
             f"{AGENT_URL}/v1/chat/completions",
             json={"model": "agentinsight-researcher", "stream": False},  # 缺少 messages
         )
-    assert r.status_code in (400, 422), (
-        f"缺少 messages 应返回 400/422, 实际: {r.status_code}"
-    )
+    assert r.status_code in (400, 422), f"缺少 messages 应返回 400/422, 实际: {r.status_code}"
 
     # 2. messages 字段类型错误 (传字符串而非数组) → 422
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -744,9 +742,7 @@ def test_pydantic_validation_external_input_boundary() -> None:
                 "stream": False,
             },
         )
-    assert r.status_code in (400, 422), (
-        f"messages 类型错误应返回 400/422, 实际: {r.status_code}"
-    )
+    assert r.status_code in (400, 422), f"messages 类型错误应返回 400/422, 实际: {r.status_code}"
 
     # 3. messages 数组元素类型错误 (content 为非字符串) → 422
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -758,9 +754,7 @@ def test_pydantic_validation_external_input_boundary() -> None:
                 "stream": False,
             },
         )
-    assert r.status_code in (400, 422), (
-        f"content 类型错误应返回 400/422, 实际: {r.status_code}"
-    )
+    assert r.status_code in (400, 422), f"content 类型错误应返回 400/422, 实际: {r.status_code}"
 
     # 4. 非法 JSON 体 → 422
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -769,9 +763,7 @@ def test_pydantic_validation_external_input_boundary() -> None:
             content=b"{not valid json",
             headers={"Content-Type": "application/json"},
         )
-    assert r.status_code in (400, 422), (
-        f"非法 JSON 应返回 400/422, 实际: {r.status_code}"
-    )
+    assert r.status_code in (400, 422), f"非法 JSON 应返回 400/422, 实际: {r.status_code}"
 
     # 5. 空 messages 列表 → 400 (业务校验, 非法空列表)
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -783,9 +775,7 @@ def test_pydantic_validation_external_input_boundary() -> None:
                 "stream": False,
             },
         )
-    assert r.status_code in (400, 422), (
-        f"空 messages 列表应返回 400/422, 实际: {r.status_code}"
-    )
+    assert r.status_code in (400, 422), f"空 messages 列表应返回 400/422, 实际: {r.status_code}"
 
 
 # ============================================================================

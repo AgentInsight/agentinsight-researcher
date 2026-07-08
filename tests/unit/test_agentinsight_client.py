@@ -17,7 +17,6 @@ AGENTS.md 第 13 章: 单元测试不依赖外部服务 (httpx 全部 mock).
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest

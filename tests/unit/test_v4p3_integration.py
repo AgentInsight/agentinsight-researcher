@@ -68,12 +68,15 @@ def context_manager(
     mock_llm: MagicMock,
 ) -> ContextManager:
     """构造 ContextManager 实例 (注入 mock 依赖, 替换 _written_compressor)."""
-    with patch(
-        "src.skills.researcher.context_manager.get_embeddings_client",
-        return_value=mock_embeddings,
-    ), patch(
-        "src.skills.researcher.context_manager.get_llm_client",
-        return_value=mock_llm,
+    with (
+        patch(
+            "src.skills.researcher.context_manager.get_embeddings_client",
+            return_value=mock_embeddings,
+        ),
+        patch(
+            "src.skills.researcher.context_manager.get_llm_client",
+            return_value=mock_llm,
+        ),
     ):
         cm = ContextManager(test_settings)
     cm._written_compressor = MagicMock()
@@ -105,17 +108,14 @@ class TestV4P3LayerRouting:
     ) -> None:
         """Layer 1 Fast Path: 总字符 < 8000 且 文档数 <= max_results → fast_path=True.
 
-        应直接拼接原文, 不调用 _bm25_filter / _embeddings_filter.
+        应直接拼接原文, 不调用 _bm25_filter / _embeddings_rerank.
         """
         docs = _make_docs(total_chars=4000, doc_count=3)
-        with patch.object(
-            context_manager, "_bm25_filter", new=AsyncMock()
-        ) as mock_bm25, patch.object(
-            context_manager, "_embeddings_filter", new=AsyncMock()
-        ) as mock_emb:
-            result = await context_manager.get_similar_content(
-                "test query", docs, max_results=10
-            )
+        with (
+            patch.object(context_manager, "_bm25_filter", new=AsyncMock()) as mock_bm25,
+            patch.object(context_manager, "_embeddings_rerank", new=AsyncMock()) as mock_emb,
+        ):
+            result = await context_manager.get_similar_content("test query", docs, max_results=10)
         mock_bm25.assert_not_called()
         mock_emb.assert_not_called()
         assert "doc-0" in result
@@ -126,19 +126,21 @@ class TestV4P3LayerRouting:
         self,
         context_manager: ContextManager,
     ) -> None:
-        """Layer 2 BM25Filter: 总字符 >= 8000 → 走 _bm25_filter."""
+        """Layer 2 BM25Filter: 总字符 >= 8000 → 走 _bm25_filter.
+
+        BM25 返回 2 chunks (<=30) → 跳过 _embeddings_rerank 精排.
+        """
         docs = _make_docs(total_chars=20000, doc_count=20)
         bm25_return = ["bm25-chunk-1", "bm25-chunk-2"]
-        with patch.object(
-            context_manager,
-            "_bm25_filter",
-            new=AsyncMock(return_value=bm25_return),
-        ) as mock_bm25, patch.object(
-            context_manager, "_embeddings_filter", new=AsyncMock()
-        ) as mock_emb:
-            result = await context_manager.get_similar_content(
-                "test query", docs, max_results=5
-            )
+        with (
+            patch.object(
+                context_manager,
+                "_bm25_filter",
+                new=AsyncMock(return_value=bm25_return),
+            ) as mock_bm25,
+            patch.object(context_manager, "_embeddings_rerank", new=AsyncMock()) as mock_emb,
+        ):
+            result = await context_manager.get_similar_content("test query", docs, max_results=5)
         mock_bm25.assert_called_once()
         mock_emb.assert_not_called()
         assert "bm25-chunk-1" in result or "bm25-chunk-2" in result
@@ -150,22 +152,23 @@ class TestV4P3LayerRouting:
         """V4-P3 两层路由: 大文档 (>=8K) 走 BM25Filter.
 
         现两层路由: >=8K 统一走 BM25Filter (含 >50K 超长上下文).
-        EmbeddingsFilter 代码保留供未来启用, 但主路由不再调用.
+        BM25 返回 2 chunks (<=30) → 跳过 _embeddings_rerank 精排.
         """
         docs = _make_docs(total_chars=60000, doc_count=100)
         bm25_return = ["bm25-chunk-1", "bm25-chunk-2"]
-        with patch.object(
-            context_manager,
-            "_bm25_filter",
-            new=AsyncMock(return_value=bm25_return),
-        ) as mock_bm25, patch.object(
-            context_manager,
-            "_embeddings_filter",
-            new=AsyncMock(),
-        ) as mock_emb:
-            result = await context_manager.get_similar_content(
-                "test query", docs, max_results=5
-            )
+        with (
+            patch.object(
+                context_manager,
+                "_bm25_filter",
+                new=AsyncMock(return_value=bm25_return),
+            ) as mock_bm25,
+            patch.object(
+                context_manager,
+                "_embeddings_rerank",
+                new=AsyncMock(),
+            ) as mock_emb,
+        ):
+            result = await context_manager.get_similar_content("test query", docs, max_results=5)
         mock_bm25.assert_called_once()
         mock_emb.assert_not_called()
         assert "bm25-chunk-1" in result or "bm25-chunk-2" in result
@@ -175,14 +178,11 @@ class TestV4P3LayerRouting:
         context_manager: ContextManager,
     ) -> None:
         """空文档列表 documents=[] → 早期返回空字符串."""
-        with patch.object(
-            context_manager, "_bm25_filter", new=AsyncMock()
-        ) as mock_bm25, patch.object(
-            context_manager, "_embeddings_filter", new=AsyncMock()
-        ) as mock_emb:
-            result = await context_manager.get_similar_content(
-                "test query", [], max_results=10
-            )
+        with (
+            patch.object(context_manager, "_bm25_filter", new=AsyncMock()) as mock_bm25,
+            patch.object(context_manager, "_embeddings_rerank", new=AsyncMock()) as mock_emb,
+        ):
+            result = await context_manager.get_similar_content("test query", [], max_results=10)
         assert result == ""
         mock_bm25.assert_not_called()
         mock_emb.assert_not_called()
@@ -196,12 +196,15 @@ class TestV4P3LayerRouting:
         """bm25_filter_enabled=False 时降级关键词匹配."""
         test_settings.bm25_filter_enabled = False
 
-        with patch(
-            "src.skills.researcher.context_manager.get_embeddings_client",
-            return_value=mock_embeddings,
-        ), patch(
-            "src.skills.researcher.context_manager.get_llm_client",
-            return_value=mock_llm,
+        with (
+            patch(
+                "src.skills.researcher.context_manager.get_embeddings_client",
+                return_value=mock_embeddings,
+            ),
+            patch(
+                "src.skills.researcher.context_manager.get_llm_client",
+                return_value=mock_llm,
+            ),
         ):
             cm = ContextManager(test_settings)
         cm._written_compressor = MagicMock()
@@ -209,16 +212,15 @@ class TestV4P3LayerRouting:
         cm._written_compressor.reset = MagicMock()
 
         docs = _make_docs(total_chars=20000, doc_count=20)
-        with patch.object(
-            cm, "_bm25_filter", new=AsyncMock()
-        ) as mock_bm25, patch.object(
-            ContextManager,
-            "_keyword_fallback",
-            wraps=ContextManager._keyword_fallback,
-        ) as spy_kw:
-            result = await cm.get_similar_content(
-                "test query 匹配关键词", docs, max_results=5
-            )
+        with (
+            patch.object(cm, "_bm25_filter", new=AsyncMock()) as mock_bm25,
+            patch.object(
+                ContextManager,
+                "_keyword_fallback",
+                wraps=ContextManager._keyword_fallback,
+            ) as spy_kw,
+        ):
+            result = await cm.get_similar_content("test query 匹配关键词", docs, max_results=5)
 
         mock_bm25.assert_not_called()
         assert spy_kw.called, "bm25_filter_enabled=False 应走 _keyword_fallback"
@@ -243,7 +245,9 @@ class TestV4P3L1FallbackChain:
         """构造 scraper 类 mock, 实例化后 scrape() 返回指定结果或抛异常."""
 
         class _MockInstance:
-            def __init__(self, url: str = "", session: object | None = None, *args, **kwargs) -> None:
+            def __init__(
+                self, url: str = "", session: object | None = None, *args, **kwargs
+            ) -> None:
                 self.url = url
                 self.session = session
 
@@ -279,18 +283,23 @@ class TestV4P3L1FallbackChain:
         custom_settings = Settings(_env_file=None)
         custom_settings.scraper_mode = "auto"
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -327,18 +336,23 @@ class TestV4P3L1FallbackChain:
         custom_settings = Settings(_env_file=None)
         custom_settings.scraper_mode = "auto"
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -355,12 +369,8 @@ class TestV4P3L1FallbackChain:
         """lightweight 模式: Trafilatura 失败 → 直接返回 (跳过 Playwright)."""
         from src.skills.researcher.scrapers import scrape_with_fallback
 
-        tf_mock = self._make_scraper_class_mock(
-            scrape_side_effect=RuntimeError("tf failed")
-        )
-        bsm_mock = self._make_scraper_class_mock(
-            scrape_side_effect=RuntimeError("bsm failed")
-        )
+        tf_mock = self._make_scraper_class_mock(scrape_side_effect=RuntimeError("tf failed"))
+        bsm_mock = self._make_scraper_class_mock(scrape_side_effect=RuntimeError("bsm failed"))
         pw_mock = self._make_scraper_class_mock(
             scrape_return={"url": "x", "content": "should-not-reach", "title": ""},
         )
@@ -368,18 +378,23 @@ class TestV4P3L1FallbackChain:
         custom_settings = Settings(_env_file=None)
         custom_settings.scraper_mode = "lightweight"
 
-        with patch(
-            "src.skills.researcher.scrapers.get_settings",
-            return_value=custom_settings,
-        ), patch(
-            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-            tf_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-            bsm_mock,
-        ), patch(
-            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-            pw_mock,
+        with (
+            patch(
+                "src.skills.researcher.scrapers.get_settings",
+                return_value=custom_settings,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+                tf_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+                bsm_mock,
+            ),
+            patch(
+                "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+                pw_mock,
+            ),
         ):
             result = await scrape_with_fallback(
                 "https://example.com/page",
@@ -406,12 +421,10 @@ class TestV4P3DegradeStrategy:
         """BM25Filter 超时 → 降级到 _keyword_fallback_split."""
         docs = _make_docs(total_chars=20000, doc_count=20)
 
-        with patch(
-            "src.rag.bm25_filter.BM25Filter"
-        ) as MockBM25:
+        with patch("src.rag.bm25_filter.BM25Filter") as mock_bm25_cls:
             mock_instance = MagicMock()
             mock_instance.filter = AsyncMock(side_effect=TimeoutError("bm25 timeout"))
-            MockBM25.return_value = mock_instance
+            mock_bm25_cls.return_value = mock_instance
 
             with patch.object(
                 ContextManager,
@@ -435,12 +448,15 @@ class TestV4P3DegradeStrategy:
         mock_emb = MagicMock()
         mock_emb.is_circuit_open = MagicMock(return_value=True)
 
-        with patch(
-            "src.skills.researcher.context_manager.get_embeddings_client",
-            return_value=mock_emb,
-        ), patch(
-            "src.skills.researcher.context_manager.get_llm_client",
-            return_value=mock_llm,
+        with (
+            patch(
+                "src.skills.researcher.context_manager.get_embeddings_client",
+                return_value=mock_emb,
+            ),
+            patch(
+                "src.skills.researcher.context_manager.get_llm_client",
+                return_value=mock_llm,
+            ),
         ):
             cm = ContextManager(test_settings)
         cm._written_compressor = MagicMock()
@@ -449,49 +465,43 @@ class TestV4P3DegradeStrategy:
 
         docs = _make_docs(total_chars=60000, doc_count=100)
 
-        with patch.object(
-            cm, "_bm25_filter", new=AsyncMock()
-        ) as mock_bm25, patch.object(
-            ContextManager,
-            "_keyword_fallback",
-            wraps=ContextManager._keyword_fallback,
-        ) as spy_kw:
-            result = await cm.get_similar_content(
-                "test query 匹配关键词", docs, max_results=5
-            )
+        with (
+            patch.object(cm, "_bm25_filter", new=AsyncMock()) as mock_bm25,
+            patch.object(
+                ContextManager,
+                "_keyword_fallback",
+                wraps=ContextManager._keyword_fallback,
+            ) as spy_kw,
+        ):
+            result = await cm.get_similar_content("test query 匹配关键词", docs, max_results=5)
 
         assert spy_kw.called, "TEI 熔断应直接走 _keyword_fallback"
         mock_bm25.assert_not_called()
         assert len(result) > 0
 
-    async def test_embeddings_filter_exception_degrades_to_keyword_match(
+    async def test_bm25_filter_disabled_degrades_to_keyword_fallback(
         self,
         context_manager: ContextManager,
     ) -> None:
-        """_embeddings_filter 方法异常 → 降级到 _keyword_fallback_split."""
+        """bm25_filter_enabled=False 时降级到 _keyword_fallback (不调远程 TEI).
+
+        V4-P3 两层路由: 旧 `_embeddings_filter` 方法已删除, bm25_filter_enabled=False
+        时直接走关键词匹配降级路径 (不依赖远程 TEI embed_texts).
+        """
         docs = _make_docs(total_chars=60000, doc_count=100)
+        context_manager.settings.bm25_filter_enabled = False
 
-        with patch(
-            "src.rag.embeddings_filter.EmbeddingsFilter"
-        ) as MockEmbFilter:
-            mock_instance = MagicMock()
-            mock_instance.filter = AsyncMock(
-                side_effect=RuntimeError("TEI unavailable")
+        with patch.object(
+            context_manager,
+            "_keyword_fallback",
+            wraps=context_manager._keyword_fallback,
+        ) as spy_kw:
+            result = await context_manager.get_similar_content(
+                "test query 匹配关键词", docs, max_results=5
             )
-            MockEmbFilter.return_value = mock_instance
 
-            with patch.object(
-                ContextManager,
-                "_keyword_fallback_split",
-                wraps=ContextManager._keyword_fallback_split,
-            ) as spy_kw:
-                result = await context_manager._embeddings_filter(
-                    "test query 匹配关键词", docs, max_results=5
-                )
-
-        assert spy_kw.called, "EmbeddingsFilter 异常应降级到 _keyword_fallback_split"
+        assert spy_kw.called, "bm25_filter_enabled=False 应直接走 _keyword_fallback"
         assert len(result) > 0
-        mock_instance.filter.assert_awaited_once()
 
     async def test_post_filter_compress_written_content_dedup(
         self,
@@ -500,24 +510,23 @@ class TestV4P3DegradeStrategy:
         mock_llm: MagicMock,
     ) -> None:
         """WrittenContentCompressor should_keep=False 过滤分支."""
-        with patch(
-            "src.skills.researcher.context_manager.get_embeddings_client",
-            return_value=mock_embeddings,
-        ), patch(
-            "src.skills.researcher.context_manager.get_llm_client",
-            return_value=mock_llm,
+        with (
+            patch(
+                "src.skills.researcher.context_manager.get_embeddings_client",
+                return_value=mock_embeddings,
+            ),
+            patch(
+                "src.skills.researcher.context_manager.get_llm_client",
+                return_value=mock_llm,
+            ),
         ):
             cm = ContextManager(test_settings)
         cm._written_compressor = MagicMock()
-        cm._written_compressor.should_keep = AsyncMock(
-            side_effect=[True, False, True]
-        )
+        cm._written_compressor.should_keep = AsyncMock(side_effect=[True, False, True])
         cm._written_compressor.reset = MagicMock()
 
         bm25_chunks = ["keep-chunk-1", "drop-chunk-2", "keep-chunk-3"]
-        with patch.object(
-            cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)
-        ):
+        with patch.object(cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)):
             result = await cm.get_similar_content(
                 "test query",
                 _make_docs(total_chars=20000, doc_count=20),

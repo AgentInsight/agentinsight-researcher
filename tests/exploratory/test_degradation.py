@@ -272,7 +272,7 @@ def test_stream_client_disconnect_does_not_crash() -> None:
 import asyncio  # noqa: E402
 import sys  # noqa: E402
 import types  # noqa: E402
-from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+from unittest.mock import AsyncMock, patch  # noqa: E402
 
 import httpx as _httpx_mod  # noqa: E402
 
@@ -299,12 +299,8 @@ class _FakeHttpxResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             req = _httpx_mod.Request("POST", "http://test/embed")
-            resp = _httpx_mod.Response(
-                self.status_code, request=req, text="error"
-            )
-            raise _httpx_mod.HTTPStatusError(
-                f"HTTP {self.status_code}", request=req, response=resp
-            )
+            resp = _httpx_mod.Response(self.status_code, request=req, text="error")
+            raise _httpx_mod.HTTPStatusError(f"HTTP {self.status_code}", request=req, response=resp)
 
     def json(self) -> object:
         return self._json_data
@@ -438,9 +434,7 @@ async def test_llm_timeout_fallback_strategy() -> None:
 
     class _FakeResp:
         usage = _FakeUsage()
-        choices = [
-            types.SimpleNamespace(message=types.SimpleNamespace(content="fast-tier-ok"))
-        ]
+        choices = [types.SimpleNamespace(message=types.SimpleNamespace(content="fast-tier-ok"))]
 
     calls: list[dict[str, object]] = []
 
@@ -466,9 +460,7 @@ async def test_llm_timeout_fallback_strategy() -> None:
     # 最终应在 fast tier 成功
     assert response.content == "fast-tier-ok", "降级链应在 fast tier 成功"
     # 应调用 3 次 (strategic + smart + fast)
-    assert len(calls) == 3, (
-        f"降级链应调用 3 次 (strategic→smart→fast), 实际: {len(calls)}"
-    )
+    assert len(calls) == 3, f"降级链应调用 3 次 (strategic→smart→fast), 实际: {len(calls)}"
 
 
 # ========== Redis 不可用降级 (无缓存直接计算) ==========
@@ -509,9 +501,12 @@ async def test_redis_unavailable_no_cache_direct_compute() -> None:
     fake_litellm.acompletion = _fake_acompletion
 
     # mock get_redis_client 返回 None (Redis 不可用)
-    with patch("src.llm.client.litellm", fake_litellm), patch(
-        "src.common.redis_client.get_redis_client",
-        new=AsyncMock(return_value=None),
+    with (
+        patch("src.llm.client.litellm", fake_litellm),
+        patch(
+            "src.common.redis_client.get_redis_client",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         response = await client.achat(
             [{"role": "user", "content": "Redis 不可用测试"}],
@@ -522,9 +517,7 @@ async def test_redis_unavailable_no_cache_direct_compute() -> None:
 
     # Redis 不可用 → 缓存未命中 → 直接调 litellm
     assert response.content == "ok", "Redis 不可用时应直接调 LLM 返回结果"
-    assert len(litellm_calls) == 1, (
-        f"Redis 不可用应直接调 litellm 1 次, 实际: {len(litellm_calls)}"
-    )
+    assert len(litellm_calls) == 1, f"Redis 不可用应直接调 litellm 1 次, 实际: {len(litellm_calls)}"
 
 
 # ========== PostgreSQL 连接池耗尽处理 ==========

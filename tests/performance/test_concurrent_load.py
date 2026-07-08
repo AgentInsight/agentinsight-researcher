@@ -17,8 +17,6 @@ import uuid
 
 import pytest
 
-from src.config.settings import Settings, get_settings
-
 pytestmark = pytest.mark.unit
 
 
@@ -186,10 +184,6 @@ async def test_redis_cache_hit_rate_under_load() -> None:
     hit_rate = hit_count / total_requests if total_requests > 0 else 0.0
 
     assert hit_rate > 0.8, (
-        f"Redis 缓存命中率 {hit_rate:.2%} 低于 80% "
-        f"(命中={hit_count} 未命中={miss_count})"
+        f"Redis 缓存命中率 {hit_rate:.2%} 低于 80% (命中={hit_count} 未命中={miss_count})"
     )
-    print(
-        f"\n[redis_cache_hit_rate] 命中率={hit_rate:.2%} "
-        f"(命中={hit_count} 未命中={miss_count})"
-    )
+    print(f"\n[redis_cache_hit_rate] 命中率={hit_rate:.2%} (命中={hit_count} 未命中={miss_count})")

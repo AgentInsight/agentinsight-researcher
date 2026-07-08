@@ -130,7 +130,10 @@ def generator_with_keys() -> ImageGenerator:
 
 def test_get_api_key_deepseek_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'deepseek/' 前缀返回 deepseek_api_key."""
-    assert resolve_api_key("deepseek/deepseek-v4-flash", generator_with_keys.settings) == "deepseek-key-xxx"
+    assert (
+        resolve_api_key("deepseek/deepseek-v4-flash", generator_with_keys.settings)
+        == "deepseek-key-xxx"
+    )
 
 
 def test_get_api_key_openai_prefix(generator_with_keys: ImageGenerator) -> None:
@@ -140,7 +143,10 @@ def test_get_api_key_openai_prefix(generator_with_keys: ImageGenerator) -> None:
 
 def test_get_api_key_anthropic_prefix(generator_with_keys: ImageGenerator) -> None:
     """测试 'anthropic/' 前缀返回 anthropic_api_key."""
-    assert resolve_api_key("anthropic/claude-3-sonnet", generator_with_keys.settings) == "anthropic-key-zzz"
+    assert (
+        resolve_api_key("anthropic/claude-3-sonnet", generator_with_keys.settings)
+        == "anthropic-key-zzz"
+    )
 
 
 def test_get_api_key_zhipu_prefix(generator_with_keys: ImageGenerator) -> None:

@@ -248,7 +248,10 @@ async def test_academic_keyword_query_stream_accepted() -> None:
             json={
                 "model": "agentinsight-researcher",
                 "messages": [
-                    {"role": "user", "content": "find recent research papers about machine learning"}
+                    {
+                        "role": "user",
+                        "content": "find recent research papers about machine learning",
+                    }
                 ],
                 "stream": True,
                 "report_type": "basic_report",
@@ -277,9 +280,7 @@ async def test_research_query_tool_selection_stream_accepted() -> None:
             f"{AGENT_URL}/v1/chat/completions",
             json={
                 "model": "agentinsight-researcher",
-                "messages": [
-                    {"role": "user", "content": "分析 2024 年新能源汽车市场发展趋势"}
-                ],
+                "messages": [{"role": "user", "content": "分析 2024 年新能源汽车市场发展趋势"}],
                 "stream": True,
                 "report_type": "basic_report",
                 "session_id": sid,

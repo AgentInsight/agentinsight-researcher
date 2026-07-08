@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.settings import Settings
 from src.skills.researcher.scrapers.bs_markdownify_scraper import BSMarkdownifyScraper
 
 

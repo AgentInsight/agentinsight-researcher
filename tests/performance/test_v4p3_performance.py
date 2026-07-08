@@ -14,15 +14,12 @@ AGENTS.md 第 13 章硬约束:
 
 from __future__ import annotations
 
-import asyncio
 import time
-from typing import Any
 
 import pytest
 
-from src.config.settings import Settings, get_settings
+from src.config.settings import get_settings
 from src.rag.bm25_filter import BM25Filter
-from src.rag.embeddings_filter import EmbeddingsFilter
 
 pytestmark = pytest.mark.unit
 
@@ -64,56 +61,34 @@ async def test_bm25_filter_response_time_under_200ms() -> None:
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     assert len(result) > 0, "BM25Filter 返回空结果"
-    assert elapsed_ms < 200.0, (
-        f"BM25Filter 响应时间 {elapsed_ms:.1f}ms 超过阈值 200ms"
-    )
+    assert elapsed_ms < 200.0, f"BM25Filter 响应时间 {elapsed_ms:.1f}ms 超过阈值 200ms"
     print(f"\n[bm25_filter_response_time] {elapsed_ms:.1f}ms (258 chunks)")
 
 
-async def test_bm25_filter_vs_embeddings_filter_speedup() -> None:
-    """验证 BM25Filter vs EmbeddingsFilter 加速比 > 100x.
+async def test_bm25_filter_vs_fastembed_rerank_latency() -> None:
+    """验证 BM25Filter 粗筛 + FastEmbed 精排两阶段延迟可接受.
 
-    V4-P3 设计目标: EmbeddingsFilter 258 chunks × TEI 推理 = ~43 分钟,
-    BM25Filter 258 chunks × 本地 jieba+BM25 = ~2 秒 (1000× 加速).
+    V4-P3 两层路由架构:
+    - BM25 粗筛 (本地 jieba+BM25Okapi): 50 chunks ~10ms
+    - FastEmbed 精排 (本地 bge-small-zh ONNX): 50 → 20 chunks ~50ms
+    - 旧 EmbeddingsFilter (已删除): 258 chunks × TEI 推理 = ~43 分钟
 
-    本测试模拟真实场景:
-    - BM25Filter: 实际执行时间 (预热后)
-    - EmbeddingsFilter: 分块时间 + 模拟 TEI 网络延迟 (0.5s)
-    加速比 = EmbeddingsFilter 总时间 / BM25Filter 总时间
+    本测试仅验证 BM25Filter 本地执行时间稳定 < 200ms (与 FastEmbed 精排解耦,
+    FastEmbed 精排性能由 test_fastembed_* 系列覆盖).
     """
     settings = get_settings()
     documents = _generate_test_documents(50)
     query = "人工智能医疗应用"
 
     bm25_filt = BM25Filter(settings)
+    # 预热 jieba
     await bm25_filt.filter(query, documents, max_results=10)
     start = time.perf_counter()
     await bm25_filt.filter(query, documents, max_results=10)
     bm25_time = time.perf_counter() - start
 
-    from unittest.mock import AsyncMock, MagicMock
-
-    async def mock_embed_texts(texts, **kwargs):
-        await asyncio.sleep(0.5)
-        return [[0.0] * 1024] * len(texts)
-
-    mock_embeddings = MagicMock()
-    mock_embeddings.embed_texts = AsyncMock(side_effect=mock_embed_texts)
-    embeddings_filt = EmbeddingsFilter(settings, embeddings=mock_embeddings)
-    start = time.perf_counter()
-    await embeddings_filt.filter(query, documents, max_results=10)
-    embeddings_time = time.perf_counter() - start
-
-    speedup = embeddings_time / bm25_time if bm25_time > 0 else float("inf")
-
-    assert speedup > 100.0, (
-        f"BM25Filter 加速比 {speedup:.1f}x 未达到 100x 目标 "
-        f"(BM25={bm25_time:.3f}s, Embeddings={embeddings_time:.3f}s)"
-    )
-    print(
-        f"\n[bm25_vs_embeddings_speedup] BM25={bm25_time:.3f}s "
-        f"Embeddings={embeddings_time:.3f}s speedup={speedup:.1f}x (>100x)"
-    )
+    assert bm25_time < 0.2, f"BM25Filter 50 chunks 延迟 {bm25_time:.3f}s 超过 200ms"
+    print(f"\n[bm25_filter_latency] 50 chunks = {bm25_time:.3f}s (<200ms)")
 
 
 # ========== Trafilatura vs BS+markdownify 抓取延迟对比 ==========
@@ -190,7 +165,6 @@ async def test_fast_path_no_compression_latency() -> None:
         query = "测试查询"
 
         from src.skills.researcher.context_manager import ContextManager
-        from unittest.mock import AsyncMock, MagicMock
 
         cm = ContextManager(settings)
         cm._embeddings.is_circuit_open = lambda: False
@@ -203,9 +177,7 @@ async def test_fast_path_no_compression_latency() -> None:
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert len(context) > 0, "Fast Path 返回空上下文"
-        assert elapsed_ms < 10.0, (
-            f"Fast Path 延迟 {elapsed_ms:.1f}ms 超过阈值 10ms"
-        )
+        assert elapsed_ms < 10.0, f"Fast Path 延迟 {elapsed_ms:.1f}ms 超过阈值 10ms"
         print(f"\n[fast_path_latency] {elapsed_ms:.1f}ms (阈值 10ms)")
     finally:
         settings.bm25_filter_char_threshold = original_threshold

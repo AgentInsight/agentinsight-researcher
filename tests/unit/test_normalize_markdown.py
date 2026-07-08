@@ -9,12 +9,11 @@
 from __future__ import annotations
 
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 
 from src.skills.researcher.report_generator import ReportGenerator
-
 
 # ========== 测试用例数据 ==========
 
@@ -23,7 +22,10 @@ def _case_table_internal_no_blank() -> tuple[str, str, Callable[[str], bool]]:
     """表格内部不应被插入空行."""
     inp = "## 表格测试\n\n| 名称 | 值 |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n\n正文"
     desc = "表格内部不应有空行"
-    check = lambda out: "|\n\n|" not in out
+
+    def check(out: str) -> bool:
+        return "|\n\n|" not in out
+
     return inp, desc, check
 
 
@@ -31,7 +33,10 @@ def _case_table_around_add_blank() -> tuple[str, str, Callable[[str], bool]]:
     """表格前后应有空行."""
     inp = "正文\n| 名称 | 值 |\n| --- | --- |\n| A | 1 |\n正文"
     desc = "表格前后应补空行"
-    check = lambda out: ("正文\n|" not in out) and ("|\n正文" not in out)
+
+    def check(out: str) -> bool:
+        return ("正文\n|" not in out) and ("|\n正文" not in out)
+
     return inp, desc, check
 
 
@@ -39,7 +44,10 @@ def _case_heading_paragraph_add_blank() -> tuple[str, str, Callable[[str], bool]
     """段落紧贴标题应补空行."""
     inp = "## 标题\n正文内容"
     desc = "标题后应补空行"
-    check = lambda out: "## 标题\n正文" not in out
+
+    def check(out: str) -> bool:
+        return "## 标题\n正文" not in out
+
     return inp, desc, check
 
 
@@ -47,7 +55,10 @@ def _case_citation_spacing() -> tuple[str, str, Callable[[str], bool]]:
     """引用紧贴应修复为带空格."""
     inp = "研究表明[1][2]显示"
     desc = "引用紧贴应修复为 [1] [2]"
-    check = lambda out: "[1][2]" not in out
+
+    def check(out: str) -> bool:
+        return "[1][2]" not in out
+
     return inp, desc, check
 
 
@@ -55,7 +66,10 @@ def _case_consecutive_blank_compress() -> tuple[str, str, Callable[[str], bool]]
     """连续空行应压缩为 2 个."""
     inp = "段落1\n\n\n\n\n段落2"
     desc = "连续4空行应压缩为2"
-    check = lambda out: "\n\n\n\n" not in out
+
+    def check(out: str) -> bool:
+        return "\n\n\n\n" not in out
+
     return inp, desc, check
 
 
@@ -63,7 +77,10 @@ def _case_list_internal_no_blank() -> tuple[str, str, Callable[[str], bool]]:
     """列表项之间不应有空行."""
     inp = "## 列表\n- 项目1\n- 项目2\n- 项目3\n\n正文"
     desc = "列表内部不应有空行"
-    check = lambda out: "- 项目1\n\n- 项目2" not in out
+
+    def check(out: str) -> bool:
+        return "- 项目1\n\n- 项目2" not in out
+
     return inp, desc, check
 
 
@@ -71,7 +88,10 @@ def _case_list_around_add_blank() -> tuple[str, str, Callable[[str], bool]]:
     """列表前后应有空行."""
     inp = "正文\n- 项目1\n- 项目2\n正文"
     desc = "列表前后应补空行"
-    check = lambda out: ("正文\n- 项目1" not in out) and ("- 项目2\n正文" not in out)
+
+    def check(out: str) -> bool:
+        return ("正文\n- 项目1" not in out) and ("- 项目2\n正文" not in out)
+
     return inp, desc, check
 
 
@@ -79,7 +99,10 @@ def _case_trailing_blank_cleanup() -> tuple[str, str, Callable[[str], bool]]:
     """末尾空行应清理为单个换行."""
     inp = "内容\n\n\n\n"
     desc = "末尾空行应清理"
-    check = lambda out: out == "内容\n"
+
+    def check(out: str) -> bool:
+        return out == "内容\n"
+
     return inp, desc, check
 
 
@@ -162,7 +185,7 @@ def run_tests() -> bool:
             print("结果: PASS")
             passed += 1
         else:
-            print(f"结果: FAIL")
+            print("结果: FAIL")
             failed += 1
 
     print(f"\n{'=' * 80}")

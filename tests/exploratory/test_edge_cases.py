@@ -299,10 +299,10 @@ import types  # noqa: E402
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
 
 from src.config.settings import Settings  # noqa: E402
+from src.llm.client import LLMClient, LLMTier  # noqa: E402
 from src.rag import embeddings as emb_module  # noqa: E402
 from src.rag.bm25_filter import BM25Filter  # noqa: E402
 from src.rag.embeddings import EmbeddingsClient  # noqa: E402
-from src.llm.client import LLMClient, LLMTier  # noqa: E402
 
 
 def _make_unit_settings(**overrides: object) -> Settings:
@@ -373,9 +373,7 @@ async def test_extremely_long_query_100k_chars() -> None:
     # 清除缓存避免干扰
     emb_module._EMBED_CACHE.clear()
     fake_vector = [[0.1] * 1024]
-    emb_client._client = _FakeAsyncHttpxClient(
-        _FakeHttpxResponse(fake_vector)
-    )
+    emb_client._client = _FakeAsyncHttpxClient(_FakeHttpxResponse(fake_vector))
     try:
         vec = await emb_client.embed_query(long_query)
         # 不应崩溃, 返回 1024 维向量
@@ -439,9 +437,7 @@ async def test_concurrent_sessions_stress() -> None:
         sessions = [f"test_stress_{i}_{uuid.uuid4().hex[:8]}" for i in range(10)]
         texts_list = [[f"会话 {sid} 的查询文本"] for sid in sessions]
 
-        results = await asyncio.gather(
-            *[emb_client.embed_texts(texts) for texts in texts_list]
-        )
+        results = await asyncio.gather(*[emb_client.embed_texts(texts) for texts in texts_list])
 
         # 所有 10 个并发调用应返回正确维度向量
         assert len(results) == 10
@@ -565,9 +561,12 @@ async def test_rapid_sequential_requests() -> None:
     mock_redis.get = AsyncMock(side_effect=_redis_get)
     mock_redis.setex = AsyncMock(side_effect=_redis_setex)
 
-    with patch("src.llm.client.litellm", fake_litellm), patch(
-        "src.common.redis_client.get_redis_client",
-        new=AsyncMock(return_value=mock_redis),
+    with (
+        patch("src.llm.client.litellm", fake_litellm),
+        patch(
+            "src.common.redis_client.get_redis_client",
+            new=AsyncMock(return_value=mock_redis),
+        ),
     ):
         messages = [{"role": "user", "content": "快速连续请求测试"}]
         for i in range(5):

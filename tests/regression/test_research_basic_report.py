@@ -167,7 +167,9 @@ async def test_detailed_report_stream_headers_accepted() -> None:
             f"{AGENT_URL}/v1/chat/completions",
             json={
                 "model": "agentinsight-researcher",
-                "messages": [{"role": "user", "content": "分析 Python 异步编程的核心优势与应用场景"}],
+                "messages": [
+                    {"role": "user", "content": "分析 Python 异步编程的核心优势与应用场景"}
+                ],
                 "stream": True,
                 "report_type": "detailed_report",
                 "session_id": sid,
@@ -253,7 +255,9 @@ async def test_deep_research_stream_headers_accepted() -> None:
             f"{AGENT_URL}/v1/chat/completions",
             json={
                 "model": "agentinsight-researcher",
-                "messages": [{"role": "user", "content": "深入研究大语言模型在代码生成领域的最新进展"}],
+                "messages": [
+                    {"role": "user", "content": "深入研究大语言模型在代码生成领域的最新进展"}
+                ],
                 "stream": True,
                 "report_type": "deep_research",
                 "session_id": sid,
@@ -311,7 +315,5 @@ async def test_unknown_report_type_string_stream_no_5xx() -> None:
                 "session_id": sid,
             },
         ) as r:
-            assert r.status_code < 500, (
-                f"未知 report_type 不应 5xx, 实际: {r.status_code}"
-            )
+            assert r.status_code < 500, f"未知 report_type 不应 5xx, 实际: {r.status_code}"
     _log(f"未知 report_type 降级验证通过: status={r.status_code}, session={sid}")

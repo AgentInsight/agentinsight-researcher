@@ -105,7 +105,7 @@ async def _connect_websocket(session_id: str) -> object | None:
             timeout=WS_CONNECT_TIMEOUT,
         )
         return ws
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _log(f"WebSocket 连接超时: {ws_uri}")
         return None
     except Exception as e:  # noqa: BLE001
@@ -113,12 +113,13 @@ async def _connect_websocket(session_id: str) -> object | None:
         return None
 
 
-async def _recv_ws_message(ws: object, timeout: float) -> dict[str, object] | None:
+async def _recv_ws_message(ws: object, recv_timeout: float) -> dict[str, object] | None:
     """接收并解析一条 WebSocket JSON 消息, 超时返回 None."""
     try:
-        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)  # type: ignore[union-attr]
+        async with asyncio.timeout(recv_timeout):
+            raw = await ws.recv()  # type: ignore[union-attr]
         return json.loads(raw)  # type: ignore[arg-type]
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None
     except Exception:  # noqa: BLE001
         return None
@@ -441,9 +442,6 @@ async def test_websocket_eight_message_types() -> None:
             f"未收到 logs 消息 (连接确认必发), 已收到: {received_types}"
         )
 
-        _log(
-            f"WebSocket 8 类消息验证通过: 收到 {len(received_types)} 种类型: "
-            f"{received_types}"
-        )
+        _log(f"WebSocket 8 类消息验证通过: 收到 {len(received_types)} 种类型: {received_types}")
     finally:
         await ws.close()  # type: ignore[union-attr]

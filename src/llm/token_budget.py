@@ -230,6 +230,3 @@ async def get_token_budget_allocator() -> TokenBudgetAllocator:
                 settings = get_settings()
                 _allocator = TokenBudgetAllocator(settings.max_total_tokens)
     return _allocator
-
-
-

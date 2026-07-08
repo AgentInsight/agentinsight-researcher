@@ -23,8 +23,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 10
-    networks:
-      - agentinsight-net
 
   redis:
     image: docker.io/redis:8
@@ -44,8 +42,6 @@ services:
       interval: 3s
       timeout: 10s
       retries: 10
-    networks:
-      - agentinsight-net
 
   qdrant:
     image: qdrant/qdrant:v1.18.0
@@ -68,8 +64,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    networks:
-      - agentinsight-net
 
   embeddings:
     # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取
@@ -100,8 +94,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 180s
-    networks:
-      - agentinsight-net
 
   rerank:
     # BGE Reranker 服务镜像 (bge-reranker-v2-m3), 可选容器
@@ -133,8 +125,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 180s
-    networks:
-      - agentinsight-net
 
   agent:
     build:
@@ -168,8 +158,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    networks:
-      - agentinsight-net
 
 volumes:
   postgres_data:
@@ -186,7 +174,3 @@ volumes:
     driver: local
   rerank_models:
     driver: local
-
-networks:
-  agentinsight-net:
-    driver: bridge

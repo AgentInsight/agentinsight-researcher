@@ -213,32 +213,47 @@ class Settings(BaseSettings):
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
 
-    # ========== L2 BM25 分层过滤 (V4-P3 两层方案, 已移除 EmbeddingsFilter) ==========
+    # ========== L2 BM25 分层过滤 (两层方案, 上下文压缩主路径) ==========
     # 两层路由: <8K Fast Path | >=8K BM25Filter (全量覆盖, 含 >50K 超长上下文)
-    # 性能: 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速)
+    # 性能: 258 chunks × (旧 TEI 推理 43min) → BM25 本地 2s (1000× 加速)
     # 零新依赖 (rank-bm25 + jieba 已声明)
-    bm25_filter_enabled: bool = True  # 默认启用, 替代 EmbeddingsFilter 全量路由
-    bm25_filter_char_threshold: int = 8000  # < 此值走 Fast Path 不压缩 (环境变量: BM25_FILTER_CHAR_THRESHOLD)
-    bm25_filter_char_upper: int = 50000  # [已弃用] EmbeddingsFilter 已移除, 保留配置供向后兼容
+    bm25_filter_enabled: bool = True  # 默认启用, 上下文压缩主路径
+    bm25_filter_char_threshold: int = (
+        8000  # < 此值走 Fast Path 不压缩 (环境变量: BM25_FILTER_CHAR_THRESHOLD)
+    )
+    bm25_filter_char_upper: int = 50000  # [已弃用] 旧 EmbeddingsFilter 已删除, 保留配置供向后兼容
     bm25_filter_top_k: int = 20  # 返回 Top-K (与 embeddings_filter_top_k 对齐)
-    bm25_filter_top_k_for_rerank: int = 50  # BM25 粗筛返回数量 (供 Embeddings 精排用, 环境变量: BM25_FILTER_TOP_K_FOR_RERANK)
-    bm25_filter_score_threshold: float = 0.0  # BM25 分数阈值 (0.0=仅过滤零分; BM25 分数无上界, 不可与 cosine 阈值复用)
+    bm25_filter_top_k_for_rerank: int = (
+        50  # BM25 粗筛返回数量 (供 FastEmbed 精排用, 环境变量: BM25_FILTER_TOP_K_FOR_RERANK)
+    )
+    bm25_filter_score_threshold: float = (
+        0.0  # BM25 分数阈值 (0.0=仅过滤零分; BM25 分数无上界, 不可与 cosine 阈值复用)
+    )
     bm25_filter_chunk_size: int = 1000  # 分块大小 (与 embeddings_filter_chunk_size 一致)
     bm25_filter_chunk_overlap: int = 100  # 分块 overlap
-    bm25_filter_timeout: float = 5.0  # 本地计算超时 (秒, 远快于 EmbeddingsFilter 15s)
+    bm25_filter_timeout: float = 5.0  # 本地计算超时 (秒, 远快于旧 EmbeddingsFilter 15s)
 
-    # ========== Embeddings 精排 (两阶段检索) ==========
-    # 总 chunk 数 > embeddings_rerank_chunk_threshold 时, 启用 Embeddings 精排:
-    #   BM25 先召回 bm25_filter_top_k_for_rerank 个候选, Embeddings 从中再选 embeddings_rerank_top_k 个
+    # ========== FastEmbed 精排 (两阶段检索第二阶段, 上下文压缩专用) ==========
+    # 总 chunk 数 > embeddings_rerank_chunk_threshold 时, 启用 FastEmbed 精排:
+    #   BM25 先召回 bm25_filter_top_k_for_rerank 个候选, FastEmbed 从中再选 embeddings_rerank_top_k 个
     # 总 chunk 数 <= embeddings_rerank_chunk_threshold 时, 直接返回 BM25 结果
-    embeddings_rerank_top_k: int = 20  # Embeddings 精排后返回 Top-K (环境变量: EMBEDDINGS_RERANK_TOP_K)
-    embeddings_rerank_chunk_threshold: int = 30  # 启用精排的 chunk 数量阈值 (环境变量: EMBEDDINGS_RERANK_CHUNK_THRESHOLD)
+    # 注: 此精排用 FastEmbed 本地 bge-small-zh-v1.5 (512维), 与私有数据 Qdrant 检索
+    #     用的远程 TEI bge-large-zh-v1.5 (1024维) 完全隔离, 不依赖远程 TEI 服务
+    embeddings_rerank_top_k: int = (
+        20  # FastEmbed 精排后返回 Top-K (环境变量: EMBEDDINGS_RERANK_TOP_K)
+    )
+    embeddings_rerank_chunk_threshold: int = (
+        30  # 启用精排的 chunk 数量阈值 (环境变量: EMBEDDINGS_RERANK_CHUNK_THRESHOLD)
+    )
 
-    # ========== FastEmbed 本地 Embeddings (上下文压缩用) ==========
-    # 用于 Embeddings 精排和 EmbeddingsFilter, 不依赖远程 TEI 服务
+    # ========== FastEmbed 本地 Embeddings (上下文压缩专用) ==========
+    # 用于 FastEmbed 精排 + WrittenContentCompressor 跨子主题去重, 不依赖远程 TEI
+    # 远程 TEI (bge-large-zh-v1.5, 1024维) 仅用于私有数据 Qdrant 索引/检索
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
-    fastembed_model_path: str = "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    fastembed_model_path: str = (
+        "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    )
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度
 
@@ -306,11 +321,14 @@ class Settings(BaseSettings):
     # ========== V2 对齐 GPTR 优化 (V2-P0/P1) ==========
     # WrittenContentCompressor 跨子主题去重阈值 (对标 GPTR WrittenContentCompressor threshold=0.5)
     # 旧版硬编码 0.5, V2 走 settings 配置 (V2-P1).
+    # V4-P3: 去重改用 FastEmbed (bge-small-zh-v1.5, 512维), 阈值可能需重新校准.
     written_content_similarity_threshold: float = 0.5
-    # EmbeddingsFilter 分块参数 (对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000)
+    # 递归分块参数 (对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000)
+    # V4-P3: 旧 EmbeddingsFilter 类已删除, 参数供 BM25Filter/WrittenContentCompressor 复用 recursive_split.
     embeddings_filter_chunk_size: int = 1000
     embeddings_filter_chunk_overlap: int = 100
-    # EmbeddingsFilter 返回 Top-K (对标 GPTR EmbeddingsFilter k=20)
+    # 精排返回 Top-K (对标 GPTR EmbeddingsFilter k=20)
+    # V4-P3: 供 ContextManager._embeddings_rerank (FastEmbed 精排) 使用.
     embeddings_filter_top_k: int = 20
     # detailed_report 章节字数下限/上限 (对标 GPTR 800-1200, V2-P1)
     # 旧版 500-1000, V2 提升到 800-1200 对齐 GPTR.

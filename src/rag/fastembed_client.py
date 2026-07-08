@@ -1,7 +1,8 @@
 """FastEmbed 本地 Embeddings 客户端 (bge-small-zh-v1.5, 512维).
 
-AGENTS.md 第 7 章: EmbeddingsFilter 上下文过滤用本地 FastEmbed,
-不依赖远程 TEI 服务, 解决 TEI CPU 部署性能瓶颈.
+AGENTS.md 第 7 章: 上下文压缩用本地 FastEmbed (WrittenContentCompressor
+跨子主题去重 + ContextManager._embeddings_rerank 精排), 不依赖远程 TEI 服务,
+解决 TEI CPU 部署性能瓶颈.
 
 设计原则:
 1. 使用 bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
@@ -11,7 +12,7 @@ AGENTS.md 第 7 章: EmbeddingsFilter 上下文过滤用本地 FastEmbed,
 5. 降级: FastEmbed 加载失败时, 降级到远程 TEI (EmbeddingsClient)
 
 注意:
-- 本客户端仅用于上下文压缩的 EmbeddingsFilter/精排, 不用于 Qdrant 索引
+- 本客户端仅用于上下文压缩 (WrittenContentCompressor 去重 + _embeddings_rerank 精排), 不用于 Qdrant 索引
 - Qdrant 索引仍使用远程 TEI (bge-large-zh-v1.5, 1024维), 维度固定不可改
 - bge-small-zh-v1.5 ONNX 模型需提前转换并放入配置的模型路径
 """
@@ -21,10 +22,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import time
 from collections import OrderedDict
 from typing import Any, cast
+
+import anyio
 
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_embedding
@@ -94,7 +96,7 @@ class FastEmbedClient:
             try:
                 from fastembed import TextEmbedding
 
-                local_model_exists = os.path.exists(self.settings.fastembed_model_path)
+                local_model_exists = await anyio.Path(self.settings.fastembed_model_path).exists()
                 kwargs: dict[str, Any] = {
                     "model_name": self.settings.fastembed_model_name,
                     "max_length": self.settings.fastembed_max_length,
@@ -102,9 +104,16 @@ class FastEmbedClient:
 
                 if local_model_exists:
                     kwargs["specific_model_path"] = self.settings.fastembed_model_path
-                    logger.info("加载 FastEmbed 模型: %s (本地路径: %s)", self.settings.fastembed_model_name, self.settings.fastembed_model_path)
+                    logger.info(
+                        "加载 FastEmbed 模型: %s (本地路径: %s)",
+                        self.settings.fastembed_model_name,
+                        self.settings.fastembed_model_path,
+                    )
                 else:
-                    logger.info("加载 FastEmbed 模型: %s (本地路径不存在, 将从 HuggingFace 自动下载)", self.settings.fastembed_model_name)
+                    logger.info(
+                        "加载 FastEmbed 模型: %s (本地路径不存在, 将从 HuggingFace 自动下载)",
+                        self.settings.fastembed_model_name,
+                    )
 
                 self._model = TextEmbedding(**kwargs)
                 self._initialized = True

@@ -502,7 +502,9 @@ def test_chat_completions_uploaded_files_context_load() -> None:
     files = {"file": ("test_uploaded_context.txt", io.BytesIO(file_content), "text/plain")}
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r_upload = client.post(f"{AGENT_URL}/v1/files", files=files)
-    assert r_upload.status_code == 201, f"文件上传失败: {r_upload.status_code} {r_upload.text[:200]}"
+    assert r_upload.status_code == 201, (
+        f"文件上传失败: {r_upload.status_code} {r_upload.text[:200]}"
+    )
     file_id = r_upload.json()["file_id"]
 
     # 步骤 2: 携带 uploaded_files 提问
@@ -532,8 +534,6 @@ def test_chat_completions_agent_role_override() -> None:
             f"{AGENT_URL}/v1/chat/completions",
             json=_chat_payload("你好", stream=False, agent_role="金融行业研究分析师"),
         )
-    assert r.status_code == 200, (
-        f"agent_role 注入应返回 200, 实际: {r.status_code} {r.text[:200]}"
-    )
+    assert r.status_code == 200, f"agent_role 注入应返回 200, 实际: {r.status_code} {r.text[:200]}"
     data = r.json()
     assert data["object"] == "chat.completion"

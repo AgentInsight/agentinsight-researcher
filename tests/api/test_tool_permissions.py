@@ -23,7 +23,6 @@ AGENTS.md 第 13 章:
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 
@@ -273,12 +272,8 @@ def test_tool_permission_isolation_per_agent() -> None:
     # 两个会话都不应执行受限工具 (execute 权限默认阻断, 不因会话不同而绕过)
     exec_claims = ["已执行", "执行成功", "executed", "whoami"]
     for claim in exec_claims:
-        assert claim.lower() not in content_a, (
-            f"会话 A execute 工具未被阻断: 响应含 '{claim}'"
-        )
-        assert claim.lower() not in content_b, (
-            f"会话 B execute 工具未被阻断: 响应含 '{claim}'"
-        )
+        assert claim.lower() not in content_a, f"会话 A execute 工具未被阻断: 响应含 '{claim}'"
+        assert claim.lower() not in content_b, f"会话 B execute 工具未被阻断: 响应含 '{claim}'"
 
     # 验证两个会话的响应不交叉污染 (session_id 隔离)
     # 两个会话的响应文本不应包含对方的 session_id

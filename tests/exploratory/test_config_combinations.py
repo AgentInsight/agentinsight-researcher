@@ -74,12 +74,15 @@ def _make_context_manager(
     mock_llm: MagicMock,
 ) -> ContextManager:
     """构造 ContextManager 实例 (注入 mock 依赖, 替换 _written_compressor)."""
-    with patch(
-        "src.skills.researcher.context_manager.get_embeddings_client",
-        return_value=mock_embeddings,
-    ), patch(
-        "src.skills.researcher.context_manager.get_llm_client",
-        return_value=mock_llm,
+    with (
+        patch(
+            "src.skills.researcher.context_manager.get_embeddings_client",
+            return_value=mock_embeddings,
+        ),
+        patch(
+            "src.skills.researcher.context_manager.get_llm_client",
+            return_value=mock_llm,
+        ),
     ):
         cm = ContextManager(settings)
     # 替换 _written_compressor 为 mock (避免触发真实 embedding 调用)
@@ -111,9 +114,7 @@ def _make_scraper_class_mock(
     """
 
     class _MockInstance:
-        def __init__(
-            self, url: str = "", session: object | None = None, *args, **kwargs
-        ) -> None:
+        def __init__(self, url: str = "", session: object | None = None, *args, **kwargs) -> None:
             self.url = url
             self.session = session
 
@@ -144,9 +145,7 @@ async def test_bm25_enabled_default(
 
     bm25_chunks = ["chunk-A " + "a" * 800, "chunk-B " + "b" * 800]
 
-    with patch.object(
-        cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)
-    ):
+    with patch.object(cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)):
         result = await cm.get_similar_content(
             "test query",
             _make_docs(total_chars=20000, doc_count=20),
@@ -186,18 +185,23 @@ async def test_trafilatura_success_no_fallback() -> None:
     custom_settings = Settings(_env_file=None)
     custom_settings.scraper_mode = "auto"
 
-    with patch(
-        "src.skills.researcher.scrapers.get_settings",
-        return_value=custom_settings,
-    ), patch(
-        "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-        tf_mock,
-    ), patch(
-        "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-        bsm_mock,
-    ), patch(
-        "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-        pw_mock,
+    with (
+        patch(
+            "src.skills.researcher.scrapers.get_settings",
+            return_value=custom_settings,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+            tf_mock,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+            bsm_mock,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+            pw_mock,
+        ),
     ):
         result = await scrape_with_fallback(
             "https://example.com/page",
@@ -221,9 +225,7 @@ async def test_trafilatura_fallback_to_bs_markdownify() -> None:
     Trafilatura 返回空内容 → 降级 BS+markdownify 成功.
     验证: Trafilatura 失败后, BS+markdownify 被调用, 最终返回其结果.
     """
-    tf_mock = _make_scraper_class_mock(
-        scrape_return={"url": "x", "content": "", "title": ""}
-    )
+    tf_mock = _make_scraper_class_mock(scrape_return={"url": "x", "content": "", "title": ""})
     bsm_content = "b" * 500
     bsm_mock = _make_scraper_class_mock(
         scrape_return={
@@ -240,18 +242,23 @@ async def test_trafilatura_fallback_to_bs_markdownify() -> None:
     custom_settings = Settings(_env_file=None)
     custom_settings.scraper_mode = "auto"
 
-    with patch(
-        "src.skills.researcher.scrapers.get_settings",
-        return_value=custom_settings,
-    ), patch(
-        "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-        tf_mock,
-    ), patch(
-        "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-        bsm_mock,
-    ), patch(
-        "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
-        pw_mock,
+    with (
+        patch(
+            "src.skills.researcher.scrapers.get_settings",
+            return_value=custom_settings,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+            tf_mock,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+            bsm_mock,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.playwright_scraper.PlaywrightScraper",
+            pw_mock,
+        ),
     ):
         result = await scrape_with_fallback(
             "https://example.com/page",
@@ -294,15 +301,19 @@ async def test_trafilatura_bm25_enabled(
     l1_settings = Settings(_env_file=None)
     l1_settings.scraper_mode = "auto"
 
-    with patch(
-        "src.skills.researcher.scrapers.get_settings",
-        return_value=l1_settings,
-    ), patch(
-        "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
-        tf_mock,
-    ), patch(
-        "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
-        bsm_mock,
+    with (
+        patch(
+            "src.skills.researcher.scrapers.get_settings",
+            return_value=l1_settings,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.trafilatura_scraper.TrafilaturaScraper",
+            tf_mock,
+        ),
+        patch(
+            "src.skills.researcher.scrapers.bs_markdownify_scraper.BSMarkdownifyScraper",
+            bsm_mock,
+        ),
     ):
         l1_result = await scrape_with_fallback(
             "https://example.com/page",
@@ -319,9 +330,7 @@ async def test_trafilatura_bm25_enabled(
 
     bm25_chunks = ["chunk-A " + "a" * 800, "chunk-B " + "b" * 800]
 
-    with patch.object(
-        cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)
-    ):
+    with patch.object(cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)):
         l2_result = await cm.get_similar_content(
             "test query",
             _make_docs(total_chars=20000, doc_count=20),
@@ -347,13 +356,14 @@ async def test_bm25_disabled_keyword_fallback(
     settings = _make_unit_settings(bm25_filter_enabled=False)
     cm = _make_context_manager(settings, mock_embeddings, mock_llm)
 
-    with patch.object(
-        cm, "_bm25_filter", new=AsyncMock()
-    ) as mock_bm25, patch.object(
-        ContextManager,
-        "_keyword_fallback",
-        wraps=ContextManager._keyword_fallback,
-    ) as spy_kw:
+    with (
+        patch.object(cm, "_bm25_filter", new=AsyncMock()) as mock_bm25,
+        patch.object(
+            ContextManager,
+            "_keyword_fallback",
+            wraps=ContextManager._keyword_fallback,
+        ) as spy_kw,
+    ):
         result = await cm.get_similar_content(
             "test query 匹配关键词",
             _make_docs(total_chars=20000, doc_count=20),
