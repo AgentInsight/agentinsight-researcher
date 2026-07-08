@@ -48,6 +48,9 @@ LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
     "deepseek/deepseek-reasoner": {"input": 0.0055, "output": 0.022},
     # deepseek-v4-flash (新模型, 用于图像生成): 待官方公布精确价格, 暂用 deepseek-chat 同档.
     "deepseek/deepseek-v4-flash": {"input": 0.0014, "output": 0.0028},
+    # deepseek-v4-pro (STRATEGIC_LLM 默认): 2026-05 永久降价 75%, 约为 v4-flash 的 3 倍
+    # (官方折扣后 3 元/M input, 6 元/M output vs v4-flash 1 元/M input, 2 元/M output).
+    "deepseek/deepseek-v4-pro": {"input": 0.0042, "output": 0.0084},
     # ========== OpenAI ==========
     "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
     "openai/gpt-4o": {"input": 0.0025, "output": 0.01},
@@ -71,7 +74,9 @@ LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
     "dashscope/qwen-plus": {"input": 0.00057, "output": 0.00171},
     "dashscope/qwen-turbo": {"input": 0.00014, "output": 0.00028},
     "dashscope/qwen-max": {"input": 0.0028, "output": 0.0084},
-    # ========== 智谱 GLM (LiteLLM 路由前缀 zhipuai/) ==========
+    # ========== 智谱 GLM ==========
+    # 项目配置用 zhipuai/ 前缀, _adapt_zhipu 适配到 litellm 原生 zai/ 路由.
+    # _compute_cost 用原始 zhipuai/ 前缀查定价 (无需 zai/ 双重注册).
     "zhipuai/glm-4-plus": {"input": 0.007, "output": 0.007},
     "zhipuai/glm-4-flash": {"input": 0.0001, "output": 0.0001},
     "zhipuai/glm-4-air": {"input": 0.0005, "output": 0.0005},
@@ -163,27 +168,39 @@ class LLMClient:
         return cast(int, getattr(self.settings, field))
 
     def _adapt_zhipu(self, model: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        """智谱 AI OpenAI 兼容端点适配.
+        """智谱 AI litellm 原生 zai/ 路由适配.
 
-        LiteLLM 1.90.2 不原生支持 zhipuai/ 路由前缀, 通过 openai/ 前缀 + api_base 接入.
-        智谱 API 兼容 OpenAI 格式, 端点 https://open.bigmodel.cn/api/paas/v4.
+        根因分析 (任务6 治本修复):
+        - litellm 1.83.7 原生支持 zai/ 路由前缀 (智谱 GLM), 基于 OpenAIGPTConfig
+        - 默认 API base: https://api.z.ai/api/paas/v4 (智谱国际端点)
+        - 项目配置用 zhipuai/ 前缀 (非 litellm 标准), 需适配到 zai/
+
+        原方案 (已废弃): 适配为 openai/ + api_base hack → 导致 _compute_cost 查
+        openai/glm-4-flash 定价表查不到 (定价表 key 是 zhipuai/glm-4-flash).
+
+        治本方案: 适配到 zai/ (litellm 原生路由), 保留原始 model 用于成本计算.
+        - litellm 用 zai/glm-4-flash 调用 (原生支持, 无需 api_base hack)
+        - _compute_cost 用原始 zhipuai/glm-4-flash 查定价 (定价表已有)
+        - LLMResponse.model 显示原始 zhipuai/glm-4-flash (用户透明)
 
         Args:
             model: 原始模型名 (如 zhipuai/glm-4-flash)
             kwargs: LiteLLM acompletion kwargs
 
         Returns:
-            (适配后 model, 适配后 kwargs)
+            (适配后 model 用于 litellm 调用, 适配后 kwargs)
+            注意: 调用方应保留原始 model 用于 _compute_cost 和 LLMResponse.model
         """
         if not (model.startswith("zhipu/") or model.startswith("zhipuai/")):
             return model, kwargs
-        # 兼容 zhipu/ 和 zhipuai/ 两种前缀
+        # 兼容 zhipu/ 和 zhipuai/ 两种前缀, 统一适配到 litellm 原生 zai/
         prefix = "zhipuai/" if model.startswith("zhipuai/") else "zhipu/"
         model_name = model[len(prefix) :]
-        adapted_model = f"openai/{model_name}"
+        adapted_model = f"zai/{model_name}"
         kwargs["model"] = adapted_model
-        kwargs["api_base"] = self.settings.zhipu_api_base
         kwargs["api_key"] = self.settings.zhipu_api_key
+        # 用国内端点 (open.bigmodel.cn) 替代默认国际端点 (api.z.ai), 国内访问更快
+        kwargs["api_base"] = self.settings.zhipu_api_base
         return adapted_model, kwargs
 
     @staticmethod
@@ -193,6 +210,9 @@ class LLMClient:
         - 精确匹配优先.
         - 前缀匹配: 如 "deepseek/deepseek-chat-2026-01-01" 命中 "deepseek/deepseek-chat".
         - 多个前缀命中时取最长前缀 (最精确), 避免短前缀误命中.
+
+        任务6 治本: 不再需要智谱 GLM 回退逻辑, 因为 _compute_cost 收到的是原始 model
+        (如 zhipuai/glm-4-flash), 而非适配后的 zai/glm-4-flash.
         """
         # 1. 精确命中
         if model in LITELLM_PRICING_TABLE:
@@ -286,21 +306,23 @@ class LLMClient:
         if api_key:
             kwargs["api_key"] = api_key
 
-        # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
-        model, kwargs = self._adapt_zhipu(model, kwargs)
+        # V2-P0: 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
+        # 任务6 治本: 保留原始 model 用于成本计算, adapted_model 仅用于 litellm 调用
+        original_model = model  # 保留原始 model (如 zhipuai/glm-4-flash) 用于 _compute_cost
+        _, kwargs = self._adapt_zhipu(model, kwargs)
 
         response = await litellm.acompletion(**kwargs)
 
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
         output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-        breakdown = self._compute_cost(model, input_tokens, output_tokens)
+        breakdown = self._compute_cost(original_model, input_tokens, output_tokens)
         cost_usd = breakdown["total_cost"]
         content = response.choices[0].message.content or ""
 
         return LLMResponse(
             content=content,
-            model=model,
+            model=original_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd,
@@ -658,8 +680,10 @@ class LLMClient:
                 if api_key:
                     kwargs["api_key"] = api_key
                 try:
-                    # V2-P0: 智谱 AI 用 OpenAI 兼容端点 (zhipuai/ → openai/ + api_base)
-                    used_model, kwargs = self._adapt_zhipu(used_model, kwargs)
+                    # V2-P0: 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
+                    # 任务6 治本: 保留原始 used_model 用于成本计算, adapted_model 仅用于 litellm 调用
+                    original_used_model = used_model  # 保留原始 model 用于 _compute_cost
+                    _, kwargs = self._adapt_zhipu(used_model, kwargs)
                     stream = await litellm.acompletion(**kwargs)
                     break  # 流式连接建立成功
                 except Exception as e:  # noqa: BLE001
@@ -714,7 +738,7 @@ class LLMClient:
                     total_input_tokens = total_input_chars // 4
                     total_output_tokens = total_output_chars // 4
 
-                breakdown = self._compute_cost(used_model, total_input_tokens, total_output_tokens)
+                breakdown = self._compute_cost(original_used_model, total_input_tokens, total_output_tokens)
                 cost_usd = breakdown["total_cost"]
 
                 span.update(

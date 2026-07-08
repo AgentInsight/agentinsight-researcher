@@ -291,13 +291,16 @@ async def chat_completions(
                         "X-Session-Id": session_id,
                     },
                 )
-            return await _run_chitchat(
-                responder.respond_short_query(
-                    query, session_id=session_id, user_id=user_id, stream=False
+            return _with_session_id(
+                await _run_chitchat(
+                    responder.respond_short_query(
+                        query, session_id=session_id, user_id=user_id, stream=False
+                    ),
+                    request,
+                    session_id,
+                    intent=intent.value,
                 ),
-                request,
                 session_id,
-                intent=intent.value,
             )
         else:  # OFF_TOPIC
             if request.stream:
@@ -321,17 +324,20 @@ async def chat_completions(
                         "X-Session-Id": session_id,
                     },
                 )
-            return await _run_chitchat(
-                responder.respond_off_topic(
-                    query,
-                    category=category,
-                    session_id=session_id,
-                    user_id=user_id,
-                    stream=False,
+            return _with_session_id(
+                await _run_chitchat(
+                    responder.respond_off_topic(
+                        query,
+                        category=category,
+                        session_id=session_id,
+                        user_id=user_id,
+                        stream=False,
+                    ),
+                    request,
+                    session_id,
+                    intent=intent.value,
                 ),
-                request,
                 session_id,
-                intent=intent.value,
             )
 
     # P1-Future-06: CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
@@ -359,7 +365,10 @@ async def chat_completions(
                 },
             )
         else:
-            return await _run_chat(chat_state, chat_config, request, session_id)
+            return _with_session_id(
+                await _run_chat(chat_state, chat_config, request, session_id),
+                session_id,
+            )
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
     # SELF_HOST=False 时, 进入研究前校验 Agent 点数 (对标 AgentInsightService)
@@ -455,7 +464,30 @@ async def chat_completions(
         )
     else:
         # 非流式: 完整执行后返回
-        return await _run_research(initial_state, graph_config, request, session_id, authorization)
+        return _with_session_id(
+            await _run_research(initial_state, graph_config, request, session_id, authorization),
+            session_id,
+        )
+
+
+def _with_session_id(response: ChatCompletionResponse, session_id: str) -> JSONResponse:
+    """将非流式 ChatCompletionResponse 包装为 JSONResponse 并注入 X-Session-Id 响应头.
+
+    流式分支 (StreamingResponse) 已在 headers 中显式设置 X-Session-Id;
+    非流式分支返回 Pydantic 模型时 FastAPI 自动转 JSONResponse 会丢失自定义头,
+    本函数统一在非流式路径注入 X-Session-Id (会话持久化回归测试依赖此头).
+
+    Args:
+        response: ChatCompletionResponse Pydantic 模型
+        session_id: 会话 ID
+
+    Returns:
+        JSONResponse 含 X-Session-Id 响应头
+    """
+    return JSONResponse(
+        content=response.model_dump(),
+        headers={"X-Session-Id": session_id},
+    )
 
 
 async def _stream_research(

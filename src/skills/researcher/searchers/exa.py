@@ -27,7 +27,7 @@ class ExaSearcher(BaseSearcher):
     name = "exa"
     region = SearchRegion.GLOBAL
     cost_tier = "paid"  # v1.1 新增
-    quality_score = 71.2  # v1.1 新增
+    quality_score = 76.0  # v1.1 新增
 
     _api_url: str = "https://api.exa.ai/search"
 

@@ -158,6 +158,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    # 任务2 内存优化: 限制 agent 容器内存上限, 防止 httpx/FastEmbed/Playwright 无界增长
+    # 基线 ~500MB (Python+litellm+jieba), FastEmbed ~300MB, Playwright ~300MB, httpx 池 ~50MB
+    # 1.5G 上限 + 500M swap 兜底, 超限 OOM 重启而非拖垮宿主机
+    mem_limit: 1536m
+    mem_reservation: 768m
+    memswap_limit: 2g
 
 volumes:
   postgres_data:

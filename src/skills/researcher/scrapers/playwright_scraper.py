@@ -59,18 +59,25 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
 class _PlaywrightPool:
     """全局 Playwright 浏览器池 (单例, P0-6 修复).
 
-    复用 browser 实例, 每次 scrape 仅创建新 page (轻量),
+    复用 browser 实例, 每次 scrape 仅创建新 context+page (轻量),
     避免每个 URL 启动新 chromium 进程 (1-3s 开销).
+
+    v2 修复:
+    - _lock 改为懒加载, 避免模块导入时绑定错误事件循环
+    - _ensure_browser 添加 30s 超时, 防止 chromium 启动挂起导致死锁
+    - shutdown 先置 _instance=None 再清理, 防止重入; 异常时记录但不阻断
     """
 
     _instance: ClassVar[_PlaywrightPool | None] = None
-    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+    _lock: ClassVar[asyncio.Lock | None] = None
     _browser: Any = None
     _playwright: Any = None
 
     @classmethod
     async def get(cls, settings: Settings | None = None) -> Any:
         """获取 browser 实例 (首次调用启动 chromium, 后续复用)."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
         async with cls._lock:
             if cls._instance is None:
                 cls._instance = cls()
@@ -85,26 +92,36 @@ class _PlaywrightPool:
         launch_kwargs = await _build_launch_kwargs(settings)
         from playwright.async_api import async_playwright
 
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(**launch_kwargs)
+        # v2: 30s 超时防止 chromium 启动挂起导致 _lock 无限持有
+        self._playwright = await asyncio.wait_for(
+            async_playwright().start(), timeout=30.0
+        )
+        self._browser = await asyncio.wait_for(
+            self._playwright.chromium.launch(**launch_kwargs), timeout=30.0
+        )
         logger.info("Playwright 浏览器池已就绪")
         return self._browser
 
     @classmethod
     async def shutdown(cls) -> None:
-        """关闭浏览器池 (供 server.py lifespan 关闭时调用)."""
-        if cls._instance is not None:
-            if cls._instance._browser is not None:
-                try:
-                    await cls._instance._browser.close()
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Playwright browser 关闭失败: %s", e)
-            if cls._instance._playwright is not None:
-                try:
-                    await cls._instance._playwright.stop()
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Playwright playwright 关闭失败: %s", e)
-            cls._instance = None
+        """关闭浏览器池 (供 server.py lifespan 关闭时调用).
+
+        v2: 先置 _instance=None 再清理, 防止重入; 异常时记录但不阻断.
+        """
+        instance = cls._instance
+        cls._instance = None  # 先置 None 防止重入
+        if instance is None:
+            return
+        if instance._browser is not None:
+            try:
+                await instance._browser.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Playwright browser 关闭失败 (可能遗留 zombie 进程): %s", e)
+        if instance._playwright is not None:
+            try:
+                await instance._playwright.stop()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Playwright playwright 关闭失败: %s", e)
 
 
 class PlaywrightScraper(BaseScraper):
@@ -117,7 +134,13 @@ class PlaywrightScraper(BaseScraper):
     name = "playwright"
 
     async def scrape(self) -> dict[str, Any]:
-        """用 Playwright 抓取 JS 渲染页面 (P0-6: 复用全局浏览器池)."""
+        """用 Playwright 抓取 JS 渲染页面 (P0-6: 复用全局浏览器池).
+
+        v2 修复:
+        - 用 BrowserContext 隔离每次 scrape (cookies/storage 不残留, context.close 批量释放)
+        - 降级模式 fallback_playwright 启动失败时清理已启动的 playwright 进程
+        - finally 块优先关 context (一次性释放所有 page + storage)
+        """
         try:
             from playwright.async_api import async_playwright
 
@@ -125,6 +148,7 @@ class PlaywrightScraper(BaseScraper):
 
             settings = get_settings()
             browser: Any = None
+            context: Any = None
             page: Any = None
             own_browser = False  # 降级模式: 自建 browser 需自行关闭
             fallback_playwright: Any = None
@@ -139,20 +163,27 @@ class PlaywrightScraper(BaseScraper):
                         "Playwright 浏览器池启动失败, 降级同步模式 (每次新 browser): %s", e
                     )
                     launch_kwargs = await _build_launch_kwargs(settings)
-                    fallback_playwright = await async_playwright().start()
-                    browser = await fallback_playwright.chromium.launch(**launch_kwargs)
+                    # v2: fallback_playwright 启动失败时清理, 防止进程泄漏
+                    try:
+                        fallback_playwright = await async_playwright().start()
+                        browser = await fallback_playwright.chromium.launch(**launch_kwargs)
+                    except Exception:
+                        if fallback_playwright is not None:
+                            try:
+                                await fallback_playwright.stop()
+                            except Exception as stop_e:  # noqa: BLE001
+                                logger.warning("降级 playwright.stop 清理失败: %s", stop_e)
+                        raise
                     own_browser = True
 
-                page = await browser.new_page()
+                # v2: 用 BrowserContext 隔离, 避免默认 context 的 cookies/storage 残留
+                # context.close() 一次性释放所有 page + storage, 比 page.close() 更可靠
+                context = await browser.new_context()
+                page = await context.new_page()
                 # P1-3: 用 domcontentloaded 替代 networkidle (避免长网络请求拖到 30s timeout)
-                # networkidle 等待所有网络请求完成, 慢页面会触发 30s timeout;
-                # domcontentloaded 在 DOM 解析完成即返回, 后续用 wait_for_selector 兜底.
                 await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
 
                 # P1-3: 短等待 + 智能检测 (替代固定 2s 等待)
-                # 1. 等 body 出现 (5s 超时, 大多数页面 <1s)
-                # 2. 滚动触发懒加载 (不等固定时间, 500ms 足够触发)
-                # 3. 超时也继续, 已有 domcontentloaded 内容
                 try:
                     await page.wait_for_selector("body", timeout=5000)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -182,12 +213,12 @@ class PlaywrightScraper(BaseScraper):
                     "content_type": "html",
                 }
             finally:
-                # page.close() 失败不阻断流程
-                if page is not None:
+                # v2: 优先关 context (一次性释放所有 page + storage), 再关 browser (仅降级模式)
+                if context is not None:
                     try:
-                        await page.close()
+                        await context.close()
                     except Exception as e:  # noqa: BLE001
-                        logger.warning("page.close 失败 (不阻断): %s", e)
+                        logger.warning("context.close 失败 (不阻断): %s", e)
                 # 仅降级模式关闭 browser (池模式由 _PlaywrightPool.shutdown 统一关闭)
                 if own_browser:
                     if browser is not None:

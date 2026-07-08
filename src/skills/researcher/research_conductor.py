@@ -614,73 +614,106 @@ class ResearchConductor:
         """处理单个子查询: 搜索 → 抓取 → 压缩.
 
         对标 GPT Researcher _process_sub_query.
+
+        任务2 内存优化: try/finally 确保 searcher httpx 客户端在搜索完成后立即释放,
+        避免 httpx.AsyncClient 泄漏 (原主因: 每次调用新建 9 个 searcher 实例, 每个含
+        持久化 httpx.AsyncClient, 永不 close → ~90MB/请求泄漏).
         """
         # 1. 检测区域 (中文优先路由, 用户需求 5)
         region = detect_region(sub_query)
-        searchers = get_searchers(region, self.settings)
+        # v2: 改用 get_searchers_async + QuotaCache, 跳过额度已满的引擎
+        from src.skills.researcher.searchers import get_searchers_async
+        from src.skills.researcher.searchers.exceptions import QuotaExceededError
+        from src.skills.researcher.searchers.quota_cache import QuotaCache
 
-        # 2. 并行搜索 (多个搜索引擎)
-        search_tasks = [
-            s.search(
-                sub_query,
-                max_results=self.settings.max_search_results_per_query,
-                query_domains=query_domains,
-            )
-            for s in searchers
-        ]
-        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-        # 3. 合并搜索结果
-        all_results: list[dict[str, Any]] = []
-        for r in search_results:
-            if isinstance(r, Exception):
-                continue
-            r = cast(list[dict[str, Any]], r)
-            all_results.extend(r)
-
-        # P1-01: 跨搜索引擎 URL 去重
-        all_results = deduplicate_results(all_results, key="url")
-        urls = {r.get("url", "") for r in all_results if r.get("url")}
-
-        # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
-        if query_domains:
-            all_results = BaseSearcher._filter_by_domains(all_results, query_domains)
-            urls = {r.get("url", "") for r in all_results if r.get("url")}
-
-        if not all_results:
+        quota_cache = QuotaCache(self.settings)
+        searchers = await get_searchers_async(region, self.settings, quota_cache)
+        if not searchers:
+            logger.warning(f"所有搜索引擎额度已满或不可用, sub_query={sub_query[:80]}")
             return {"context": "", "sources": [], "urls": set()}
 
-        # 4. 抓取 URL 内容
-        max_workers = self.settings.max_scraper_workers
-        rate_limit = self.settings.scraper_rate_limit_delay
-        scraped = await scrape_urls(
-            list(urls),
-            scraper_type=self.settings.scraper,
-            max_workers=max_workers,
-            rate_limit_delay=rate_limit,
-        )
+        # 记录实际使用的搜索引擎 (便于排查 "METASO 未使用" 类问题)
+        active_engines = [s.name for s in searchers]
+        logger.info(f"sub_query 搜索引擎列表 (region={region}): {active_engines}")
 
-        # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
-        # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
-        # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
-        context_parts: list[str] = []
-        mcp_contexts = await conduct_mcp_if_enabled(self.settings, sub_query, user_id, session_id)
-        if mcp_contexts:
-            context_parts.append("\n\n".join(mcp_contexts))
+        try:
+            # 2. 并行搜索 (多个搜索引擎)
+            search_tasks = [
+                s.search(
+                    sub_query,
+                    max_results=self.settings.max_search_results_per_query,
+                    query_domains=query_domains,
+                )
+                for s in searchers
+            ]
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        # 5. ContextManager 压缩 + 去重 (Token 优化)
-        context = await self._context_manager.get_similar_content(
-            sub_query,
-            scraped,
-            max_results=10,
-            user_id=user_id,
-            session_id=session_id,
-        )
-        if context:
-            context_parts.append(context)
+            # 3. 合并搜索结果 (捕获 QuotaExceededError 写入缓存)
+            all_results: list[dict[str, Any]] = []
+            for searcher, r in zip(searchers, search_results, strict=True):
+                if isinstance(r, QuotaExceededError):
+                    await quota_cache.mark_exceeded(
+                        engine=r.engine, reset_at=r.reset_at, reason="quota_exceeded"
+                    )
+                    logger.warning(f"{searcher.name} 额度已满: {r.message}")
+                    continue
+                if isinstance(r, BaseException):
+                    logger.warning(f"{searcher.name} 调用失败: {r}")
+                    continue
+                r = cast(list[dict[str, Any]], r)
+                all_results.extend(r)
 
-        return {
-            "context": "\n\n".join(context_parts),
-            "sources": all_results,
-            "urls": urls,
-        }
+            # P1-01: 跨搜索引擎 URL 去重
+            all_results = deduplicate_results(all_results, key="url")
+            urls = {r.get("url", "") for r in all_results if r.get("url")}
+
+            # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
+            if query_domains:
+                all_results = BaseSearcher._filter_by_domains(all_results, query_domains)
+                urls = {r.get("url", "") for r in all_results if r.get("url")}
+
+            if not all_results:
+                return {"context": "", "sources": [], "urls": set()}
+
+            # 4. 抓取 URL 内容
+            max_workers = self.settings.max_scraper_workers
+            rate_limit = self.settings.scraper_rate_limit_delay
+            scraped = await scrape_urls(
+                list(urls),
+                scraper_type=self.settings.scraper,
+                max_workers=max_workers,
+                rate_limit_delay=rate_limit,
+            )
+
+            # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+            # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
+            # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
+            context_parts: list[str] = []
+            mcp_contexts = await conduct_mcp_if_enabled(self.settings, sub_query, user_id, session_id)
+            if mcp_contexts:
+                context_parts.append("\n\n".join(mcp_contexts))
+
+            # 5. ContextManager 压缩 + 去重 (Token 优化)
+            context = await self._context_manager.get_similar_content(
+                sub_query,
+                scraped,
+                max_results=10,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if context:
+                context_parts.append(context)
+
+            return {
+                "context": "\n\n".join(context_parts),
+                "sources": all_results,
+                "urls": urls,
+            }
+        finally:
+            # 任务2 内存优化: 释放 searcher 持有的 httpx.AsyncClient (防泄漏)
+            # 每个 httpx.AsyncClient 含 TCP 连接池 + SSL 上下文 + 内部缓冲区 ~5-15MB
+            for s in searchers:
+                try:
+                    await s.close()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"searcher {s.name} close 失败 (不阻断): {e}")

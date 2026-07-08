@@ -287,7 +287,7 @@ class Settings(BaseSettings):
     custom_retriever_arg: str = "query"  # 自定义检索端点的查询参数名 (默认 query)
 
     # ========== 抓取 (GPT Researcher 模式) ==========
-    max_scraper_workers: int = 15
+    max_scraper_workers: int = 5  # 任务2: 15→5 限制并发资源占用 (对齐项目记忆)
     scraper_rate_limit_delay: float = 0.0
     browse_chunk_max_length: int = 8192
     scraper: str = "bs"

@@ -123,6 +123,11 @@ class FastEmbedClient:
                 self._load_failed = True
                 raise
 
+    # 任务7: 分批并行阈值. 实测 200 chunks 时 batch_size=32 收益 32.1% (>= 30% 阈值).
+    # 小批量 (< 此阈值) 用单次 to_thread, 避免线程池调度开销.
+    _PARALLEL_BATCH_THRESHOLD: int = 32
+    _PARALLEL_BATCH_SIZE: int = 32
+
     async def embed_texts(
         self,
         texts: list[str],
@@ -130,7 +135,13 @@ class FastEmbedClient:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[list[float]]:
-        """批量嵌入文本 (512维)."""
+        """批量嵌入文本 (512维).
+
+        任务7 优化: sync 调用卸载到线程池 + 大批量分批并行.
+        - 实测: sync 直接调用 100% 阻塞事件循环 (影响 SSE 流式响应)
+        - 实测: 200 chunks 分批并行 (b=32) 耗时收益 +32.1%, 事件循环阻塞率 100%→35.7%
+        - 决策依据: temp/fastembed_parallel_test_results.json
+        """
         if not texts:
             return []
 
@@ -161,8 +172,7 @@ class FastEmbedClient:
             await self._ensure_model()
 
             try:
-                embeddings = list(self._model.embed(miss_texts))
-                miss_vectors: list[list[float]] = [list(e) for e in embeddings]
+                miss_vectors = await self._embed_parallel(miss_texts)
 
                 for idx, vec in zip(miss_indices, miss_vectors, strict=True):
                     results[idx] = vec
@@ -178,6 +188,37 @@ class FastEmbedClient:
                 logger.error("FastEmbed embed_texts 失败: %s", e)
                 span.update(metadata={"error": str(e)})
                 raise
+
+    async def _embed_parallel(self, texts: list[str]) -> list[list[float]]:
+        """任务7: sync embed 卸载到线程池 + 大批量分批并行.
+
+        策略:
+        - text_count < _PARALLEL_BATCH_THRESHOLD: 单次 asyncio.to_thread (避免调度开销)
+        - text_count >= _PARALLEL_BATCH_THRESHOLD: 分批 + asyncio.gather 并行
+          (实测 200 chunks/b=32 收益 +32.1%)
+
+        关键: 原 list(self._model.embed(texts)) 是 sync CPU 调用, 100% 阻塞事件循环,
+        导致 SSE 流式响应卡顿. asyncio.to_thread 释放事件循环 (阻塞率 100%→35.7%).
+        """
+        model = self._model
+
+        def _embed_batch(batch: list[str]) -> list[list[float]]:
+            return [list(e) for e in model.embed(batch)]
+
+        # 小批量: 单次卸载 (避免线程池调度开销)
+        if len(texts) < self._PARALLEL_BATCH_THRESHOLD:
+            return await asyncio.to_thread(_embed_batch, texts)
+
+        # 大批量: 分批并行
+        batch_size = self._PARALLEL_BATCH_SIZE
+        batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+        batch_results = await asyncio.gather(
+            *[asyncio.to_thread(_embed_batch, b) for b in batches]
+        )
+        flat: list[list[float]] = []
+        for r in batch_results:
+            flat.extend(r)
+        return flat
 
     async def embed_text(
         self,

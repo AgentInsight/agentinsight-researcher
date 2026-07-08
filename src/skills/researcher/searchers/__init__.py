@@ -170,6 +170,15 @@ class BaseSearcher:
             return results
         return [r for r in results if any(d in r.get("url", "") for d in query_domains)]
 
+    async def close(self) -> None:
+        """释放资源 (httpx 客户端等).
+
+        任务2 内存优化: BaseSearcher 基类提供默认空实现,
+        持有 httpx.AsyncClient 的子类需 override 此方法.
+        调用方 (research_conductor._process_sub_query) 在 finally 中调用.
+        """
+        pass
+
 
 def get_searchers(
     region: SearchRegion = SearchRegion.AUTO,

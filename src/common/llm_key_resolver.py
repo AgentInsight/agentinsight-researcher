@@ -21,9 +21,11 @@ _PREFIX_KEY_MAP: dict[str, str] = {
     "deepseek/": "deepseek_api_key",
     "openai/": "openai_api_key",
     "anthropic/": "anthropic_api_key",
-    # 智谱 AI 兼容 zhipu/ 和 zhipuai/ 两种前缀 (LiteLLM 1.90.2 不原生支持 zhipuai/)
+    # 智谱 AI: 项目配置用 zhipuai/ 前缀, litellm 1.83.7 原生支持 zai/ 路由
+    # _adapt_zhipu 会将 zhipuai/ 适配为 zai/ (litellm 原生路由), resolve_api_key 用原始前缀
     "zhipu/": "zhipu_api_key",
     "zhipuai/": "zhipu_api_key",
+    "zai/": "zhipu_api_key",  # litellm 原生 zai/ 路由前缀 (智谱 GLM)
 }
 
 

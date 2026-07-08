@@ -27,7 +27,7 @@ class BochaSearcher(BaseSearcher):
     name = "bocha"
     region = SearchRegion.CN
     cost_tier = "paid"  # v1.1 新增
-    quality_score = 70.0  # v1.1 新增
+    quality_score = 62.0  # v1.1 新增; v2: 降低权重 (口令配额不稳定, 质量低于 EXA)
 
     _api_url: str = "https://api.bochaai.com/v1/web-search"
 

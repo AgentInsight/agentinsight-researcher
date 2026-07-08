@@ -40,6 +40,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1.1 \
     libpq5 \
     fonts-dejavu-core \
+    fonts-noto-cjk \
+    fonts-noto-cjk-extra \
+    fonts-wqy-zenhei \
+    fonts-wqy-microhei \
     ca-certificates \
     curl \
     gnupg \

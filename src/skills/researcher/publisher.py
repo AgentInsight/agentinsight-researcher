@@ -106,13 +106,32 @@ class Publisher:
         """Markdown → DOCX (python-docx, P1-05).
 
         简易 Markdown 解析 (标题/段落/列表), 失败返回空 bytes.
+        中文字体通过修改 Normal 样式 + eastAsia 属性设置, 确保 Word/WPS 正确显示.
         """
         try:
             import io
 
             from docx import Document
+            from docx.oxml.ns import qn
+            from docx.shared import Pt
 
             doc = Document()
+
+            # 设置默认中英文字体 (解决中文乱码)
+            # 西文字体用 DejaVu Sans Mono 兼容, 中文用宋体/Noto
+            _CN_FONT = "Noto Sans CJK SC"
+            _EN_FONT = "DejaVu Sans"
+            style = doc.styles["Normal"]
+            style.font.name = _EN_FONT
+            style.font.size = Pt(11)
+            # eastAsia 属性必须通过 XML 设置, 否则中文显示为方块
+            rpr = style.element.get_or_add_rPr()
+            rfonts = rpr.find(qn("w:rFonts"))
+            if rfonts is None:
+                rfonts = rpr.makeelement(qn("w:rFonts"), {})
+                rpr.append(rfonts)
+            rfonts.set(qn("w:eastAsia"), _CN_FONT)
+
             if title:
                 doc.add_heading(title, level=0)
             # 简易 Markdown 解析 (标题/段落/列表)
@@ -182,13 +201,13 @@ class Publisher:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>研究报告</title>
 <style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; }}
+body {{ font-family: "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; }}
 h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
 h2 {{ color: #34495e; border-bottom: 1px solid #ecf0f1; padding-bottom: 8px; margin-top: 30px; }}
 h3 {{ color: #34495e; margin-top: 25px; }}
 a {{ color: #3498db; text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
-code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: "Source Code Pro", monospace; }}
+code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: "DejaVu Sans Mono", "Source Code Pro", monospace; }}
 blockquote {{ border-left: 4px solid #3498db; margin: 0; padding-left: 16px; color: #666; }}
 table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
 th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}

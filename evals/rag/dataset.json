@@ -1,0 +1,27 @@
+[
+  {
+    "question": "什么是大语言模型(LLM)的幻觉问题？如何缓解？",
+    "ground_truth": "大语言模型幻觉是指模型生成看似合理但事实不正确或无法被来源支持的内容。缓解方法包括：检索增强生成(RAG)、事实核查、引用来源、降低温度参数、使用高质量训练数据、RLHF对齐训练等。",
+    "tags": ["ai", "llm", "rag"]
+  },
+  {
+    "question": "LangGraph 和 AutoGen 在多 Agent 编排上有什么区别？",
+    "ground_truth": "LangGraph 基于状态机+条件边+Checkpointer，控制流显式可追溯，适合生产环境；AutoGen 基于对话式协作，控制流隐式，适合快速原型。LangGraph 支持子图/Supervisor/Swarm 三种多 Agent 模式。",
+    "tags": ["ai", "agent", "langgraph"]
+  },
+  {
+    "question": "BM25 检索和向量检索的优缺点对比？",
+    "ground_truth": "BM25 基于关键词匹配和词频，优点是快、无需训练、可解释、对精确关键词召回强；缺点是无语义理解、无法处理同义词。向量检索基于语义嵌入，优点是语义召回强、跨语言；缺点是需训练嵌入模型、对精确关键词可能漏召回、计算成本高。混合检索(BM25+向量)结合两者优势。",
+    "tags": ["rag", "bm25", "vector"]
+  },
+  {
+    "question": "bge-large-zh-v1.5 和 bge-small-zh-v1.5 的主要区别？",
+    "ground_truth": "bge-large-zh-v1.5 输出 1024 维向量，模型更大，精度更高，适合索引/检索主路径；bge-small-zh-v1.5 输出 512 维向量，模型更小，推理更快，适合上下文压缩、精排等对延迟敏感的场景。两者均为 BAAI 开源中文嵌入模型。",
+    "tags": ["rag", "embeddings", "bge"]
+  },
+  {
+    "question": "什么是 RAGAS 评测框架？它的核心指标有哪些？",
+    "ground_truth": "RAGAS 是 RAG 应用评估框架，核心指标包括：faithfulness(忠实度，答案是否忠于检索上下文)、answer_relevancy(答案相关性，答案是否回应了问题)、context_precision(上下文精度，检索到的上下文是否相关)、context_recall(上下文召回，是否召回了所有需要的信息)。",
+    "tags": ["rag", "eval", "ragas"]
+  }
+]
