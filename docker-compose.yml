@@ -143,7 +143,7 @@ services:
       SEARXNG_PORT: "8099"
     volumes:
       # 配置文件 (只读挂载, 含引擎开关/limiter/redis 配置)
-      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./config/searxng:/etc/searxng
       # 数据卷 (limiter 限流数据, 如启用 redis 则无需)
       - searxng_data:/etc/searxng/data
     # 资源限制 (元搜索引擎轻量, 限制内存防泄漏)
