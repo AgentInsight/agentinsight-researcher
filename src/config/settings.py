@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "agents"
-    qdrant_vector_size: int = 1024
+    qdrant_vector_size: int = 768  # bge-base-zh-v1.5 固定维度
 
     # Qdrant HNSW 索引参数调优 (P0-03)
     qdrant_hnsw_m: int = 32  # HNSW 图连接数 (默认 16, 中文建议 32)
@@ -104,7 +104,7 @@ class Settings(BaseSettings):
 
     # ========== Embeddings (AGENTS.md 第 1/7 章, 远程 TEI) ==========
     embeddings_base_url: str = "http://embeddings:8088"
-    embeddings_model: str = "BAAI/bge-large-zh-v1.5"
+    embeddings_model: str = "BAAI/bge-base-zh-v1.5"
     embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
     embeddings_max_client_batch_size: int = (
         4  # 客户端单次 TEI 请求上限 (P0-1 修复: 16→4, 匹配 TEI CPU max_batch_requests=4)
@@ -238,7 +238,7 @@ class Settings(BaseSettings):
     #   BM25 先召回 bm25_filter_top_k_for_rerank 个候选, FastEmbed 从中再选 embeddings_rerank_top_k 个
     # 总 chunk 数 <= embeddings_rerank_chunk_threshold 时, 直接返回 BM25 结果
     # 注: 此精排用 FastEmbed 本地 bge-small-zh-v1.5 (512维), 与私有数据 Qdrant 检索
-    #     用的远程 TEI bge-large-zh-v1.5 (1024维) 完全隔离, 不依赖远程 TEI 服务
+    #     用的远程 TEI bge-base-zh-v1.5 (768维) 完全隔离, 不依赖远程 TEI 服务
     embeddings_rerank_top_k: int = (
         20  # FastEmbed 精排后返回 Top-K (环境变量: EMBEDDINGS_RERANK_TOP_K)
     )
@@ -248,7 +248,7 @@ class Settings(BaseSettings):
 
     # ========== FastEmbed 本地 Embeddings (上下文压缩专用) ==========
     # 用于 FastEmbed 精排 + WrittenContentCompressor 跨子主题去重, 不依赖远程 TEI
-    # 远程 TEI (bge-large-zh-v1.5, 1024维) 仅用于私有数据 Qdrant 索引/检索
+    # 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
     fastembed_model_path: str = (
@@ -279,9 +279,11 @@ class Settings(BaseSettings):
     crossref_mailto: str = ""  # CrossRef polite pool 邮箱 (可选, 50 req/s)
     unpaywall_email: str = ""  # Unpaywall 真实邮箱 (必填, 否则 HTTP 422 拒绝)
     searchapi_api_key: str | None = None  # SearchAPI.io (全球, query param)
-    searx_url: str = "http://localhost:8080"  # SearXNG 自托管实例 URL (无需 Key)
+    searx_url: str = "http://searxng:8099"  # SearXNG 自托管实例 URL (无需 Key, 容器内访问地址)
     openalex_email: str = ""  # OpenAlex polite pool 邮箱 (可选, 无需 Key)
     max_search_results_per_query: int = 5
+    # 搜索引擎超时秒数 (SearXNG/DuckDuckGo 等免费引擎专用, P0-1 优化)
+    search_timeout: float = 10.0
     # 自定义搜索引擎 (searchers/custom.py 读取): endpoint + 查询参数名
     custom_retriever_endpoint: str | None = None  # 自定义检索端点 URL, 留空则不启用
     custom_retriever_arg: str = "query"  # 自定义检索端点的查询参数名 (默认 query)

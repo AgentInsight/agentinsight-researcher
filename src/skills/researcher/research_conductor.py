@@ -217,9 +217,10 @@ class ResearchConductor:
             )
 
             messages = [{"role": "user", "content": prompt}]
+            # P1-7: planner 生成短 JSON 数组, SMART (v4-flash) 足够, 省 2/3 成本
             response = await self._llm.achat(
                 messages,
-                tier=LLMTier.STRATEGIC,
+                tier=LLMTier.SMART,
                 temperature=0.2,
                 user_id=user_id,
                 session_id=session_id,
@@ -264,6 +265,10 @@ class ResearchConductor:
         - "subtopics": 子主题模式 (按子主题分章节)
         - 其他/默认: 现有 basic/detailed 逻辑
         """
+        # P0-3: 会话级 reset (替代原 get_similar_content 内的每次 reset)
+        # 跨子查询共享 WrittenContentCompressor 去重状态, 减少重复 embed 调用
+        self._context_manager._written_compressor.reset()
+
         async with trace_chain(
             name="research-conductor",
             input={"query": query[:100], "mode": mode},
@@ -569,9 +574,10 @@ class ResearchConductor:
 
 返回 JSON 数组, 每项为字符串:"""
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        # P1-7: 子主题列表是短 JSON 数组任务, SMART 足够, 省 2/3 成本 (与 report_generator 一致)
         response = await self._llm.achat(
             messages,
-            tier=LLMTier.STRATEGIC,
+            tier=LLMTier.SMART,
             temperature=0.4,
             max_tokens=800,
             user_id=user_id,

@@ -1,7 +1,7 @@
 """性能测试: 吞吐量 (Embeddings + Qdrant + 并发短查询).
 
 AGENTS.md 第 7/13 章硬约束:
-- Embeddings: bge-large-zh-v1.5 (固定 1024 维), TEI 服务 /embed 接口
+- Embeddings: bge-base-zh-v1.5 (固定 768 维), TEI 服务 /embed 接口
 - Qdrant: 单一集合 agents, distance=Cosine, namespace 过滤隔离
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试数据隔离: namespace=test_* + session_id=test_*
@@ -47,8 +47,8 @@ QDRANT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 # 并发短查询超时 (短查询不走 graph, 但并发时 TEI/中间件可能排队)
 CONCURRENT_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
-# bge-large-zh-v1.5 固定维度
-VECTOR_DIM = 1024
+# bge-base-zh-v1.5 固定维度
+VECTOR_DIM = 768
 
 
 def _unique_session_id(prefix: str = "perf_thr") -> str:
@@ -62,7 +62,7 @@ def _unique_session_id(prefix: str = "perf_thr") -> str:
 def test_embeddings_single_latency(embeddings_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证单条文本嵌入延迟 < 2s (TEI /embed 单条).
 
-    AGENTS.md 第 7 章: Embeddings bge-large-zh-v1.5, 固定 1024 维.
+    AGENTS.md 第 7 章: Embeddings bge-base-zh-v1.5, 固定 768 维.
     """
     threshold_s = perf_thresholds["embeddings_single_s"]
     headers = embeddings_auth_headers()
@@ -102,7 +102,7 @@ def test_embeddings_batch_10_latency(
         "Qdrant 向量数据库的混合检索策略",
         "大语言模型在金融风控中的应用",
         "BM25 与向量检索的 RRF 融合算法",
-        "bge-large-zh-v1.5 嵌入模型性能评测",
+        "bge-base-zh-v1.5 嵌入模型性能评测",
         "MCP 协议在 AI Agent 工具调用中的实践",
         "PostgreSQL Checkpointer 会话持久化方案",
     ]
@@ -138,7 +138,7 @@ def test_qdrant_search_latency(
     """验证 Qdrant 搜索延迟 < 1s (不含 embedding 时间, 含 namespace 过滤).
 
     AGENTS.md 第 7 章:
-    - 单一集合 agents, distance=Cosine, vector_size=1024
+    - 单一集合 agents, distance=Cosine, vector_size=768
     - 检索时显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
     - 测试数据隔离: namespace=test_*
 

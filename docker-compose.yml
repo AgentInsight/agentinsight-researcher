@@ -66,7 +66,7 @@ services:
       start_period: 10s
 
   embeddings:
-    # BGE 服务镜像 (bge-large-zh-v1.5), 联网模式从 Docker Hub 拉取
+    # BGE 服务镜像 (bge-base-zh-v1.5, 768维), 联网模式从 Docker Hub 拉取
     # 生产联网模式: 模型权重由 TEI 容器首次启动时从 HuggingFace 下载到命名卷 embeddings_models 缓存
     # (AGENTS.md 第 12 章允许生产联网模式联网下载; 不挂载本地 packages/models/, 与离线模式区分)
     image: tei-embedding:cpu-1.9
@@ -75,7 +75,7 @@ services:
       - .env
     environment:
       # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
-      MODEL_ID: /data/bge-large-zh-v1.5
+      MODEL_ID: /data/bge-base-zh-v1.5
       DTYPE: float32
       MAX_BATCH_TOKENS: 16384
       MAX_CLIENT_BATCH_SIZE: ${EMBEDDINGS_MAX_CLIENT_BATCH_SIZE:-4}
@@ -135,9 +135,12 @@ services:
     image: docker.io/searxng/searxng:latest
     restart: always
     ports:
-      - "127.0.0.1:8099:8080"
+      - "127.0.0.1:8099:8099"
     env_file:
       - .env
+    environment:
+      # SearXNG 镜像启动脚本通过 SEARXNG_PORT 覆盖 settings.yml 的 server.port
+      SEARXNG_PORT: "8099"
     volumes:
       # 配置文件 (只读挂载, 含引擎开关/limiter/redis 配置)
       - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
@@ -148,10 +151,8 @@ services:
     mem_reservation: 128m
     cpus: 1.0
     healthcheck:
-      # SearXNG 健康端点: /healthz (新版) 或 / (首页)
-      test:
-        - "CMD-SHELL"
-        - "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz || curl -fsS -o /dev/null http://127.0.0.1:8080/"
+      # SearXNG 镜像基于 Alpine 无 curl, 改用 busybox wget
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8099/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -196,12 +197,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    # 任务2 内存优化: 限制 agent 容器内存上限, 防止 httpx/FastEmbed/Playwright 无界增长
-    # 基线 ~500MB (Python+litellm+jieba), FastEmbed ~300MB, Playwright ~300MB, httpx 池 ~50MB
-    # 1.5G 上限 + 500M swap 兜底, 超限 OOM 重启而非拖垮宿主机
-    mem_limit: 1536m
-    mem_reservation: 768m
-    memswap_limit: 2g
 
 volumes:
   postgres_data:

@@ -44,7 +44,7 @@ def test_settings_instantiable_without_env() -> None:
     assert settings.strategic_llm
     # Qdrant 默认配置 (AGENTS.md 第 7 章)
     assert settings.qdrant_collection == "agents"
-    assert settings.qdrant_vector_size == 1024
+    assert settings.qdrant_vector_size == 768
 
 
 def test_get_settings_cached_singleton() -> None:

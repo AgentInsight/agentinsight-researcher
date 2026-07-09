@@ -1,7 +1,7 @@
-"""功能测试: 验证 Embeddings TEI 服务 (bge-large-zh-v1.5).
+"""功能测试: 验证 Embeddings TEI 服务 (bge-base-zh-v1.5).
 
 AGENTS.md 第 7 章硬约束:
-- Embeddings: bge-large-zh-v1.5 (固定 1024 维)
+- Embeddings: bge-base-zh-v1.5 (固定 768 维)
 - TEI 服务通过 API_KEY 环境变量开启鉴权, 客户端须携带 Authorization: Bearer <key>
 - Embedding 调用统一走 rag/embeddings.py, 但本测试直连 TEI 验证服务可用性
 
@@ -21,8 +21,8 @@ import pytest
 EMBEDDINGS_URL = os.getenv("EMBEDDINGS_URL", "http://127.0.0.1:8088").rstrip("/")
 EMBEDDINGS_API_KEY = os.getenv("EMBEDDINGS_API_KEY", "")
 
-# bge-large-zh-v1.5 固定维度
-EXPECTED_DIM = 1024
+# bge-base-zh-v1.5 固定维度
+EXPECTED_DIM = 768
 
 # TEI 服务首次加载模型较慢, 给足超时
 TEI_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
@@ -38,7 +38,7 @@ def _auth_headers() -> dict[str, str]:
 
 @pytest.mark.functional
 def test_embed_single() -> None:
-    """验证单条文本嵌入: POST /embed {"inputs":["测试"]} → 200 + 1024 维."""
+    """验证单条文本嵌入: POST /embed {"inputs":["测试"]} → 200 + 768 维."""
     r = httpx.post(
         f"{EMBEDDINGS_URL}/embed",
         json={"inputs": ["测试"]},

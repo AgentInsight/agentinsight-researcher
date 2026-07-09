@@ -95,7 +95,7 @@ def _build_evaluator_llm() -> Any:
 def _build_evaluator_embeddings() -> Any:
     """构建 RAGAS 评估器 Embedding (LangchainEmbeddingsWrapper).
 
-    优先使用本地 TEI (bge-large-zh-v1.5) 的 OpenAI 兼容端点;
+    优先使用本地 TEI (bge-base-zh-v1.5) 的 OpenAI 兼容端点;
     无配置时降级到 OpenAI embedding.
     """
     from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio
@@ -107,7 +107,7 @@ def _build_evaluator_embeddings() -> Any:
 
     restore_original_asyncio(saved)
 
-    embedding_model = os.getenv("EVAL_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
+    embedding_model = os.getenv("EVAL_EMBEDDING_MODEL", "BAAI/bge-base-zh-v1.5")
     embedding_base = os.getenv("EVAL_EMBEDDING_API_BASE")
     embedding_key = os.getenv("EVAL_EMBEDDING_API_KEY", os.getenv("EMBEDDINGS_API_KEY", "dummy"))
 

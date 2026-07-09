@@ -1,8 +1,8 @@
 """性能测试: RAG 性能 (检索耗时 + Embedding batch 吞吐).
 
 AGENTS.md 第 7/13 章硬约束:
-- 检索必须混合 BM25 + 向量 (bge-large-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
-- Embeddings: bge-large-zh-v1.5 (固定 1024 维), TEI 服务 /embed 接口
+- 检索必须混合 BM25 + 向量 (bge-base-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
+- Embeddings: bge-base-zh-v1.5 (固定 768 维), TEI 服务 /embed 接口
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试数据隔离: namespace=test_*
 
@@ -40,8 +40,8 @@ TEI_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
 # Qdrant 搜索超时
 QDRANT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
-# bge-large-zh-v1.5 固定维度
-VECTOR_DIM = 1024
+# bge-base-zh-v1.5 固定维度
+VECTOR_DIM = 768
 
 
 def _unique_namespace(prefix: str = "perf_rag") -> str:
@@ -70,7 +70,7 @@ def test_embeddings_batch_throughput_10_texts(
         "Qdrant 向量数据库的混合检索策略",
         "大语言模型在金融风控中的应用",
         "BM25 与向量检索的 RRF 融合算法",
-        "bge-large-zh-v1.5 嵌入模型性能评测",
+        "bge-base-zh-v1.5 嵌入模型性能评测",
         "MCP 协议在 AI Agent 工具调用中的实践",
         "PostgreSQL Checkpointer 会话持久化方案",
     ]
@@ -198,7 +198,7 @@ def test_qdrant_search_under_5s(
     """验证 Qdrant 检索耗时 < 5s (含 namespace 过滤, 不含 embedding 时间).
 
     AGENTS.md 第 7 章:
-    - 单一集合 agents, distance=Cosine, vector_size=1024
+    - 单一集合 agents, distance=Cosine, vector_size=768
     - 检索时显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
     - 测试数据隔离: namespace=test_*
 

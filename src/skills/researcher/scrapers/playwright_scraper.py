@@ -5,6 +5,11 @@
 
 P0-6: 全局 _PlaywrightPool 单例复用 browser, 每次 scrape 仅创建新 page,
 避免每个 URL 启动新 chromium 进程 (1-3s 开销).
+
+v3 借鉴 GPTR NoDriverScraper (P2-05):
+- 浏览器池化: max_browsers=5 + 负载均衡 (min processing_count), 支持高并发
+- 域名级限流: Semaphore(1) per domain + 随机延迟, 避免单域名被封
+- 图片评分: get_relevant_images() 按尺寸/class 评分排序
 """
 
 from __future__ import annotations
@@ -12,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlparse
 
 from src.skills.researcher.scrapers import BaseScraper
 
@@ -56,36 +63,149 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
     return launch_kwargs
 
 
+def _get_domain(url: str) -> str:
+    """从 URL 提取二级域名 (对标 GPTR NoDriverScraper.get_domain).
+
+    示例: https://www.example.com/path → example.com
+    用于域名级限流 (同域名请求串行化, 避免被封).
+    """
+    domain = urlparse(url).netloc
+    parts = domain.split(".")
+    if len(parts) > 2:
+        domain = ".".join(parts[-2:])
+    return domain
+
+
+class _PooledBrowser:
+    """池化浏览器包装 (借鉴 GPTR NoDriverScraper.Browser).
+
+    封装 Playwright browser 实例 + 负载计数 + 域名级 Semaphore.
+    - processing_count: 当前并发处理数, 用于负载均衡 (min 选择)
+    - domain_semaphores: 每域名一个 Semaphore(1), 同域名串行化
+    """
+
+    def __init__(self, browser: Any, playwright: Any) -> None:
+        self.browser = browser
+        self.playwright = playwright
+        self.processing_count: int = 0
+        self.domain_semaphores: dict[str, asyncio.Semaphore] = {}
+        self.stopping: bool = False
+
+    async def acquire_domain(self, url: str) -> asyncio.Semaphore | None:
+        """获取域名级 Semaphore (同域名串行化, 加锁时随机延迟 0.6-1.2s).
+
+        返回 Semaphore 供调用方 async with 使用; None 表示无 URL (不限流).
+        """
+        if not url:
+            return None
+        domain = _get_domain(url)
+        sem = self.domain_semaphores.get(domain)
+        if sem is None:
+            sem = asyncio.Semaphore(1)
+            self.domain_semaphores[domain] = sem
+        return sem
+
+    async def stop(self) -> None:
+        """关闭浏览器 + playwright (幂等)."""
+        if self.stopping:
+            return
+        self.stopping = True
+        if self.browser is not None:
+            try:
+                await self.browser.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("池化 browser.close 失败: %s", e)
+        if self.playwright is not None:
+            try:
+                await self.playwright.stop()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("池化 playwright.stop 失败: %s", e)
+
+
 class _PlaywrightPool:
-    """全局 Playwright 浏览器池 (单例, P0-6 修复).
+    """全局 Playwright 浏览器池 (单例, P0-6 修复 + P2-05 借鉴 GPTR 池化).
 
-    复用 browser 实例, 每次 scrape 仅创建新 context+page (轻量),
-    避免每个 URL 启动新 chromium 进程 (1-3s 开销).
+    v3 借鉴 GPTR NoDriverScraper:
+    - max_browsers=5: 池上限, 超过则复用负载最低的
+    - browser_load_threshold=8: 单 browser 并发阈值, 超过则新建
+    - 负载均衡: get_browser 选 min(processing_count)
+    - release_browser: processing_count 归零时可选关闭 (本实现保留池化, 不主动关闭)
 
-    v2 修复:
-    - _lock 改为懒加载, 避免模块导入时绑定错误事件循环
-    - _ensure_browser 添加 30s 超时, 防止 chromium 启动挂起导致死锁
-    - shutdown 先置 _instance=None 再清理, 防止重入; 异常时记录但不阻断
+    v2 修复保留:
+    - _lock 懒加载, 避免模块导入时绑定错误事件循环
+    - _ensure_browser 添加 30s 超时, 防止 chromium 启动挂起
+    - shutdown 先置 _instance=None 再清理, 防止重入
     """
 
     _instance: ClassVar[_PlaywrightPool | None] = None
     _lock: ClassVar[asyncio.Lock | None] = None
+    # v3: 池化 (借鉴 GPTR max_browsers=5)
+    _pooled_browsers: ClassVar[set[_PooledBrowser]] = set()
+    _max_browsers: ClassVar[int] = 5
+    _browser_load_threshold: ClassVar[int] = 8
+    # 兼容旧字段 (降级模式检测用)
     _browser: Any = None
     _playwright: Any = None
 
     @classmethod
     async def get(cls, settings: Settings | None = None) -> Any:
-        """获取 browser 实例 (首次调用启动 chromium, 后续复用)."""
+        """获取 browser 实例 (v3: 从池中选负载最低, 必要时新建).
+
+        返回 Playwright browser 实例 (调用方需配合 acquire/release 计数).
+        """
         if cls._lock is None:
             cls._lock = asyncio.Lock()
         async with cls._lock:
             if cls._instance is None:
                 cls._instance = cls()
-            return await cls._instance._ensure_browser(settings)
+            return await cls._instance._get_or_create_browser(settings)
 
-    async def _ensure_browser(self, settings: Settings | None) -> Any:
-        if self._browser is not None:
-            return self._browser
+    @classmethod
+    async def acquire(cls, url: str, settings: Settings | None = None) -> tuple[Any, asyncio.Semaphore | None, _PooledBrowser]:
+        """获取 browser + 域名 Semaphore + 池包装 (v3 新增, 借鉴 GPTR).
+
+        调用方需在 finally 中调用 release(pooled).
+        返回 (browser, domain_semaphore, pooled_browser).
+        """
+        pooled = await cls._get_pooled_browser(settings)
+        pooled.processing_count += 1
+        try:
+            sem = await pooled.acquire_domain(url)
+        except Exception:
+            pooled.processing_count -= 1
+            raise
+        return pooled.browser, sem, pooled
+
+    @classmethod
+    async def _get_pooled_browser(cls, settings: Settings | None = None) -> _PooledBrowser:
+        """内部: 获取池化 browser (负载均衡 + 必要时新建)."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        async with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return await cls._instance._get_or_create_pooled(settings)
+
+    async def _get_or_create_pooled(self, settings: Settings | None) -> _PooledBrowser:
+        """v3 核心逻辑: 负载均衡选最低, 超阈值则新建."""
+        # 池为空: 新建
+        if not self._pooled_browsers:
+            return await self._create_pooled_browser(settings)
+
+        # 负载均衡: 选 processing_count 最低的 (借鉴 GPTR min key)
+        browser = min(self._pooled_browsers, key=lambda b: b.processing_count)
+
+        # 所有 browser 都超阈值且池未满: 新建
+        if (
+            browser.processing_count >= self._browser_load_threshold
+            and len(self._pooled_browsers) < self._max_browsers
+        ):
+            return await self._create_pooled_browser(settings)
+
+        return browser
+
+    async def _create_pooled_browser(self, settings: Settings | None) -> _PooledBrowser:
+        """新建池化 browser (30s 超时防挂起)."""
         from src.config.settings import get_settings
 
         settings = settings or get_settings()
@@ -93,23 +213,52 @@ class _PlaywrightPool:
         from playwright.async_api import async_playwright
 
         # v2: 30s 超时防止 chromium 启动挂起导致 _lock 无限持有
-        self._playwright = await asyncio.wait_for(async_playwright().start(), timeout=30.0)
-        self._browser = await asyncio.wait_for(
-            self._playwright.chromium.launch(**launch_kwargs), timeout=30.0
+        playwright = await asyncio.wait_for(async_playwright().start(), timeout=30.0)
+        browser = await asyncio.wait_for(
+            playwright.chromium.launch(**launch_kwargs), timeout=30.0
         )
-        logger.info("Playwright 浏览器池已就绪")
-        return self._browser
+        pooled = _PooledBrowser(browser, playwright)
+        self._pooled_browsers.add(pooled)
+        logger.info(
+            "Playwright 池化 browser 已创建 (池大小=%d/%d)",
+            len(self._pooled_browsers),
+            self._max_browsers,
+        )
+        return pooled
+
+    async def _get_or_create_browser(self, settings: Settings | None) -> Any:
+        """v2 兼容入口: 返回 browser 实例 (供旧调用方使用, 不做计数)."""
+        pooled = await self._get_or_create_pooled(settings)
+        return pooled.browser
+
+    @classmethod
+    async def release(cls, pooled: _PooledBrowser) -> None:
+        """释放 browser 槽位 (v3 新增, 借鉴 GPTR release_browser).
+
+        processing_count 归零时不关闭 (保留池化复用);
+        仅 shutdown 时统一关闭.
+        """
+        pooled.processing_count = max(0, pooled.processing_count - 1)
 
     @classmethod
     async def shutdown(cls) -> None:
         """关闭浏览器池 (供 server.py lifespan 关闭时调用).
 
+        v3: 遍历池中所有 _PooledBrowser 逐一关闭.
         v2: 先置 _instance=None 再清理, 防止重入; 异常时记录但不阻断.
         """
         instance = cls._instance
         cls._instance = None  # 先置 None 防止重入
         if instance is None:
             return
+        # v3: 关闭池中所有 browser
+        for pooled in list(cls._pooled_browsers):
+            try:
+                await pooled.stop()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("池化 browser 关闭失败: %s", e)
+        cls._pooled_browsers.clear()
+        # v2 兼容: 旧字段清理
         if instance._browser is not None:
             try:
                 await instance._browser.close()
@@ -127,6 +276,11 @@ class PlaywrightScraper(BaseScraper):
 
     比 BeautifulSoup 重, 仅在配置 SCRAPER=playwright 时启用.
     镜像内需预装 chromium.
+
+    v3 借鉴 GPTR (P2-05):
+    - 浏览器池化: acquire/release 语义, 负载均衡
+    - 域名限流: acquire 返回 domain_semaphore, async with 加锁
+    - 图片评分: 调用 utils.get_relevant_images_from_html 评分排序
     """
 
     name = "playwright"
@@ -134,15 +288,21 @@ class PlaywrightScraper(BaseScraper):
     async def scrape(self) -> dict[str, Any]:
         """用 Playwright 抓取 JS 渲染页面 (P0-6: 复用全局浏览器池).
 
-        v2 修复:
-        - 用 BrowserContext 隔离每次 scrape (cookies/storage 不残留, context.close 批量释放)
-        - 降级模式 fallback_playwright 启动失败时清理已启动的 playwright 进程
-        - finally 块优先关 context (一次性释放所有 page + storage)
+        v3 修复:
+        - acquire/release 语义: 配合池化负载均衡 + 域名限流
+        - 域名 Semaphore: 同域名串行化 + 随机延迟 0.6-1.2s
+        - 图片提取改用 get_relevant_images_from_html 评分排序
+        v2 修复保留:
+        - BrowserContext 隔离 + context.close 批量释放
+        - 降级模式 fallback_playwright 启动失败时清理
         """
         try:
             from playwright.async_api import async_playwright
 
             from src.config.settings import get_settings
+            from src.skills.researcher.scrapers.utils import (
+                get_relevant_images_from_html,
+            )
 
             settings = get_settings()
             browser: Any = None
@@ -150,18 +310,21 @@ class PlaywrightScraper(BaseScraper):
             page: Any = None
             own_browser = False  # 降级模式: 自建 browser 需自行关闭
             fallback_playwright: Any = None
+            pooled: _PooledBrowser | None = None
+            domain_sem: asyncio.Semaphore | None = None
 
             try:
-                # 优先复用全局浏览器池 (P0-6)
+                # v3: 池化 acquire (负载均衡 + 域名 Semaphore)
                 try:
-                    browser = await _PlaywrightPool.get(settings)
+                    browser, domain_sem, pooled = await _PlaywrightPool.acquire(
+                        self.url, settings
+                    )
                 except Exception as e:  # noqa: BLE001
                     # 浏览器池启动失败时降级到原同步模式 (每次启动新 browser)
                     logger.warning(
                         "Playwright 浏览器池启动失败, 降级同步模式 (每次新 browser): %s", e
                     )
                     launch_kwargs = await _build_launch_kwargs(settings)
-                    # v2: fallback_playwright 启动失败时清理, 防止进程泄漏
                     try:
                         fallback_playwright = await async_playwright().start()
                         browser = await fallback_playwright.chromium.launch(**launch_kwargs)
@@ -174,44 +337,53 @@ class PlaywrightScraper(BaseScraper):
                         raise
                     own_browser = True
 
-                # v2: 用 BrowserContext 隔离, 避免默认 context 的 cookies/storage 残留
-                # context.close() 一次性释放所有 page + storage, 比 page.close() 更可靠
-                context = await browser.new_context()
-                page = await context.new_page()
-                # P1-3: 用 domcontentloaded 替代 networkidle (避免长网络请求拖到 30s timeout)
-                await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
+                # v3: 域名级限流 (借鉴 GPTR, 同域名串行化 + 随机延迟)
+                async def _do_scrape() -> dict[str, Any]:
+                    nonlocal context, page
+                    # v2: BrowserContext 隔离, context.close 一次性释放 page+storage
+                    context = await browser.new_context()
+                    page = await context.new_page()
+                    # P1-3: domcontentloaded 替代 networkidle
+                    await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
 
-                # P1-3: 短等待 + 智能检测 (替代固定 2s 等待)
-                try:
-                    await page.wait_for_selector("body", timeout=5000)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(500)
-                except Exception as wait_e:  # noqa: BLE001
-                    logger.debug(
-                        "Playwright wait_for_selector/scroll 超时 (不阻断, 用已有 DOM): %s",
-                        wait_e,
-                    )
+                    # P1-3: 短等待 + 智能检测
+                    try:
+                        await page.wait_for_selector("body", timeout=5000)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await page.wait_for_timeout(500)
+                    except Exception as wait_e:  # noqa: BLE001
+                        logger.debug(
+                            "Playwright wait_for_selector/scroll 超时 (不阻断): %s",
+                            wait_e,
+                        )
 
-                content = await page.inner_text("body")
-                title = await page.title()
+                    content = await page.inner_text("body")
+                    title = await page.title()
 
-                # 提取图片
-                image_urls = await page.evaluate("""
-                    () => Array.from(document.querySelectorAll('img'))
-                        .map(img => img.src || img.dataset.src)
-                        .filter(src => src && src.startsWith('http'))
-                        .slice(0, 4)
-                """)
+                    # v3: 提取页面 HTML 用于图片评分 (借鉴 GPTR get_relevant_images)
+                    html_content = await page.content()
+                    # 图片评分排序 (按尺寸/class 评分, 取 Top-4)
+                    image_urls = get_relevant_images_from_html(html_content, self.url, top_k=4)
 
-                return {
-                    "url": self.url,
-                    "content": content,
-                    "title": title,
-                    "image_urls": image_urls,
-                    "content_type": "html",
-                }
+                    return {
+                        "url": self.url,
+                        "content": content,
+                        "title": title,
+                        "image_urls": image_urls,
+                        "content_type": "html",
+                    }
+
+                if domain_sem is not None:
+                    # v3: 域名 Semaphore 加锁 (借鉴 GPTR, 被锁时随机延迟)
+                    was_locked = domain_sem.locked()
+                    async with domain_sem:
+                        if was_locked:
+                            await asyncio.sleep(random.uniform(0.6, 1.2))
+                        return await _do_scrape()
+                else:
+                    return await _do_scrape()
             finally:
-                # v2: 优先关 context (一次性释放所有 page + storage), 再关 browser (仅降级模式)
+                # v2: 优先关 context (一次性释放所有 page + storage)
                 if context is not None:
                     try:
                         await context.close()
@@ -229,6 +401,12 @@ class PlaywrightScraper(BaseScraper):
                             await fallback_playwright.stop()
                         except Exception as e:  # noqa: BLE001
                             logger.warning("降级 playwright.stop 失败: %s", e)
+                # v3: 释放池化槽位 (processing_count -1)
+                if pooled is not None:
+                    try:
+                        await _PlaywrightPool.release(pooled)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("池化 release 失败 (不阻断): %s", e)
         except ImportError:
             logger.warning("playwright 未安装, 降级为空内容")
             return {"url": self.url, "content": "", "title": "", "image_urls": []}

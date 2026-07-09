@@ -121,12 +121,12 @@ async def test_embed_texts_empty_returns_empty() -> None:
 @pytest.mark.asyncio
 async def test_embed_texts_main_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """主流程: mock httpx 返回向量, 验证返回值 + token_count 估算 + span.update 调用."""
-    settings = Settings(embeddings_model="BAAI/bge-large-zh-v1.5", _env_file=None)
+    settings = Settings(embeddings_model="BAAI/bge-base-zh-v1.5", _env_file=None)
     client = EmbeddingsClient(settings)
 
     captured = _install_capturing_trace(monkeypatch)
 
-    fake_vectors = [[0.1] * 1024, [0.2] * 1024]
+    fake_vectors = [[0.1] * 768, [0.2] * 768]
     fake_response = _FakeResponse(fake_vectors)
     fake_http_client = _FakeAsyncClient(response=fake_response)
     client._client = fake_http_client  # type: ignore[assignment]
@@ -198,12 +198,12 @@ async def test_embed_query_delegates_to_embed_texts() -> None:
     settings = Settings(_env_file=None)
     client = EmbeddingsClient(settings)
 
-    fake_vectors = [[0.5] * 1024]
+    fake_vectors = [[0.5] * 768]
     fake_response = _FakeResponse(fake_vectors)
     client._client = _FakeAsyncClient(response=fake_response)  # type: ignore[assignment]
 
     result = await client.embed_query("test query")
-    assert result == [0.5] * 1024
+    assert result == [0.5] * 768
 
 
 @pytest.mark.asyncio
@@ -245,7 +245,7 @@ async def test_warmup_success(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(_env_file=None)
     client = EmbeddingsClient(settings)
 
-    fake_vectors = [[0.1] * 1024 for _ in client._WARMUP_TEXTS]
+    fake_vectors = [[0.1] * 768 for _ in client._WARMUP_TEXTS]
     fake_response = _FakeResponse(fake_vectors)
     client._client = _FakeAsyncClient(response=fake_response)  # type: ignore[assignment]
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
 from src.skills.researcher.scrapers import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -82,19 +84,14 @@ class TrafilaturaScraper(BaseScraper):
             except Exception:
                 pass
 
-            image_urls: list[str] = []
-            try:
-                import trafilatura.extractors as te
+            # v3 借鉴 GPTR: 按尺寸/class 评分排序, 取 Top-4
+            # trafilatura.extractors.extract_images 仅返回 URL 列表无尺寸信息,
+            # 改用 get_relevant_images_from_html 从 HTML 评分排序.
+            from src.skills.researcher.scrapers.utils import (
+                get_relevant_images_from_html,
+            )
 
-                images = te.extract_images(html)
-                if images:
-                    image_urls = [
-                        img["url"]
-                        for img in images
-                        if "url" in img and img["url"].startswith("http")
-                    ][:4]
-            except Exception:
-                pass
+            image_urls = get_relevant_images_from_html(html, self.url, top_k=4)
 
             while "\n\n\n" in result:
                 result = result.replace("\n\n\n", "\n\n")
@@ -110,6 +107,21 @@ class TrafilaturaScraper(BaseScraper):
         except ImportError:
             logger.info("trafilatura 未安装, 降级链兜底: %s", self.url)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
+        except httpx.HTTPStatusError as e:
+            # 403/401/429 快速失败: 服务器层拒绝, 降级到 BS/Playwright 也无法成功,
+            # 仅徒增内存 (BS DOM 5-10x / Playwright chromium ~400MB).
+            # 将状态码写入 _http_status, 供降级链 _is_fast_fail() 检测后终止.
+            status_code = e.response.status_code
+            logger.warning(
+                "Trafilatura HTTP %d (快速失败, 不降级): %s", status_code, self.url
+            )
+            return {
+                "url": self.url,
+                "content": "",
+                "title": "",
+                "image_urls": [],
+                "_http_status": status_code,
+            }
         except Exception as e:  # noqa: BLE001
             logger.warning("Trafilatura 抓取失败 %s: %s", self.url, e)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}

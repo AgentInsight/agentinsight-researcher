@@ -2,7 +2,13 @@
 
 P2-Future-04: 对标 GPT Researcher retrievers/searx/searx.py.
 通过自托管 SearXNG 实例进行搜索, 适用于全球场景.
-无需 API Key, 需配置 SEARX_URL 环境变量 (默认 http://localhost:8080).
+无需 API Key, 需配置 SEARX_URL 环境变量 (默认 http://searxng:8099, 容器内访问).
+
+P0-1 优化: 国内主搜索引擎, 替代 DuckDuckGo (平均 22.5s/次) 作为 CN 区域首选.
+- name 改为 "searxng" (与注册表 FREE_QUOTA_MAP 一致)
+- timeout 从 settings.search_timeout 读取 (默认 10.0)
+- 新增 safesearch=0 (关闭安全搜索过滤) + language="zh-CN" 参数
+- 新增 time_range/categories 参数支持 (可选, kwargs 传入)
 """
 
 from __future__ import annotations
@@ -20,9 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 class SearXNGSearcher(BaseSearcher):
-    """SearXNG 自托管元搜索引擎 (全球场景, 无需 Key)."""
+    """SearXNG 自托管元搜索引擎 (CN/GLOBAL 场景, 无需 Key).
 
-    name = "searx"
+    P0-1 优化: 注册到 CN+GLOBAL+AUTO 三区域, 国内查询优先使用.
+    """
+
+    name = "searxng"  # 与注册表 FREE_QUOTA_MAP 的 "searxng" 一致
     region = SearchRegion.GLOBAL
     cost_tier = "free"  # v1.1 新增
     quality_score = 65.0  # v1.1 新增
@@ -43,19 +52,37 @@ class SearXNGSearcher(BaseSearcher):
         """SearXNG 搜索 (GET, JSON 格式).
 
         返回 [{"title","url","snippet","source","region"}].
+
+        Args:
+            query: 搜索查询.
+            max_results: 最大返回结果数.
+            query_domains: 域名过滤白名单.
+            **kwargs: 可选参数:
+                time_range: 时间范围过滤 (None/"day"/"week"/"month"/"year", None 不过滤).
+                categories: 搜索分类 (默认 "general", 可选 "images"/"news"/"it"/"science" 等).
         """
+        # 可选参数从 kwargs 读取 (默认 categories=general, time_range 不过滤)
+        time_range = kwargs.get("time_range")
+        categories = kwargs.get("categories", "general")
         async with trace_tool(
-            name="searx-search",
+            name="searxng-search",
             input={"query": query[:100], "max_results": max_results},
-            metadata={"tool_name": "searx", "region": "global"},
+            metadata={"tool_name": "searxng", "region": "global"},
         ) as span:
             try:
                 params: dict[str, Any] = {
                     "q": query,
                     "format": "json",
                     "pageno": 1,
+                    "safesearch": 0,  # 关闭安全搜索过滤, 避免遗漏相关结果
+                    "language": "zh-CN",  # 中文优先, 提升国内查询召回质量
+                    "categories": categories,
                 }
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                # time_range 仅在显式传入时加入 (None 表示不过滤, 不传该参数)
+                if time_range:
+                    params["time_range"] = time_range
+                # timeout 从 settings 读取 (默认 10.0, P0-1 优化替代硬编码 15.0)
+                async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
                     response = await client.get(self._api_url, params=params)
                     response.raise_for_status()
                     data = response.json()
@@ -74,10 +101,10 @@ class SearXNGSearcher(BaseSearcher):
                 results = self._filter_by_domains(results, query_domains)
                 span.update(
                     output={"results_count": len(results)},
-                    metadata={"tool_name": "searx", "success": True},
+                    metadata={"tool_name": "searxng", "success": True},
                 )
                 return results
             except Exception as e:  # noqa: BLE001
                 logger.warning("SearXNG 搜索失败: %s", e)
-                span.update(metadata={"tool_name": "searx", "success": False, "error": str(e)})
+                span.update(metadata={"tool_name": "searxng", "success": False, "error": str(e)})
                 return []

@@ -10,7 +10,7 @@ AGENTS.md 用户需求 10: Token 优化核心.
 4. Word Limit: MAX_CONTEXT_WORDS (25000) 截断
 
 AGENTS.md 第 7 章硬约束:
-- 远程 TEI Embeddings (bge-large-zh-v1.5, 1024维) 仅用于私有数据 Qdrant 索引/检索
+- 远程 TEI Embeddings (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
 - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """
 
@@ -54,6 +54,8 @@ class ContextManager:
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
         self._fastembed = get_fastembed_client()
+        # P2-9: BM25Filter 实例复用, jieba 分词缓存跨调用累积
+        self._bm25_filter_instance: Any = None  # BM25Filter | None (惰性初始化避免循环导入)
 
     async def compress_messages(
         self,
@@ -194,8 +196,8 @@ class ContextManager:
         P0-3: TEI 熔断器开启时 (Qdrant 索引/检索也会受影响) 降级关键词匹配.
         V4-P3 L2: 性能 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
         """
-        # 重置已写入内容记录 (P1-02), 每次新查询开始时清空
-        self._written_compressor.reset()
+        # P0-3: 不在此处 reset _written_compressor, 跨子查询去重保留已写入状态;
+        # reset 由会话级调用方显式控制 (research_conductor.conduct_research 开始时调用一次).
 
         async with trace_chain(
             name="context-compress",
@@ -302,11 +304,22 @@ class ContextManager:
         layer: str,
     ) -> str:
         """后处理: 去重 + Word Limit 截断."""
-        # WrittenContentCompressor 跨子主题去重 (P1-02)
-        deduped: list[str] = []
-        for chunk in compressed:
-            if await self._written_compressor.should_keep(chunk):
-                deduped.append(chunk)
+        # P0-4: 批量化去重 (1 次 compute_embedding 替代 N 次串行调用)
+        if not compressed:
+            context = ""
+            span.update(
+                output={"context_len": len(context), "fast_path": False, "layer": layer}
+            )
+            return context
+        # 1. 批量计算所有 chunk 的 embedding (1 次 FastEmbed 调用)
+        all_chunks_list, all_embs = (
+            await self._written_compressor.compute_embedding_batch(compressed)
+        )
+        # 2. 批量 check_and_update (内存操作, 无 IO)
+        keep_flags = self._written_compressor.check_and_update_batch(
+            all_chunks_list, all_embs
+        )
+        deduped = [c for c, keep in zip(compressed, keep_flags, strict=False) if keep]
 
         # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
         context = self._truncate_by_words(deduped, self.settings.max_context_words)
@@ -352,8 +365,16 @@ class ContextManager:
                 user_id=user_id,
                 session_id=session_id,
             ) as span:
-                query_emb = await self._fastembed.embed_text(query)
-                doc_embs = await self._fastembed.embed_texts(documents)
+                # P1-5: 合并为 1 次批量调用 (消除串行 await)
+                all_texts = [query] + documents
+                all_embs = await self._fastembed.embed_texts(all_texts)
+                query_emb = all_embs[0]
+                doc_embs = all_embs[1:]
+
+                # P1-8: 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
+                for doc_text, doc_emb in zip(documents, doc_embs, strict=False):
+                    cache_key = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
+                    self._written_compressor._chunk_cache[cache_key] = doc_emb
 
                 similarities: list[tuple[float, str]] = []
                 for doc, emb in zip(documents, doc_embs, strict=False):
@@ -405,10 +426,13 @@ class ContextManager:
         if not documents:
             return []
 
+        # P2-9: 复用 BM25Filter 实例, jieba _token_cache 跨调用累积
         from src.rag.bm25_filter import BM25Filter
 
         try:
-            filt = BM25Filter(self.settings)
+            if self._bm25_filter_instance is None:
+                self._bm25_filter_instance = BM25Filter(self.settings)
+            filt = self._bm25_filter_instance
             return await asyncio.wait_for(
                 filt.filter(
                     query,
@@ -841,6 +865,105 @@ class WrittenContentCompressor:
         self._written_embeddings.extend(content_embs)
         self._written_chunks.extend(chunks)
         return True
+
+    async def compute_embedding_batch(
+        self,
+        contents: list[str],
+    ) -> tuple[list[list[str]], list[list[list[float]]]]:
+        """批量计算多个 content 的 chunk embeddings (P0-4 批量化优化).
+
+        1 次调用替代 N 次串行 compute_embedding, 减少 FastEmbed 调用次数.
+
+        Args:
+            contents: 多个内容字符串列表
+
+        Returns:
+            (all_chunks, all_embs):
+            - all_chunks[i] 为 contents[i] 分块后的文本列表
+            - all_embs[i] 为 all_chunks[i] 对应的 embedding 列表
+        """
+        # 收集所有 content 的 miss chunks, 一次性 embed_texts
+        all_chunks_list: list[list[str]] = []
+        all_embs_list: list[list[list[float]]] = []
+        miss_indices: list[tuple[int, int]] = []  # (content_idx, chunk_idx)
+        miss_chunks: list[str] = []
+
+        for content_idx, content in enumerate(contents):
+            if not content.strip():
+                all_chunks_list.append([])
+                all_embs_list.append([])
+                continue
+            from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
+            chunks = recursive_split(
+                content,
+                separators=DEFAULT_SEPARATORS,
+                chunk_size=self.settings.embeddings_filter_chunk_size,
+                chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
+            )
+            if not chunks:
+                chunks = [content]
+            all_chunks_list.append(chunks)
+            content_embs: list[list[float]] = [[] for _ in chunks]
+            for i, chunk in enumerate(chunks):
+                cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+                cached = self._chunk_cache.get(cache_key)
+                if cached is not None:
+                    content_embs[i] = cached
+                else:
+                    miss_indices.append((content_idx, i))
+                    miss_chunks.append(chunk)
+            all_embs_list.append(content_embs)
+
+        if miss_chunks:
+            async with trace_embedding(
+                name="written-content-dedup-embed-batch",
+                input={
+                    "text_count": len(miss_chunks),
+                    "total_chars": sum(len(t) for t in miss_chunks),
+                },
+                model=self.settings.fastembed_model_name,
+            ) as span:
+                try:
+                    miss_embs = await self._fastembed.embed_texts(miss_chunks)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("批量 embedding 失败, 降级保留内容: %s", e)
+                    span.update(metadata={"error": str(e), "degraded": True})
+                    # 降级: 返回空 embs, check_and_update_batch 会降级保留
+                    return all_chunks_list, all_embs_list
+                for (content_idx, chunk_idx), chunk, emb in zip(
+                    miss_indices, miss_chunks, miss_embs, strict=True
+                ):
+                    all_embs_list[content_idx][chunk_idx] = emb
+                    cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+                    self._chunk_cache[cache_key] = emb
+                token_count = sum(len(t) for t in miss_chunks) // 3
+                span.update(
+                    output={"vector_count": len(miss_embs)},
+                    usage_details={"total_tokens": token_count},
+                )
+
+        return all_chunks_list, all_embs_list
+
+    def check_and_update_batch(
+        self,
+        all_chunks: list[list[str]],
+        all_embs: list[list[list[float]]],
+    ) -> list[bool]:
+        """批量判断多个 content 是否应保留 (P0-4 批量化优化).
+
+        在锁内执行 numpy 矩阵比对, 替代 N 次串行 check_and_update.
+
+        Args:
+            all_chunks: 多个 content 的分块列表 (来自 compute_embedding_batch)
+            all_embs: 对应的 embedding 列表 (来自 compute_embedding_batch)
+
+        Returns:
+            keep_flags[i] = True 表示 contents[i] 应保留
+        """
+        keep_flags: list[bool] = []
+        for chunks, content_embs in zip(all_chunks, all_embs, strict=False):
+            keep_flags.append(self.check_and_update(chunks, content_embs))
+        return keep_flags
 
     async def should_keep(self, content: str) -> bool:
         """判断内容是否应保留 (兼容入口, 内部调用 compute_embedding + check_and_update).

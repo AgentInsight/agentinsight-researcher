@@ -46,7 +46,7 @@ def mock_embeddings() -> MagicMock:
     emb.is_circuit_open = MagicMock(return_value=False)
 
     async def _embed_texts(texts, **kwargs):
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * 768 for _ in texts]
 
     emb.embed_texts = AsyncMock(side_effect=_embed_texts)
     return emb

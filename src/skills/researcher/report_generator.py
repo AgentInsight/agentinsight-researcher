@@ -593,25 +593,35 @@ class ReportGenerator:
             - skipped: 是否因去重被跳过
         """
         sub_query = f"{query} - {topic}"
+        # P0-2: 复用主研究 contexts, 仅在上下文不足时触发嵌套搜索 (消除 5 倍搜索冗余)
+        # 主研究 combined_context 已含主查询的完整搜索结果, 子主题可直接复用
+        # 仅当 combined_context 过短 (<2000 字符, 可能主研究未覆盖该子主题) 时补充搜索
+        sub_contexts: list[str] = []
         sub_sources: list[dict[str, Any]] = []
+        if len(combined_context) < 2000:
+            # 上下文不足, 触发嵌套搜索补充
+            try:
+                research_result = await research_conductor.conduct_research(
+                    sub_query,
+                    mode="basic",
+                    agent_role=agent_role,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                sub_contexts = research_result.get("contexts", [])
+                sub_sources = research_result.get("sources", []) or []
+            except Exception as e:  # noqa: BLE001
+                logger.warning("子主题 '%s' 嵌套研究失败, 降级用初始上下文: %s", topic, e)
+                sub_contexts = []
+                sub_sources = []
 
-        # 1. 嵌套研究 (失败时降级用 combined_context, 不直接 continue)
-        try:
-            research_result = await research_conductor.conduct_research(
-                sub_query,
-                mode="basic",
-                agent_role=agent_role,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            sub_contexts = research_result.get("contexts", [])
-            sub_sources = research_result.get("sources", []) or []
-        except Exception as e:  # noqa: BLE001
-            logger.warning("子主题 '%s' 嵌套研究失败, 降级用初始上下文: %s", topic, e)
-            sub_contexts = []
-            sub_sources = []
-
-        sub_context = "\n\n---\n\n".join(sub_contexts) if sub_contexts else combined_context
+        # 复用主研究上下文 (优先), 不足时用嵌套搜索结果补充
+        if sub_contexts:
+            sub_context = "\n\n---\n\n".join(sub_contexts)
+        elif combined_context:
+            sub_context = combined_context
+        else:
+            sub_context = ""
         if len(sub_context) > max_context_chars:
             sub_context = sub_context[:max_context_chars]
 
@@ -673,9 +683,10 @@ class ReportGenerator:
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # V4-P1-03: LLM 调用增加重试, 失败降级为 [query]
         # V2-P1: temperature 0.4 → 0.25 (对标 GPTR draft_titles temp)
+        # P1-7: 子主题列表生成是短 JSON 数组任务, SMART 足够, 省 2/3 成本
         content = await self._achat_with_retry(
             messages,
-            tier=LLMTier.STRATEGIC,
+            tier=LLMTier.SMART,
             temperature=0.25,
             max_tokens=800,
             user_id=user_id,

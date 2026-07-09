@@ -68,7 +68,7 @@ def perf_thresholds() -> dict[str, float]:
         "short_query_total_p95_s": float(os.getenv("PERF_SHORT_QUERY_TOTAL_P95_S", "10")),
         # 研究查询首块 (含意图分类, 不含完整研究)
         "stream_first_chunk_s": float(os.getenv("PERF_STREAM_FIRST_CHUNK_S", "5")),
-        # Embeddings (TEI bge-large-zh-v1.5)
+        # Embeddings (TEI bge-base-zh-v1.5)
         "embeddings_single_s": float(os.getenv("PERF_EMBEDDINGS_SINGLE_S", "2")),
         "embeddings_batch_10_s": float(os.getenv("PERF_EMBEDDINGS_BATCH_10_S", "5")),
         # Qdrant 搜索 (不含 embedding 时间)

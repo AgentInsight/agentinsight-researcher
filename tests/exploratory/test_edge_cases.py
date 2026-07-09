@@ -375,12 +375,12 @@ async def test_extremely_long_query_100k_chars() -> None:
     emb_client = EmbeddingsClient(settings)
     # 清除缓存避免干扰
     emb_module._EMBED_CACHE.clear()
-    fake_vector = [[0.1] * 1024]
+    fake_vector = [[0.1] * 768]
     emb_client._client = _FakeAsyncHttpxClient(_FakeHttpxResponse(fake_vector))
     try:
         vec = await emb_client.embed_query(long_query)
-        # 不应崩溃, 返回 1024 维向量
-        assert len(vec) == 1024, f"超长查询嵌入应返回 1024 维, 实际: {len(vec)}"
+        # 不应崩溃, 返回 768 维向量
+        assert len(vec) == 768, f"超长查询嵌入应返回 768 维, 实际: {len(vec)}"
     finally:
         emb_module._EMBED_CACHE.clear()
 
@@ -428,7 +428,7 @@ async def test_concurrent_sessions_stress() -> None:
     class _ConcurrentFakeClient:
         async def post(self, url: str, **kwargs: object) -> _FakeHttpxResponse:
             inputs = kwargs.get("json", {}).get("inputs", [])  # type: ignore[union-attr]
-            return _FakeHttpxResponse([[0.1] * 1024 for _ in inputs])
+            return _FakeHttpxResponse([[0.1] * 768 for _ in inputs])
 
         async def aclose(self) -> None:
             pass
@@ -446,7 +446,7 @@ async def test_concurrent_sessions_stress() -> None:
         assert len(results) == 10
         for i, vectors in enumerate(results):
             assert len(vectors) == 1, f"会话 {i} 向量数不符"
-            assert len(vectors[0]) == 1024, f"会话 {i} 向量维度不符"
+            assert len(vectors[0]) == 768, f"会话 {i} 向量维度不符"
     finally:
         emb_module._EMBED_CACHE.clear()
 

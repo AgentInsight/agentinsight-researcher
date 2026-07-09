@@ -36,7 +36,7 @@ class _FakeEmbeddingsClient:
         self.settings = settings
 
     async def embed_texts(self, texts: list[str], **_kwargs: Any) -> list[list[float]]:
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * 768 for _ in texts]
 
     @staticmethod
     def generate_point_id(namespace: str, content: str) -> str:
@@ -147,9 +147,9 @@ async def test_ensure_collection_creates_when_missing() -> None:
     assert len(fake.calls["create_collection"]) == 1
     create_kwargs = fake.calls["create_collection"][0]
     assert create_kwargs["collection_name"] == "agents"
-    # 验证 VectorParams (bge-large-zh-v1.5 固定 1024 维)
+    # 验证 VectorParams (bge-base-zh-v1.5 固定 768 维)
     vectors_config = create_kwargs["vectors_config"]
-    assert vectors_config.size == 1024
+    assert vectors_config.size == 768
 
 
 # ========== upsert_points ==========
@@ -185,7 +185,7 @@ async def test_upsert_points_with_user_id(monkeypatch: pytest.MonkeyPatch) -> No
     assert p0.payload["metadata"] == {"source": "web"}
     assert p0.payload["namespace"] == "ns:user123"
     assert p0.payload["user_id"] == "user123"  # user_id 条件注入
-    assert len(p0.vector) == 1024
+    assert len(p0.vector) == 768
     assert p0.id  # 应有 uuid
 
 
@@ -247,7 +247,7 @@ async def test_search_returns_mapped_fields() -> None:
     mgr, _ = _make_manager(fake_client=fake)
 
     results = await mgr.search(
-        query_vector=[0.1] * 1024,
+        query_vector=[0.1] * 768,
         namespaces=["ns1", "ns2"],
         limit=10,
         score_threshold=0.5,
@@ -280,7 +280,7 @@ async def test_search_no_threshold_when_score_threshold_none() -> None:
     fake = _FakeQdrantClient()
     mgr, _ = _make_manager(settings=settings, fake_client=fake)
 
-    await mgr.search([0.1] * 1024, ["ns1"], limit=5)
+    await mgr.search([0.1] * 768, ["ns1"], limit=5)
 
     search_kwargs = fake.calls["query_points"][0]
     # score_threshold=None 传给 query_points (qdrant-client: None 表示不应用阈值)
@@ -294,7 +294,7 @@ async def test_search_explicit_threshold_still_applied() -> None:
     fake = _FakeQdrantClient()
     mgr, _ = _make_manager(settings=settings, fake_client=fake)
 
-    await mgr.search([0.1] * 1024, ["ns1"], limit=5, score_threshold=0.5)
+    await mgr.search([0.1] * 768, ["ns1"], limit=5, score_threshold=0.5)
 
     search_kwargs = fake.calls["query_points"][0]
     assert search_kwargs["score_threshold"] == 0.5
@@ -305,7 +305,7 @@ async def test_search_empty_results() -> None:
     """search: 无命中时返回空列表."""
     fake = _FakeQdrantClient(search_results=[])
     mgr, _ = _make_manager(fake_client=fake)
-    results = await mgr.search([0.1] * 1024, ["ns1"], limit=5)
+    results = await mgr.search([0.1] * 768, ["ns1"], limit=5)
     assert results == []
 
 

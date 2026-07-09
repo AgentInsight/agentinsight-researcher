@@ -36,7 +36,7 @@ async def test_concurrent_embeddings_10_requests() -> None:
 
     async def mock_embed_texts(texts, **kwargs):
         await asyncio.sleep(0.1)
-        return [[0.0] * 1024] * len(texts)
+        return [[0.0] * 768] * len(texts)
 
     mock_embeddings = MagicMock()
     mock_embeddings.embed_texts = AsyncMock(side_effect=mock_embed_texts)

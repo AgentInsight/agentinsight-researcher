@@ -106,19 +106,19 @@ Success: no issues found in 44 source files
 ### 5.1 直接测试 (容器内)
 ```
 $ docker exec agentinsight-researcher-agent python /tmp/test_emb.py
-OK, dim: 1024
+OK, dim: 768
 ```
 
 ### 5.2 批量测试 (21 texts, 19554 chars)
 ```
 $ docker exec agentinsight-researcher-agent python /tmp/test_emb_batch.py
 Total texts: 21, total chars: 19554
-OK, count: 21 dim: 1024
+OK, count: 21 dim: 768
 ```
 
 ### 5.3 Chat 流程内 Embeddings
 - 重建 agent 镜像后, 日志中 `Embedding 调用失败` 错误已消除
-- **结论**: ✅ Embeddings 服务 (TEI 1.9 + bge-large-zh-v1.5) 工作正常, 1024 维
+- **结论**: ✅ Embeddings 服务 (TEI 1.9 + bge-base-zh-v1.5) 工作正常, 768 维
 
 ---
 
@@ -182,7 +182,7 @@ OK, count: 21 dim: 1024
 | 流式 SSE API | ✅ | 48 chunks, 7337 chars |
 | 文件上传 | ✅ | 200, file_id 返回 |
 | 文件+Chat 联动 | ✅ | 200, 14899 chars |
-| Embeddings | ✅ | 1024 dim, 批量 OK |
+| Embeddings | ✅ | 768 dim, 批量 OK |
 | 离线构建 | ✅ | 199 wheels + 53 debs |
 
 **总体结论**: ✅ Phase 5 测试全部通过, 系统可交付。

@@ -37,6 +37,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ========== 快速失败状态码集合 (403 快速失败, 省 BS/Playwright 内存) ==========
+# 命中即跳过后续降级链, 直接返回空结果:
+# - 401 Unauthorized / 403 Forbidden / 429 Too Many Requests
+# 这些状态码不会因降级到 BS/Playwright 而成功 (服务器层拒绝),
+# 继续降级只会徒增内存占用 (BS DOM 树 5-10x HTML / Playwright chromium ~400MB).
+_FAST_FAIL_STATUS_CODES: frozenset[int] = frozenset({401, 403, 429})
+
+
+def _is_fast_fail(result: dict[str, Any]) -> bool:
+    """检测抓取结果是否携带快速失败状态码.
+
+    scraper 在捕获 httpx.HTTPStatusError 时, 将状态码写入 result["_http_status"].
+    命中 _FAST_FAIL_STATUS_CODES 时, 降级链应立即终止, 不再触发后续 BS/Playwright.
+    """
+    status = result.get("_http_status")
+    return isinstance(status, int) and status in _FAST_FAIL_STATUS_CODES
+
+
 # ========== 全局速率限制器 (单例, 跨所有 WorkerPool 实例) ==========
 
 
@@ -81,6 +99,84 @@ def get_global_rate_limiter() -> GlobalRateLimiter:
     return GlobalRateLimiter()
 
 
+# ========== 域名级限流器 (单例, 借鉴 GPTR NoDriverScraper, P2-05) ==========
+
+
+class DomainRateLimiter:
+    """域名级限流器 (单例, 借鉴 GPTR NoDriverScraper.Browser.rate_limit_for_domain).
+
+    每域名一个 asyncio.Semaphore(1), 同域名请求串行化, 避免单域名被封.
+    被锁时随机延迟 0.6-1.2s (对标 GPTR random.uniform(0.6, 1.2)).
+
+    与 GlobalRateLimiter 区别:
+    - GlobalRateLimiter: 全局速率 (跨所有域名, 控总 QPS)
+    - DomainRateLimiter: 域名级串行 (同域名 1 并发, 避免被封)
+
+    使用方式:
+        limiter = get_domain_rate_limiter()
+        async with limiter.throttle(url):
+            # 同域名请求串行执行
+            ...
+    """
+
+    _instance: DomainRateLimiter | None = None
+    _semaphores: dict[str, asyncio.Semaphore]
+    _lock: asyncio.Lock
+
+    def __new__(cls) -> DomainRateLimiter:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._semaphores = {}
+            cls._instance._lock = asyncio.Lock()
+        return cls._instance
+
+    def _get_domain(self, url: str) -> str:
+        """从 URL 提取二级域名 (对标 GPTR NoDriverScraper.get_domain)."""
+        from urllib.parse import urlparse
+
+        domain = urlparse(url).netloc
+        parts = domain.split(".")
+        if len(parts) > 2:
+            domain = ".".join(parts[-2:])
+        return domain
+
+    async def _get_semaphore(self, domain: str) -> asyncio.Semaphore:
+        """获取域名 Semaphore (惰性创建, 加锁防并发创建)."""
+        sem = self._semaphores.get(domain)
+        if sem is not None:
+            return sem
+        async with self._lock:
+            # 双重检查, 防并发创建
+            sem = self._semaphores.get(domain)
+            if sem is None:
+                sem = asyncio.Semaphore(1)
+                self._semaphores[domain] = sem
+            return sem
+
+    @asynccontextmanager
+    async def throttle(self, url: str) -> AsyncIterator[None]:
+        """域名级限流 (同域名串行化 + 随机延迟).
+
+        Args:
+            url: 请求 URL (用于提取域名)
+        """
+        import random
+
+        domain = self._get_domain(url)
+        sem = await self._get_semaphore(domain)
+        was_locked = sem.locked()
+        async with sem:
+            # 借鉴 GPTR: 被锁时随机延迟 0.6-1.2s (避免密集重试)
+            if was_locked:
+                await asyncio.sleep(random.uniform(0.6, 1.2))
+            yield
+
+
+def get_domain_rate_limiter() -> DomainRateLimiter:
+    """获取域名级限流器单例."""
+    return DomainRateLimiter()
+
+
 # ========== WorkerPool 并发池 ==========
 
 
@@ -88,7 +184,8 @@ class WorkerPool:
     """并发工作池.
 
     对标 GPT Researcher utils/workers.py.
-    asyncio.Semaphore 控并发, GlobalRateLimiter 控速率.
+    asyncio.Semaphore 控并发, GlobalRateLimiter 控全局速率.
+    域名级限流由 scraper 主动调用 DomainRateLimiter.throttle(url) (P2-05).
     """
 
     def __init__(
@@ -102,12 +199,22 @@ class WorkerPool:
         limiter.configure(rate_limit_delay)
 
     @asynccontextmanager
-    async def throttle(self) -> AsyncIterator[None]:
-        """获取并发槽 + 速率限制."""
+    async def throttle(self, url: str | None = None) -> AsyncIterator[None]:
+        """获取并发槽 + 全局速率限制 + 域名级限流.
+
+        Args:
+            url: 可选 URL, 提供时启用域名级限流 (P2-05 新增, 向后兼容)
+        """
         async with self.semaphore:
             limiter = get_global_rate_limiter()
             await limiter.wait_if_needed()
-            yield
+            # P2-05: 域名级限流 (借鉴 GPTR, 同域名串行化 + 随机延迟)
+            if url:
+                domain_limiter = get_domain_rate_limiter()
+                async with domain_limiter.throttle(url):
+                    yield
+            else:
+                yield
 
 
 # ========== Scraper 基类与注册 ==========
@@ -226,6 +333,14 @@ async def scrape_with_fallback(
     PDF/Arxiv 不降级 (专用抓取器).
     user_agent 参数预留 (session 已含 UA, 由调用方在构建 session 时注入).
     方案 E: scraper_mode=lightweight 时跳过 Playwright 降级.
+
+    内存优化 (P2-04, 3 项硬性要求):
+    - 成功不降级: 各级成功 (>=min_content_length) 直接返回, 不做 max() 三级比较.
+      原 max() 导致 tf/bsm/pw 三份内容同时驻留 (+1.5GB), 现仅驻留当前级.
+    - 失败不驻留: 降级前 del 上一级结果 (tf_result/tf_content, bsm_result/bsm_content),
+      CPython 引用计数立即释放, 避免累积. L3 失败返回空结果 (L1/L2 已 del, 无法回退).
+    - 403 快速失败: L1/L2 命中 _FAST_FAIL_STATUS_CODES (401/403/429) 立即返回,
+      不触发后续 BS/Playwright (服务器层拒绝, 降级必失败, 徒增 BS DOM 50MB / chromium 400MB).
     """
     settings = get_settings()
     scraper_mode = settings.scraper_mode
@@ -252,7 +367,13 @@ async def scrape_with_fallback(
     from src.skills.researcher.scrapers.trafilatura_scraper import TrafilaturaScraper
 
     tf_result = await _safe_scrape(TrafilaturaScraper(url, session))
+
+    # 403 快速失败: 服务器层拒绝, 降级到 BS/Playwright 也无法成功
+    if _is_fast_fail(tf_result):
+        return tf_result
+
     tf_content = tf_result.get("content", "") or ""
+    # 成功不降级 (硬性要求): 内容达标直接返回
     if tf_content and len(tf_content) >= min_content_length:
         return tf_result
 
@@ -268,12 +389,21 @@ async def scrape_with_fallback(
         len(tf_content),
         url,
     )
+    # 失败不驻留: 释放 L1 结果, 避免 L1+L2 结果同时驻留 (原 max() 三级比较的根因)
+    del tf_result, tf_content
+
     from src.skills.researcher.scrapers.bs_markdownify_scraper import (
         BSMarkdownifyScraper,
     )
 
     bsm_result = await _safe_scrape(BSMarkdownifyScraper(url, session))
+
+    # 403 快速失败: L2 命中也立即终止, 不触发 Playwright
+    if _is_fast_fail(bsm_result):
+        return bsm_result
+
     bsm_content = bsm_result.get("content", "") or ""
+    # 成功不降级 (硬性要求): 内容达标直接返回
     if bsm_content and len(bsm_content) >= min_content_length:
         return bsm_result
 
@@ -282,23 +412,23 @@ async def scrape_with_fallback(
         "BS+markdownify 抓取内容过短, 降级 Playwright: %s",
         url,
     )
+    # 失败不驻留: 释放 L2 结果, 避免 L2+L3 结果同时驻留
+    del bsm_result, bsm_content
+
     try:
         from src.skills.researcher.scrapers.playwright_scraper import PlaywrightScraper
 
         pw_result = await _safe_scrape(PlaywrightScraper(url, session))
-        best_content = max(
-            [tf_content, bsm_content, pw_result.get("content", "") or ""],
-            key=len,
-        )
-        if len(pw_result.get("content", "") or "") >= len(best_content):
-            return pw_result
-        for r in [tf_result, bsm_result, pw_result]:
-            if r.get("content"):
-                return r
-        return tf_result
+        # 成功不降级 (硬性要求): 移除原 max() 三级比较,
+        # Playwright 结果无论长度直接返回 (已是兜底, 无更优选项).
+        # 原 max() 导致 tf_content/bsm_content/pw_content 三份同时驻留 (+1.5GB),
+        # 现已通过 del 释放 L1/L2, 仅 pw_result 单份驻留.
+        return pw_result
     except Exception as e:  # noqa: BLE001
         logger.warning("Playwright 降级失败 %s: %s", url, e)
-        return tf_result
+        # L3 失败: 返回空结果 (L1/L2 已 del, 无法回退).
+        # 这是"失败不驻留"的必然结果: 所有降级均已失败, 返回空符合语义.
+        return {"url": url, "content": "", "title": "", "image_urls": []}
 
 
 # ========== 共享 HTTP 客户端 (单例, 复用 TCP 连接, P1-3) ==========
@@ -398,7 +528,8 @@ async def scrape_urls(
     session = await get_shared_http_client(user_agent=user_agent)
 
     async def _scrape_one(url: str) -> dict[str, Any]:
-        async with worker_pool.throttle():
+        # P2-05: 传入 url 启用域名级限流 (同域名串行化, 避免被封)
+        async with worker_pool.throttle(url):
             if enable_fallback:
                 return await scrape_with_fallback(
                     url,

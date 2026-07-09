@@ -1,6 +1,6 @@
 """递归文本分块工具 (对标 GPTR RecursiveCharacterTextSplitter).
 
-历史背景: 本模块原为 `EmbeddingsFilter` 类 (V2-P1), 通过远程 TEI bge-large-zh-v1.5
+历史背景: 本模块原为 `EmbeddingsFilter` 类 (V2-P1), 通过远程 TEI bge-base-zh-v1.5
 做相似度过滤. V4-P3 改用 BM25Filter (本地 jieba+BM25Okapi) 替代主路由,
 `EmbeddingsFilter` 类已删除 (上下文压缩改用 FastEmbed bge-small-zh-v1.5, 见
 `WrittenContentCompressor` 与 `_embeddings_rerank`).

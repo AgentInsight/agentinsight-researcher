@@ -1,7 +1,7 @@
 """Qdrant 客户端封装.
 
 AGENTS.md 第 7 章硬约束:
-- 单一集合 agents, distance=Cosine, vector_size=1024 (bge-large-zh-v1.5 固定)
+- 单一集合 agents, distance=Cosine, vector_size=768 (bge-base-zh-v1.5 固定)
 - payload namespace 隔离:
   - 共享知识库: namespace = agent_id (不含 user_id, 所有用户共享)
   - 用户私有数据: namespace = {agent_id}:{user_id} (payload 含 user_id)
@@ -85,7 +85,7 @@ class QdrantManager:
     async def ensure_collection(self) -> None:
         """确保集合存在 (不存在则创建, 含 HNSW 参数调优 P0-03).
 
-        AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=1024.
+        AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=768.
         P0-03: 中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
         scalar 量化降低内存 50%.
 

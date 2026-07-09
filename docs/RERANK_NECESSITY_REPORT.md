@@ -74,7 +74,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 
 | 维度 | GPT Researcher 实现 | 本项目实现 |
 |---|---|---|
-| **检索器** | Tavily Search API + DuckDuckGo 兜底 | BM25 + bge-large-zh-v1.5 + RRF |
+| **检索器** | Tavily Search API + DuckDuckGo 兜底 | BM25 + bge-base-zh-v1.5 + RRF |
 | **Rerank** | ❌ **不使用独立 Rerank 模型** | ✅ bge-reranker-v2-m3 强制调用 |
 | **二次过滤** | `EmbeddingsFilter`（相似度阈值 0.35）+ LLM ContextManager 压缩 | `score_threshold=0.3` + Rerank |
 | **Top-K** | 默认 5 篇 web 内容，直接送 LLM | Top-15 召回 → Rerank → Top-5 |

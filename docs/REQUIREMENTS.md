@@ -101,7 +101,7 @@ Publisher（发布：Markdown / HTML / PDF）
 |---|---|---|
 | **编排内核** | LangGraph StateGraph + PostgresSaver + functools.partial 注入 | AGENTS.md 第 5 章硬约束 + AgentInsightService insight/graph.py 模式 |
 | **LLM 网关** | LiteLLM（替换 openai SDK） + 三级模型（fast/smart/strategic） | AGENTS.md 第 9 章硬约束 + GPT Researcher 模式 |
-| **检索** | HybridRetriever（BM25+jieba + bge-large-zh-v1.5 + RRF k=60） + 双 namespace | AGENTS.md 第 7 章 + AgentInsightService/common/retriever.py |
+| **检索** | HybridRetriever（BM25+jieba + bge-base-zh-v1.5 + RRF k=60） + 双 namespace | AGENTS.md 第 7 章 + AgentInsightService/common/retriever.py |
 | **重排** | bge-reranker-v2-m3 Top-K 后 rerank | AGENTS.md 第 7 章 |
 | **行业识别** | Qdrant 向量检索（GICS 知识库，namespace=agent_id）→ LLM 兜底 | 用户需求 4 |
 | **国内搜索** | 博查搜索（Bocha）为主 + DuckDuckGo 兜底 | 用户需求 5（中文优先） |
@@ -307,7 +307,7 @@ agentinsight-researcher/
 | `postgres` | `postgres:16-alpine` | 5432（127.0.0.1） | `pg_isready` |
 | `redis` | `redis:7-alpine` | 6379（127.0.0.1） | `redis-cli ping` |
 | `qdrant` | `qdrant/qdrant:v1.18.0` | 6333/6334（127.0.0.1） | `/healthz` |
-| `embeddings` | `text-embeddings-inference:cpu-1.5`（bge-large-zh-v1.5） | 8100（127.0.0.1） | `/health` |
+| `embeddings` | `text-embeddings-inference:cpu-1.5`（bge-base-zh-v1.5） | 8100（127.0.0.1） | `/health` |
 | `rerank` | `text-embeddings-inference:cpu-1.5`（bge-reranker-v2-m3） | 8101（127.0.0.1） | `/health` |
 | `agent` | 本仓 Dockerfile（python:3.12-slim） | 8066（对外） | `GET /health` |
 

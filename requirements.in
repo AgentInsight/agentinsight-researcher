@@ -43,7 +43,7 @@ asyncpg>=0.30
 # === 向量库 (AGENTS.md 第 1/7 章) ===
 qdrant-client>=1.18
 
-# === Embeddings + Rerank (AGENTS.md 第 7 章, bge-large-zh-v1.5 固定 1024 维) ===
+# === Embeddings + Rerank (AGENTS.md 第 7 章, bge-base-zh-v1.5 固定 768 维) ===
 # 远程 TEI 服务调用, 无需本地模型包; 仅需 HTTP 客户端
 
 # === FastEmbed 本地 Embeddings (上下文压缩用, bge-small-zh-v1.5 ONNX) ===

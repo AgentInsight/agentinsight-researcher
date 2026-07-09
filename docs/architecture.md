@@ -30,7 +30,7 @@ flowchart LR
     Qdrant[("Qdrant<br/>向量库 :6333")]
     PG[("PostgreSQL<br/>Checkpointer + 业务表 :5432")]
     Redis[("Redis<br/>缓存 / 限流 :6379")]
-    EMB["Embeddings TEI<br/>bge-large-zh-v1.5 :8088"]
+    EMB["Embeddings TEI<br/>bge-base-zh-v1.5 :8088"]
     RER["Rerank TEI (可选)<br/>bge-reranker-v2-m3 :8089"]
     LLMEXT["外部 LLM<br/>DeepSeek / 智谱 / ..."]
 
@@ -49,10 +49,10 @@ flowchart LR
 
 - **编排内核** — LangGraph `StateGraph`（状态机 + 显式条件边 + `PostgresSaver` Checkpointer），三套图：研究图 / 多 Agent 图 / 对话图
 - **LLM 网关** — LiteLLM（一次接入 100+ 模型，内置成本/限流/重试），模型名以路由前缀声明（如 `deepseek/deepseek-chat`），由配置注入
-- **向量库** — Qdrant（单集合 `agents`，Cosine 距离，1024 维，按 payload `namespace` 隔离），混合检索 BM25 + 向量
+- **向量库** — Qdrant（单集合 `agents`，Cosine 距离，768 维，按 payload `namespace` 隔离），混合检索 BM25 + 向量
 - **关系库** — PostgreSQL ≥17（LangGraph Checkpointer 会话持久化 + 业务元数据，单库 `agents` 多 Agent 共享）
 - **缓存** — Redis ≥8（热点检索缓存 + 限流 + BM25 语料缓存，LRU + TTL 双策略）
-- **Embeddings / Rerank** — HuggingFace TEI 服务：`bge-large-zh-v1.5`（中文最强开源嵌入）+ `bge-reranker-v2-m3`（可选，中文 Rerank SOTA）
+- **Embeddings / Rerank** — HuggingFace TEI 服务：`bge-base-zh-v1.5`（中文最强开源嵌入）+ `bge-reranker-v2-m3`（可选，中文 Rerank SOTA）
 - **可观测性** — AgentInsight Python SDK（6 类 trace span，异步上下文管理器，OpenTelemetry Context API 自动传播）
 
 ---
@@ -182,7 +182,7 @@ flowchart LR
     NS --> CACHE{Redis 缓存命中?}
     CACHE -->|命中| RET[返回缓存]
     CACHE -->|未命中| PARA[并行检索]
-    PARA --> V[向量检索<br/>bge-large-zh-v1.5 + Qdrant]
+    PARA --> V[向量检索<br/>bge-base-zh-v1.5 + Qdrant]
     PARA --> B[BM25 检索<br/>jieba 分词 + rank-bm25]
     V --> RRF[RRF 融合<br/>k=60, vector 0.7 / bm25 0.3]
     B --> RRF
@@ -218,7 +218,7 @@ flowchart TB
         CK[("LangGraph Checkpointer 表<br/>thread_id 会话隔离")]
         BT[("业务表<br/>agent_id + user_id 双列 + 复合索引")]
     end
-    subgraph Qdrant["Qdrant (单集合 agents, Cosine, 1024 维)"]
+    subgraph Qdrant["Qdrant (单集合 agents, Cosine, 768 维)"]
         SH[("共享知识库<br/>namespace = agent_id<br/>所有用户共享")]
         PR[("用户私有数据<br/>namespace = agent_id:user_id<br/>仅该用户可检索")]
     end
@@ -336,7 +336,7 @@ flowchart TD
     PG[("postgres:17<br/>业务表 + Checkpointer")]
     RD[("redis:8<br/>缓存 / 限流")]
     QD[("qdrant:v1.18<br/>向量库")]
-    EB["embeddings TEI<br/>bge-large-zh-v1.5 :8088"]
+    EB["embeddings TEI<br/>bge-base-zh-v1.5 :8088"]
     RB["rerank TEI (可选)<br/>bge-reranker-v2-m3 :8089<br/>profiles: [rerank]"]
     AG["agent<br/>FastAPI :8066"]
 
@@ -350,7 +350,7 @@ flowchart TD
 | 服务 | 镜像 | 端口 | 健康检查 | 对外暴露 |
 |------|------|------|---------|---------|
 | `agent` | 本仓 `Dockerfile`（Python 3.12-slim，非 root） | 8066 | `GET /health` | ✅ |
-| `embeddings` | `tei-embedding:cpu-1.9`（bge-large-zh-v1.5） | 8088 | `GET /health` | ✅ |
+| `embeddings` | `tei-embedding:cpu-1.9`（bge-base-zh-v1.5） | 8088 | `GET /health` | ✅ |
 | `rerank`（可选） | `tei-embedding:cpu-1.9`（bge-reranker-v2-m3） | 8089 | `GET /health` | ✅ |
 | `qdrant` | `qdrant/qdrant:v1.18.0` | 6333 / 6334 | `/healthz` | 6333 ✅ / 6334 仅本机 |
 | `redis` | `redis:8` | 6379 | `redis-cli ping` | 仅本机 |
@@ -378,10 +378,10 @@ flowchart TD
 
 - **Orchestration Core** — LangGraph `StateGraph` (state machine + explicit conditional edges + `PostgresSaver` checkpointer). Three graphs: research / multi-agent / chat
 - **LLM Gateway** — LiteLLM (unified access to 100+ models with built-in cost/rate-limit/retry)
-- **Vector Store** — Qdrant (single `agents` collection, Cosine distance, 1024-dim, isolated by payload `namespace`), hybrid BM25 + vector retrieval
+- **Vector Store** — Qdrant (single `agents` collection, Cosine distance, 768-dim, isolated by payload `namespace`), hybrid BM25 + vector retrieval
 - **Relational DB** — PostgreSQL ≥17 (LangGraph Checkpointer session persistence + business metadata, single `agents` DB shared across agents)
 - **Cache** — Redis ≥8 (hot retrieval cache + rate limiting + BM25 corpus cache, LRU + TTL)
-- **Embeddings / Rerank** — HuggingFace TEI: `bge-large-zh-v1.5` + `bge-reranker-v2-m3` (optional)
+- **Embeddings / Rerank** — HuggingFace TEI: `bge-base-zh-v1.5` + `bge-reranker-v2-m3` (optional)
 - **Observability** — AgentInsight Python SDK (6 trace span types, async context managers, OpenTelemetry Context API auto-propagation)
 
 ### Data Flow

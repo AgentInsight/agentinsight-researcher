@@ -1,7 +1,7 @@
 """功能测试: 验证 Qdrant 向量库服务.
 
 AGENTS.md 第 7 章硬约束:
-- 单一集合 agents, distance=Cosine, vector_size=1024 (bge-large-zh-v1.5 固定)
+- 单一集合 agents, distance=Cosine, vector_size=768 (bge-base-zh-v1.5 固定)
 - payload namespace 隔离: 共享知识库 namespace=agent_id, 用户私有 namespace={agent_id}:{user_id}
 - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等生成
 - 检索时必须显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
@@ -34,7 +34,7 @@ from qdrant_client.http.models import (
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 COLLECTION = os.getenv("QDRANT_COLLECTION", "agents")
-VECTOR_SIZE = 1024
+VECTOR_SIZE = 768
 
 # Embeddings 服务 (用于生成测试向量)
 EMBEDDINGS_URL = os.getenv("EMBEDDINGS_URL", "http://127.0.0.1:8088").rstrip("/")

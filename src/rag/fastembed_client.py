@@ -13,7 +13,7 @@ AGENTS.md 第 7 章: 上下文压缩用本地 FastEmbed (WrittenContentCompresso
 
 注意:
 - 本客户端仅用于上下文压缩 (WrittenContentCompressor 去重 + _embeddings_rerank 精排), 不用于 Qdrant 索引
-- Qdrant 索引仍使用远程 TEI (bge-large-zh-v1.5, 1024维), 维度固定不可改
+- Qdrant 索引仍使用远程 TEI (bge-base-zh-v1.5, 768维), 维度固定不可改
 - bge-small-zh-v1.5 ONNX 模型需提前转换并放入配置的模型路径
 """
 

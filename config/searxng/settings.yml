@@ -1,8 +1,42 @@
 # SearXNG 配置 (国内优化, 无 redis, 不开启限流)
 # 部署: bind mount 到容器 /etc/searxng/settings.yml (只读)
-# 使用默认配置作为基础, 按国内网络环境覆盖引擎开关与语言
+#
+# 引擎策略: 使用 keep_only 模式, 仅加载下列指定引擎, 其他引擎(含 google/duckduckgo
+# 及其全部衍生引擎)均不加载, 从根源上确保不可用引擎不会出现在搜索结果中。
+#
+# 国内可用引擎: baidu/sogou/360search/quark + cn.bing.com (官方推荐中国镜像)
+# 国外可用引擎 (实测连通): yandex/mojeek/mwmbl/github/stackoverflow/npm/crates.io/arxiv/pubmed/crossref
 
-use_default_settings: true
+use_default_settings:
+  engines:
+    # keep_only 模式: 仅保留以下引擎, 未列出的引擎一律不加载
+    # google/duckduckgo 系列因未列入此列表, 不会被加载 (等同于 disabled)
+    keep_only:
+      # ========== 国内引擎 ==========
+      - baidu              # web
+      - baidu images       # images
+      - bing               # web (base_url 覆盖为 cn.bing.com)
+      - bing images        # images
+      - bing videos        # videos
+      - sogou              # web
+      - sogou images       # images
+      - sogou videos       # videos
+      - sogou wechat       # wechat (news)
+      - 360search          # web
+      - 360search videos   # videos
+      - quark              # web
+      - quark images       # images
+      # ========== 国外可用引擎 ==========
+      - arxiv              # science
+      - pubmed             # science
+      - crossref           # science
+      - mwmbl              # general
+      - github             # it/repos
+      - yandex             # general
+      - mojeek             # general
+      - stackoverflow      # it/q&a
+      - npm                # it/packages
+      - crates.io          # it/packages
 
 general:
   instance_name: "AgentInsight SearXNG"
@@ -20,7 +54,7 @@ server:
   # secret_key: 容器间通信鉴权用, 生产环境请替换 (python -c "import secrets; print(secrets.token_hex(32))")
   secret_key: "7b27f252d4b4800da343118e3f3ce850f0a70c00f8b75a0d8fbd51e9f1ff9c68"
   bind_address: "0.0.0.0"
-  port: 8080
+  port: 8099
   limiter: false
   image_proxy: true
 
@@ -29,34 +63,149 @@ ui:
 
 # 无需 redis (limiter=false, 无限流数据需持久化)
 
+# =============================================================================
+# engines 部分覆盖 keep_only 保留引擎的运行时配置
+# 说明: 仅 keep_only 列表中的引擎会被加载; google/duckduckgo 等未列入的引擎
+#       不会出现在实例中, 无需也无法在此处对其设置 disabled: true。
+#       bing 系列强制使用 cn.bing.com (中国可访问的官方镜像)。
+# =============================================================================
 engines:
-  # 关闭国内不稳定引擎
-  - name: Google
-    disabled: true
-  - name: Yahoo
-    disabled: true
-  - name: Yandex
-    disabled: true
-  # 开启国内可访问引擎 (显式声明)
-  - name: Bing
+  # ========== 国内引擎 (启用 + 配置中国镜像) ==========
+  # bing: 强制使用 cn.bing.com (官方推荐中国镜像)
+  - name: bing
+    engine: bing
+    shortcut: bi
     disabled: false
-  - name: Baidu
+    base_url: https://cn.bing.com
+    timeout: 10.0
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bii
     disabled: false
-  - name: Brave
+    base_url: https://cn.bing.com
+    timeout: 10.0
+
+  - name: bing videos
+    engine: bing_videos
+    shortcut: biv
     disabled: false
-  - name: DuckDuckGo
+    base_url: https://cn.bing.com
+    timeout: 10.0
+
+  # baidu: 显式启用
+  - name: baidu
+    engine: baidu
+    shortcut: bd
     disabled: false
-  - name: Wikipedia
+    timeout: 10.0
+
+  - name: baidu images
+    engine: baidu
+    shortcut: bdi
     disabled: false
-  - name: Wikidata
+    timeout: 10.0
+
+  # 360search: 显式启用
+  - name: 360search
+    engine: 360search
+    shortcut: 360so
     disabled: false
-  - name: Arxiv
+    timeout: 10.0
+
+  - name: 360search videos
+    engine: 360search_videos
+    shortcut: 360sov
     disabled: false
-  - name: PubMed
+    timeout: 10.0
+
+  # sogou: 显式启用
+  - name: sogou
+    engine: sogou
+    shortcut: sogou
     disabled: false
-  - name: Semantic Scholar
+    timeout: 10.0
+
+  - name: sogou images
+    engine: sogou_images
+    shortcut: sogoui
     disabled: false
-  - name: GitHub
+    timeout: 10.0
+
+  - name: sogou videos
+    engine: sogou_videos
+    shortcut: sogouv
+    disabled: false
+    timeout: 10.0
+
+  - name: sogou wechat
+    engine: sogou_wechat
+    shortcut: sogouw
+    disabled: false
+    timeout: 10.0
+
+  # quark: 显式启用
+  - name: quark
+    engine: quark
+    shortcut: qk
+    disabled: false
+    timeout: 10.0
+
+  - name: quark images
+    engine: quark
+    shortcut: qki
+    disabled: false
+    timeout: 10.0
+
+  # ========== 国外可用引擎 (显式启用) ==========
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    disabled: false
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pm
+    disabled: false
+
+  - name: crossref
+    engine: crossref
+    shortcut: cr
+    disabled: false
+
+  - name: mwmbl
+    engine: mwmbl
+    shortcut: mwm
+    disabled: false
+
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+
+  - name: yandex
+    engine: yandex
+    shortcut: yd
+    disabled: false
+
+  - name: mojeek
+    engine: mojeek
+    shortcut: mjk
+    disabled: false
+
+  - name: stackoverflow
+    engine: stackexchange
+    shortcut: st
+    disabled: false
+
+  - name: npm
+    engine: npm
+    shortcut: npm
+    disabled: false
+
+  - name: crates.io
+    engine: crates
+    shortcut: cio
     disabled: false
 
 outgoing:

@@ -1,7 +1,7 @@
 """Embeddings 封装.
 
 AGENTS.md 第 7 章硬约束:
-- Embeddings: bge-large-zh-v1.5 (中文最强开源嵌入, 本地零成本)
+- Embeddings: bge-base-zh-v1.5 (中文最强开源嵌入, 本地零成本)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API
 - Qdrant 单集合 agents, payload namespace 隔离:
   - 共享知识库: namespace = agent_id
@@ -164,9 +164,9 @@ class EmbeddingsCircuitOpenError(RuntimeError):
 
 
 class EmbeddingsClient:
-    """Embeddings 客户端, 调用远程 TEI 服务 (bge-large-zh-v1.5).
+    """Embeddings 客户端, 调用远程 TEI 服务 (bge-base-zh-v1.5).
 
-    AGENTS.md 第 1/7 章: bge-large-zh-v1.5 固定 1024 维, 远程 TEI 服务.
+    AGENTS.md 第 1/7 章: bge-base-zh-v1.5 固定 768 维, 远程 TEI 服务.
 
     P0-1: 内置 EmbeddingsCircuitBreaker 熔断器, TEI 连续失败 N 次后短路,
     避免雪崩; 调用方可通过 is_circuit_open() 检查状态做降级 (如 context_manager).
@@ -228,7 +228,7 @@ class EmbeddingsClient:
     ) -> list[list[float]]:
         """批量嵌入文本.
 
-        返回与 texts 等长的向量列表, 每条 1024 维.
+        返回与 texts 等长的向量列表, 每条 768 维.
         高频调用, head-based 采样降存储压力.
 
         P1-1: 客户端按 embeddings_max_client_batch_size 分批, asyncio.gather 并发.

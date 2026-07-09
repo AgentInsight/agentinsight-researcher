@@ -19,8 +19,9 @@ from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
 
 # P1-5: DuckDuckGo 搜索超时保护 (秒)
-# settings 暂无 search_timeout 字段, 使用常量; 网络挂起时强制降级返回空列表, 避免研究流程卡死
-DUCKDUCKGO_TIMEOUT = 30
+# P0-1 优化: 运行时从 settings.search_timeout 读取 (默认 10.0), 此常量仅作为兜底默认值
+# 网络挂起时强制降级返回空列表, 避免研究流程卡死
+DUCKDUCKGO_TIMEOUT = 10
 
 # DDGS 可能为 None (两个包都未安装时), 类型由下方 try/except 导入 + None 赋值联合推断
 with _warnings.catch_warnings():
@@ -78,6 +79,8 @@ class DuckDuckGoSearcher(BaseSearcher):
             try:
                 # ddgs 是同步库, 用 asyncio.to_thread 包装
                 # P1-5: 用 asyncio.wait_for 包裹, 防止网络挂起导致整个研究流程卡死
+                # P0-1 优化: 超时从 settings.search_timeout 读取 (默认 10.0), 替代原硬编码 30s
+                timeout = self.settings.search_timeout
 
                 def _sync_search() -> list[dict[str, Any]]:
                     results: list[dict[str, Any]] = []
@@ -104,19 +107,19 @@ class DuckDuckGoSearcher(BaseSearcher):
                 try:
                     raw_results = await asyncio.wait_for(
                         asyncio.to_thread(_sync_search),
-                        timeout=DUCKDUCKGO_TIMEOUT,
+                        timeout=timeout,
                     )
                 except TimeoutError:
                     logger.warning(
-                        "DuckDuckGo 搜索超时 (>%ds), 降级返回空列表: query=%r",
-                        DUCKDUCKGO_TIMEOUT,
+                        "DuckDuckGo 搜索超时 (>%ss), 降级返回空列表: query=%r",
+                        timeout,
                         query[:100],
                     )
                     span.update(
                         metadata={
                             "tool_name": "duckduckgo",
                             "success": False,
-                            "error": f"timeout after {DUCKDUCKGO_TIMEOUT}s",
+                            "error": f"timeout after {timeout}s",
                             "timeout": True,
                         }
                     )

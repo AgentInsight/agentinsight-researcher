@@ -72,7 +72,7 @@ def main() -> None:
     llm = ChatOpenAI(**llm_kwargs)
     evaluator_llm = LangchainLLMWrapper(llm)
 
-    embedding_model = os.getenv("EVAL_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
+    embedding_model = os.getenv("EVAL_EMBEDDING_MODEL", "BAAI/bge-base-zh-v1.5")
     embedding_base = os.getenv("EVAL_EMBEDDING_API_BASE")
     embedding_key = os.getenv("EVAL_EMBEDDING_API_KEY", os.getenv("EMBEDDINGS_API_KEY", "dummy"))
     emb_kwargs: dict = {"model": embedding_model, "api_key": embedding_key}

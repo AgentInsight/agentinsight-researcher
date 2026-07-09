@@ -79,7 +79,7 @@ def test_qdrant_nonexistent_namespace_returns_empty() -> None:
     无命中时应返回空列表, 不应抛异常.
     """
     nonexistent_ns = f"test_nonexistent_{uuid.uuid4().hex}"
-    fake_vector = [0.01] * 1024
+    fake_vector = [0.01] * 768
 
     payload = {
         "vector": fake_vector,
@@ -111,9 +111,9 @@ def test_qdrant_nonexistent_namespace_returns_empty() -> None:
 
 @pytest.mark.exploratory
 def test_qdrant_invalid_vector_dimension_handled() -> None:
-    """降级: 无效向量维度 (非 1024) 应被 Qdrant 拒绝 (400), 不应崩溃.
+    """降级: 无效向量维度 (非 768) 应被 Qdrant 拒绝 (400), 不应崩溃.
 
-    AGENTS.md 第 7 章: bge-large-zh-v1.5 固定 1024 维.
+    AGENTS.md 第 7 章: bge-base-zh-v1.5 固定 768 维.
     """
     invalid_vector = [0.1] * 512  # 错误维度
     payload = {
@@ -180,7 +180,7 @@ def test_embeddings_large_batch_handled() -> None:
         assert isinstance(vectors, list)
         # 维度检查 (若返回向量)
         if vectors:
-            assert len(vectors[0]) == 1024
+            assert len(vectors[0]) == 768
 
 
 # ========== LLM 降级: 短查询应快速返回 (走 short_query 保护) ==========
@@ -345,7 +345,7 @@ async def test_tei_429_rate_limit_retry() -> None:
                 )
             # 第二次返回 200
             inputs = kwargs.get("json", {}).get("inputs", [])  # type: ignore[union-attr]
-            return _FakeHttpxResponse([[0.1] * 1024 for _ in inputs])
+            return _FakeHttpxResponse([[0.1] * 768 for _ in inputs])
 
         async def aclose(self) -> None:
             pass
@@ -356,7 +356,7 @@ async def test_tei_429_rate_limit_retry() -> None:
         vectors = await client.embed_texts(["测试文本"])
         # 重试后成功
         assert len(vectors) == 1, "应返回 1 条向量"
-        assert len(vectors[0]) == 1024, "向量维度应为 1024"
+        assert len(vectors[0]) == 768, "向量维度应为 768"
         assert call_count == 2, f"应重试 1 次 (共 2 次调用), 实际: {call_count}"
         # 熔断器应记录 1 次失败但未开启 (阈值 5)
         assert not client.is_circuit_open(), "1 次失败不应触发熔断 (阈值 5)"

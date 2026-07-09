@@ -29,8 +29,8 @@ def test_settings_defaults(monkeypatch):
     assert settings.env == "dev"
     assert settings.agent_name == "agentinsight-researcher"
     assert settings.qdrant_collection == "agents"
-    assert settings.qdrant_vector_size == 1024
-    assert settings.embeddings_model == "BAAI/bge-large-zh-v1.5"
+    assert settings.qdrant_vector_size == 768
+    assert settings.embeddings_model == "BAAI/bge-base-zh-v1.5"
     assert settings.default_report_format == "markdown"
     assert settings.mcp_strategy == "fast"
 

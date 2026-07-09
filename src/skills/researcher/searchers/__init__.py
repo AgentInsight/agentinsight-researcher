@@ -1,7 +1,7 @@
 """搜索引擎注册中心与工厂.
 
 用户需求 5: 中文优先原则.
-- 国内资料: 博查搜索 (Bocha) 为主 + DuckDuckGo 兜底
+- 国内资料: 博查搜索 (Bocha) 为主 + SearXNG 兜底 (P0-1: DuckDuckGo 已被 SearXNG 替代, 代码保留但不再注册)
 - 国外资料: Tavily + arxiv + Semantic Scholar
 - 混合: 双引擎并行
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class SearchRegion(StrEnum):
     """搜索区域 (中文优先路由)."""
 
-    CN = "cn"  # 国内 (博查 + 秘塔 + DuckDuckGo + Tavily + Exa)
+    CN = "cn"  # 国内 (博查 + 秘塔 + SearXNG + Tavily + Exa)  # P0-1: DuckDuckGo 已被 SearXNG 替代
     GLOBAL = "global"  # 国外 (Tavily + arxiv + Brave + Bing + Google + Serper)
     ACADEMIC = "academic"  # 学术 (PubMed + Semantic Scholar + arxiv + OpenAlex + CrossRef)
     AUTO = "auto"  # 自动判断 (基于查询语言/学术关键词)
@@ -48,6 +48,7 @@ class SearchRegion(StrEnum):
 # v1.1 新增: 引擎免费额度配置 (用于综合排序)
 FREE_QUOTA_MAP: dict[str, str] = {
     # 完全免费 (无额度限制)
+    # P0-1: duckduckgo 已被 SearXNG 替代并移除注册, 此条目保留以备将来恢复
     "duckduckgo": "unlimited",
     "searxng": "unlimited",
     "arxiv": "unlimited",
@@ -187,7 +188,7 @@ def get_searchers(
     """按区域获取搜索引擎列表.
 
     用户需求 5:
-    - CN: 博查 (主) + 秘塔 (国内AI) + DuckDuckGo (兜底) + Tavily + Exa + GDELT + HackerNews
+    - CN: 博查 (主) + 秘塔 (国内AI) + SearXNG (兜底, P0-1 已替代 DuckDuckGo) + Tavily + Exa + GDELT + HackerNews
     - GLOBAL: Tavily + Arxiv + Brave + Bing + Google + Serper + Exa + SearchApi + SearXNG + GDELT + HackerNews + GitHub + CrossRef + PubMed + SemanticScholar
     - ACADEMIC: PubMed + Semantic Scholar + Arxiv + OpenAlex + CrossRef + Unpaywall (学术优先)
     - AUTO: 混合 (全部可用引擎)
@@ -342,12 +343,15 @@ def _register_all_searchers() -> None:
 
     各 searcher 按区域 + Key 要求注册到 _SEARCHER_REGISTRY:
     - ACADEMIC 区域: PubMed/SemanticScholar/Arxiv/OpenAlex/CrossRef/Unpaywall (全免费)
-    - CN 区域: Bocha(require_key)/Metaso(require_key)/DuckDuckGo/GDELT/HackerNews/
-              Tavily(require_key, 跨区域兜底)/Exa(require_key, 跨区域兜底)
+    - CN 区域: Bocha(require_key)/Metaso(require_key)/SearXNG(主, P0-1 已替代 DuckDuckGo)/GDELT/
+              HackerNews/Tavily(require_key, 跨区域兜底)/Exa(require_key, 跨区域兜底)
     - GLOBAL 区域: Tavily/Brave/Bing/Google+SerpApi(共享 serpapi_key)/Serper/Exa/
                    SearchApi/SearXNG/GDELT/HackerNews/GitHub(require_key)/CrossRef/
                    Arxiv/PubMed/SemanticScholar/Custom(require env var)
     - AUTO 区域: CN + GLOBAL 引擎并集
+
+    P0-1 优化: SearXNG 注册区域从 GLOBAL+AUTO 扩展为 CN+GLOBAL+AUTO,
+    国内查询优先使用 SearXNG (DuckDuckGo 已被替代, 代码保留但不再注册).
 
     注: 先 clear() 清除各 searcher 模块导入时装饰器预注册的默认条目
     (如 unpaywall_doi 不应出现在 GLOBAL/AUTO), 以本函数的显式注册为准.
@@ -399,9 +403,12 @@ def _register_all_searchers() -> None:
         "require_key": None,
     }
 
-    # CN 区域引擎 (DuckDuckGo/GDELT/HackerNews 免费; Bocha/Metaso/Tavily/Exa 需 Key)
+    # CN 区域引擎 (SearXNG/GDELT/HackerNews 免费; Bocha/Metaso/Tavily/Exa 需 Key)
+    # P0-1: DuckDuckGo 已被 SearXNG 替代, 代码保留但不再注册
+    # P0-1: SearXNG 在 GLOBAL 区域导入并注册到 CN+GLOBAL+AUTO (见下方)
     from src.skills.researcher.searchers.bocha import BochaSearcher
-    from src.skills.researcher.searchers.duckduckgo import DuckDuckGoSearcher
+    # P0-1: DuckDuckGo 已被 SearXNG 替代, 代码保留但不再注册 (import 注释)
+    # from src.skills.researcher.searchers.duckduckgo import DuckDuckGoSearcher
     from src.skills.researcher.searchers.exa import ExaSearcher
     from src.skills.researcher.searchers.gdelt import GDELTSearcher
     from src.skills.researcher.searchers.hackernews import HackerNewsSearcher
@@ -418,11 +425,12 @@ def _register_all_searchers() -> None:
         "regions": (SearchRegion.CN, SearchRegion.AUTO),
         "require_key": "metaso_api_key",
     }
-    _SEARCHER_REGISTRY["duckduckgo"] = {
-        "class": DuckDuckGoSearcher,
-        "regions": (SearchRegion.CN, SearchRegion.AUTO),
-        "require_key": None,
-    }
+    # P0-1: DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留以备将来恢复)
+    # _SEARCHER_REGISTRY["duckduckgo"] = {
+    #     "class": DuckDuckGoSearcher,
+    #     "regions": (SearchRegion.CN, SearchRegion.AUTO),
+    #     "require_key": None,
+    # }
     _SEARCHER_REGISTRY["gdelt_cn"] = {
         "class": GDELTSearcher,
         "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
@@ -486,9 +494,11 @@ def _register_all_searchers() -> None:
         "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
         "require_key": "searchapi_api_key",
     }
+    # P0-1 优化: SearXNG 注册到 CN+GLOBAL+AUTO 三区域, 国内查询优先使用
+    # (DuckDuckGo 平均 22.5s/次是最大瓶颈, 已被 SearXNG 替代并移除注册, 代码保留以备恢复)
     _SEARCHER_REGISTRY["searxng"] = {
         "class": SearXNGSearcher,
-        "regions": (SearchRegion.GLOBAL, SearchRegion.AUTO),
+        "regions": (SearchRegion.CN, SearchRegion.GLOBAL, SearchRegion.AUTO),
         "require_key": None,
     }
     _SEARCHER_REGISTRY["github"] = {

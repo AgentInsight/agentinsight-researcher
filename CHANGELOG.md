@@ -60,7 +60,7 @@
 - 智谱 AI OpenAI 兼容端点适配(`_adapt_zhipu` 方法)
 
 **RAG 检索**
-- 混合检索:BM25(jieba 分词)+ 向量(bge-large-zh-v1.5)
+- 混合检索:BM25(jieba 分词)+ 向量(bge-base-zh-v1.5)
 - RRF 倒数排名融合(`vector_weight=0.7`、`bm25_weight=0.3`)
 - 可选 Rerank(bge-reranker-v2-m3,TEI 服务)
 - Qdrant 单集合 + namespace 隔离(共享知识库 + 用户私有数据)
@@ -204,7 +204,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Zhipu AI OpenAI-compatible endpoint adaptation (`_adapt_zhipu` method)
 
 **RAG Retrieval**
-- Hybrid retrieval: BM25 (jieba tokenization) + Vector (bge-large-zh-v1.5)
+- Hybrid retrieval: BM25 (jieba tokenization) + Vector (bge-base-zh-v1.5)
 - RRF Reciprocal Rank Fusion (`vector_weight=0.7`, `bm25_weight=0.3`)
 - Optional Rerank (bge-reranker-v2-m3, TEI service)
 - Qdrant single collection + namespace isolation (shared knowledge base + user private data)

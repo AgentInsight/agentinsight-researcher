@@ -200,7 +200,7 @@ async def test_trace_embedding_sample_rate_zero_always_noop(
     for _ in range(20):
         async with tracer.trace_embedding(
             name="test-emb",
-            model="BAAI/bge-large-zh-v1.5",
+            model="BAAI/bge-base-zh-v1.5",
         ) as span:
             assert isinstance(span, _NoopSpan), "sample_rate=0.0 应永远降级"
 
@@ -221,7 +221,7 @@ async def test_trace_embedding_sample_rate_one_always_sdk(
     for _ in range(20):
         async with tracer.trace_embedding(
             name="test-emb",
-            model="BAAI/bge-large-zh-v1.5",
+            model="BAAI/bge-base-zh-v1.5",
         ) as span:
             assert span is fake_client._span, "sample_rate=1.0 应永远走 SDK"
 

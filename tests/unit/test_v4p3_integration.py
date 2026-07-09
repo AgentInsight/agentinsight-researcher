@@ -47,7 +47,7 @@ def mock_embeddings() -> MagicMock:
     emb.is_circuit_open = MagicMock(return_value=False)
 
     async def _embed_texts(texts, **kwargs):
-        return [[0.1] * 1024 for _ in texts]
+        return [[0.1] * 768 for _ in texts]
 
     emb.embed_texts = AsyncMock(side_effect=_embed_texts)
     return emb
@@ -82,6 +82,17 @@ def context_manager(
     cm._written_compressor = MagicMock()
     cm._written_compressor.should_keep = AsyncMock(return_value=True)
     cm._written_compressor.reset = MagicMock()
+    # compute_embedding_batch 是 async 方法 (await 调用), 必须用 AsyncMock
+    # 返回 (chunks, embeddings) 二元组 (WrittenContentCompressor.compute_embedding_batch 契约)
+    # side_effect 动态返回: chunks 原样传回, embeddings 用零向量占位 (长度匹配)
+    cm._written_compressor.compute_embedding_batch = AsyncMock(
+        side_effect=lambda chunks: (chunks, [0.0] * len(chunks))
+    )
+    # check_and_update_batch 是 sync 方法, 返回 keep_flags 列表
+    # side_effect 动态返回: 全部 True (保留所有 chunk), 长度与输入一致
+    cm._written_compressor.check_and_update_batch = MagicMock(
+        side_effect=lambda chunks, embs: [True] * len(chunks)
+    )
     return cm
 
 
@@ -210,6 +221,14 @@ class TestV4P3LayerRouting:
         cm._written_compressor = MagicMock()
         cm._written_compressor.should_keep = AsyncMock(return_value=True)
         cm._written_compressor.reset = MagicMock()
+        # compute_embedding_batch 是 async 方法 (await 调用), 必须用 AsyncMock
+        # side_effect 动态返回: chunks 原样传回, embeddings 用零向量占位
+        cm._written_compressor.compute_embedding_batch = AsyncMock(
+            side_effect=lambda chunks: (chunks, [0.0] * len(chunks))
+        )
+        cm._written_compressor.check_and_update_batch = MagicMock(
+            side_effect=lambda chunks, embs: [True] * len(chunks)
+        )
 
         docs = _make_docs(total_chars=20000, doc_count=20)
         with (
@@ -462,6 +481,14 @@ class TestV4P3DegradeStrategy:
         cm._written_compressor = MagicMock()
         cm._written_compressor.should_keep = AsyncMock(return_value=True)
         cm._written_compressor.reset = MagicMock()
+        # compute_embedding_batch 是 async 方法 (await 调用), 必须用 AsyncMock
+        # side_effect 动态返回: chunks 原样传回, embeddings 用零向量占位
+        cm._written_compressor.compute_embedding_batch = AsyncMock(
+            side_effect=lambda chunks: (chunks, [0.0] * len(chunks))
+        )
+        cm._written_compressor.check_and_update_batch = MagicMock(
+            side_effect=lambda chunks, embs: [True] * len(chunks)
+        )
 
         docs = _make_docs(total_chars=60000, doc_count=100)
 
@@ -524,6 +551,15 @@ class TestV4P3DegradeStrategy:
         cm._written_compressor = MagicMock()
         cm._written_compressor.should_keep = AsyncMock(side_effect=[True, False, True])
         cm._written_compressor.reset = MagicMock()
+        # compute_embedding_batch 是 async 方法 (await 调用), 必须用 AsyncMock
+        # side_effect 动态返回: chunks 原样传回, embeddings 用零向量占位
+        cm._written_compressor.compute_embedding_batch = AsyncMock(
+            side_effect=lambda chunks: (chunks, [0.0] * len(chunks))
+        )
+        # check_and_update_batch 返回 [True, False, True] (保留第 1/3, 丢弃第 2)
+        cm._written_compressor.check_and_update_batch = MagicMock(
+            return_value=[True, False, True]
+        )
 
         bm25_chunks = ["keep-chunk-1", "drop-chunk-2", "keep-chunk-3"]
         with patch.object(cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)):

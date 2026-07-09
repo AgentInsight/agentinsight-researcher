@@ -224,7 +224,7 @@ async def test_embed_texts_records_success_on_ok_response() -> None:
     # mock httpx 返回 200
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = [[0.1] * 1024]  # 单文本 1024 维
+    mock_response.json.return_value = [[0.1] * 768]  # 单文本 768 维
 
     with patch.object(client._client, "post", new=AsyncMock(return_value=mock_response)):
         await client.embed_texts(["test"])

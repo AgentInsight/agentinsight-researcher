@@ -177,7 +177,7 @@ jobs:
           EVAL_LLM_MODEL=deepseek-chat
           EVAL_LLM_API_KEY=
           EVAL_LLM_API_BASE=https://api.deepseek.com/v1
-          EVAL_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+          EVAL_EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
           EVAL_EMBEDDING_API_BASE=http://localhost:8088/v1
           EVAL_EMBEDDING_API_KEY=
           ENVEOF
@@ -295,7 +295,7 @@ jobs:
           EVAL_LLM_MODEL=deepseek-chat
           EVAL_LLM_API_KEY=${EVAL_LLM_API_KEY}
           EVAL_LLM_API_BASE=https://api.deepseek.com/v1
-          EVAL_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+          EVAL_EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
           EVAL_EMBEDDING_API_BASE=http://localhost:8088/v1
           EVAL_EMBEDDING_API_KEY=${EVAL_EMBEDDING_API_KEY}
           DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}

@@ -179,10 +179,13 @@ class SourceCurator:
             # 对标 GPTR: agent_role 作为角色 persona
             role_persona = agent_role or "你是一位资深研究分析专家, 擅长多领域综合研究."
 
-            # 截断避免 token 过大
+            # P1-6: LLM 前用 credibility 预过滤, 减少输入 token (30 条 → 最多 20 条)
+            filtered_sources = [s for s in sources if self._score_credibility(s) >= 0.5]
+            if not filtered_sources:
+                filtered_sources = sources  # 全部低于阈值时保留原列表
             sources_text = "\n".join(
                 f"[{i + 1}] {s.get('title', '')[:80]} | {s.get('url', '')[:100]} | {s.get('snippet', '')[:150]}"
-                for i, s in enumerate(sources[:30])  # 最多 30 条
+                for i, s in enumerate(filtered_sources[:20])  # P1-6: 30→20
             )
 
             # P1-Future-04: prompt 经 PromptFamily 策略注入
@@ -198,7 +201,7 @@ class SourceCurator:
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.2,
-                max_tokens=8000,
+                max_tokens=4000,  # P1-6: 8000→4000 (预过滤后输入已减少, 输出上限同步缩减)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="curator-llm",
@@ -209,12 +212,12 @@ class SourceCurator:
             try:
                 scored = safe_json_parse(response.content, fallback=[])
                 if isinstance(scored, list) and scored:
-                    # 映射回原 sources 并计算可信度
+                    # 映射回 filtered_sources 并计算可信度 (P1-6: 索引基于预过滤后列表)
                     curated: list[dict[str, Any]] = []
                     for item in scored:
                         idx = item.get("index", 0) - 1
-                        if 0 <= idx < len(sources):
-                            source = sources[idx].copy()
+                        if 0 <= idx < len(filtered_sources):  # P1-6: 用 filtered_sources
+                            source = filtered_sources[idx].copy()
                             curator_score = item.get("score", 0)
                             source["curator_score"] = curator_score
                             source["curator_reason"] = item.get("reason", "")

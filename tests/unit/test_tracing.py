@@ -106,7 +106,7 @@ async def test_trace_embedding_yields_span():
     for _ in range(10):
         async with trace_embedding(
             name="test-embedding",
-            model="BAAI/bge-large-zh-v1.5",
+            model="BAAI/bge-base-zh-v1.5",
             input={"text_count": 1},
         ) as span:
             span.update(

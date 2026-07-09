@@ -20,7 +20,7 @@
 | 向量库 | Qdrant ≥1.18 | API 优雅、过滤强、部署简单 | Pinecone（不推荐，闭源）/Milvus（运维重） |
 | 关系库 | PostgreSQL ≥16 | Checkpointer+业务元数据，分布式共享 | MySQL（不推荐，分布式弱） |
 | 缓存 | Redis ≥8.0 | 热点缓存+限流+短期会话 | Memcached（不推荐，无持久化） |
-| Embeddings | bge-large-zh-v1.5 | 中文最强开源嵌入，本地零成本 | OpenAI embedding（不推荐，数据出境） |
+| Embeddings | bge-base-zh-v1.5 | 中文最强开源嵌入，本地零成本 | OpenAI embedding（不推荐，数据出境） |
 | Rerank | bge-reranker-v2-m3 | 中文 Rerank SOTA，本地部署 | Cohere Rerank（不推荐，闭源收费） |
 | BM25 | rank-bm25+jieba | 中文分词+IDF，混合检索必备 | 字符 2-gram（降级兜底，非首选） |
 | Web 框架 | FastAPI+Uvicorn ≥0.115 | 异步原生、OpenAPI 自动、SSE 流式 | Flask/Django（不推荐，异步弱/过重） |
@@ -158,7 +158,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 纯日志表（如 `research_search_logs`/`token_usage_logs`）只需 `created_at`，不需要 `updated_at`（INSERT-only 设计）。
 - `agent_id`/`user_id`/`session_id` 三列在所有业务表中应保持相同长度（推荐统一 VARCHAR(64)），避免跨表 JOIN 时类型/长度不一致引发隐式转换。
 
-**Qdrant 集合约定**：单一集合 `agents`，`distance=Cosine`，`vector_size=1024`（bge-large-zh-v1.5 固定维度）。按 payload `namespace` 字段隔离数据，分两类：
+**Qdrant 集合约定**：单一集合 `agents`，`distance=Cosine`，`vector_size=768`（bge-base-zh-v1.5 固定维度）。按 payload `namespace` 字段隔离数据，分两类：
 - **共享知识库**（非用户导入数据）：`namespace = agent_id`（即 `agent_name`），payload 不含 `user_id`，所有用户共享，检索时默认召回。
 - **用户私有数据**（用户导入数据）：`namespace = {agent_id}:{user_id}`（即 `{agent_name}:{user_id}`），payload 含 `user_id` 字段，仅该用户可检索，不推荐跨用户召回。
 
@@ -166,7 +166,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 **Redis 约定**：所有键应加前缀 `{agent_id}:{user_id}:`，完整键格式 `{agent_id}:{user_id}:{module}:{type}:{id}`。不推荐使用无 `agent_id` 或 `user_id` 前缀的裸键。会话级数据按 `{agent_id}:{user_id}:{session_id}` 三级分键。应设 TTL，不推荐永久键（配置数据除外）。
 
-**RAG 流水线**：检索应混合 BM25 + 向量（bge-large-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，不推荐直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，不推荐业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产应告警并失败转移。Embeddings/Rerank TEI 服务通过环境变量 `API_KEY` 开启鉴权，客户端（`rag/embeddings.py`/`rag/retriever.py`）应通过 `embeddings_api_key`/`rerank_api_key` 配置传递 `Authorization: Bearer <key>` 请求头；API Key 仅在 `.env`/`.env.qa` 配置，不推荐硬编码。
+**RAG 流水线**：检索应混合 BM25 + 向量（bge-base-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，不推荐直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，不推荐业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产应告警并失败转移。Embeddings/Rerank TEI 服务通过环境变量 `API_KEY` 开启鉴权，客户端（`rag/embeddings.py`/`rag/retriever.py`）应通过 `embeddings_api_key`/`rerank_api_key` 配置传递 `Authorization: Bearer <key>` 请求头；API Key 仅在 `.env`/`.env.qa` 配置，不推荐硬编码。
 
 **行业适配 GPTR 4 层机制（核心约定，优先选择，对标 GPT Researcher）**：
 行业适配刻意不引入 `IndustrySkill`，用 4 层隐形机制替代，不推荐业务代码 if-else 行业分支：
@@ -254,7 +254,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 | 服务 | 镜像/构建 | 端口 | 健康检查 |
 |------|----------|------|---------|
 | `agent` | 本仓 `Dockerfile`（Python 3.12-slim） | 8066 | `GET /health` |
-| `embeddings` | BGE 服务镜像（bge-large-zh-v1.5） | 8088 | `GET /health` |
+| `embeddings` | BGE 服务镜像（bge-base-zh-v1.5） | 8088 | `GET /health` |
 | `rerank`（可选，`rerank_enabled=True` 时启用） | BGE 服务镜像（bge-reranker-v2-m3） | 8089 | `GET /health` |
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
 | `redis` | `redis:≥8` | 6379 | `redis-cli ping` |
@@ -269,7 +269,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 所有镜像应预下载为 tarball（`docker save -o packages/images/<image>.tar`），部署机 `docker load` 导入，不推荐部署时 `docker pull`。
 - Python 依赖应预下载 wheel 到 `packages/`，构建时 `pip install --no-index --find-links=/app/packages -r requirements.txt`，不推荐联网安装。
 - 系统依赖（.deb）应预下载到 `packages/debs/`，构建时 `dpkg -i /tmp/debs/*.deb`，不推荐 `apt-get update`。
-- BGE 模型权重应预下载到 `packages/models/`（`bge-large-zh-v1.5`/`bge-reranker-v2-m3`），不推荐运行时从 HuggingFace 下载。embeddings/rerank 容器（第三方 TEI 镜像）通过 bind mount 挂载到容器内 `/data/<model_name>:ro`（只读），compose 文件中与命名卷 `embeddings_models`/`rerank_models`（可写 HF cache）并列配置。
+- BGE 模型权重应预下载到 `packages/models/`（`bge-base-zh-v1.5`/`bge-reranker-v2-m3`），不推荐运行时从 HuggingFace 下载。embeddings/rerank 容器（第三方 TEI 镜像）通过 bind mount 挂载到容器内 `/data/<model_name>:ro`（只读），compose 文件中与命名卷 `embeddings_models`/`rerank_models`（可写 HF cache）并列配置。
 - 环境变量推荐 `LANG=C.UTF-8` / `PYTHONIOENCODING=utf-8`。
 
 **容器编排核心约定（优先选择）**：

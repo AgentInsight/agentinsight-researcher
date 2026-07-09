@@ -1,7 +1,7 @@
 """混合检索器: BM25 + 向量 + RRF + Rerank.
 
 AGENTS.md 第 7 章硬约束:
-- 检索必须混合 BM25 + 向量 (bge-large-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
+- 检索必须混合 BM25 + 向量 (bge-base-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
 - 重排序默认不启用; 当 rerank_enabled=True 时经 bge-reranker-v2-m3, Top-K 召回后 rerank
 - score_threshold 默认 0.3, 低于阈值丢弃 (仅 rerank 启用时生效, 向量检索阶段不套用)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API

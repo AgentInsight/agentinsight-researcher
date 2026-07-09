@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
 from src.skills.researcher.scrapers import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -100,12 +102,20 @@ class BSMarkdownifyScraper(BaseScraper):
             while "\n\n\n" in markdown:
                 markdown = markdown.replace("\n\n\n", "\n\n")
 
-            # 提取图片 (对标 BeautifulSoupScraper)
-            image_urls: list[str] = []
-            for img in soup.find_all("img", limit=20):
-                src = img.get("src") or img.get("data-src")
-                if isinstance(src, str) and src.startswith("http"):
-                    image_urls.append(src)
+            # 提取图片 (v3 借鉴 GPTR: 按尺寸/class 评分排序, 取 Top-4)
+            from src.skills.researcher.scrapers.utils import (
+                get_relevant_images_from_soup,
+            )
+
+            image_urls = get_relevant_images_from_soup(soup, self.url, top_k=4)
+
+            # 显式释放大对象 (省 500MB-1GB):
+            # - html: 原始 HTML 字符串 (上限 5MB)
+            # - soup: BeautifulSoup DOM 树 (5-10x HTML, 可达 50MB)
+            # - content_html: 正文 HTML 字符串 (article/main/body 的 str 表示)
+            # markdown 已是最终产物, 保留返回; image_urls/title 为小对象, 无需 del.
+            # CPython 引用计数: del 立即触发析构, 无需等 GC; 此处变量均已定义, 无 NameError 风险.
+            del html, soup, content_html
 
             return {
                 "url": self.url,
@@ -118,6 +128,21 @@ class BSMarkdownifyScraper(BaseScraper):
         except ImportError:
             logger.info("markdownify 未安装, 降级链兜底: %s", self.url)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
+        except httpx.HTTPStatusError as e:
+            # 403/401/429 快速失败: 服务器层拒绝, 降级到 Playwright 也无法成功,
+            # 仅徒增内存 (Playwright chromium ~400MB).
+            # 将状态码写入 _http_status, 供降级链 _is_fast_fail() 检测后终止.
+            status_code = e.response.status_code
+            logger.warning(
+                "BS+markdownify HTTP %d (快速失败, 不降级): %s", status_code, self.url
+            )
+            return {
+                "url": self.url,
+                "content": "",
+                "title": "",
+                "image_urls": [],
+                "_http_status": status_code,
+            }
         except Exception as e:  # noqa: BLE001
             logger.warning("BS+markdownify 抓取失败 %s: %s", self.url, e)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
