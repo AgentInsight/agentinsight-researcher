@@ -129,6 +129,39 @@ services:
       retries: 5
       start_period: 180s
 
+  searxng:
+    # 元搜索引擎 (替代 DuckDuckGo 直连, 国内可用), 聚合 Bing/Baidu/Brave 等
+    # 仅绑定 127.0.0.1, agent 容器通过 compose 网络以服务名 searxng:8080 访问
+    image: docker.io/searxng/searxng:latest
+    restart: always
+    ports:
+      - "127.0.0.1:8099:8080"
+    env_file:
+      - .env
+    volumes:
+      # 配置文件 (只读挂载, 含引擎开关/limiter/redis 配置)
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      # 数据卷 (limiter 限流数据, 如启用 redis 则无需)
+      - searxng_data:/etc/searxng/data
+    # 资源限制 (元搜索引擎轻量, 限制内存防泄漏)
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 1.0
+    healthcheck:
+      # SearXNG 健康端点: /healthz (新版) 或 / (首页)
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz || curl -fsS -o /dev/null http://127.0.0.1:8080/"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   agent:
     build:
       context: .
@@ -153,6 +186,8 @@ services:
       embeddings:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      searxng:
         condition: service_healthy
       # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
     healthcheck:
@@ -182,4 +217,6 @@ volumes:
   embeddings_models:
     driver: local
   rerank_models:
+    driver: local
+  searxng_data:
     driver: local

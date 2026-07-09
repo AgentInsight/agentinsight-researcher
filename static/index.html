@@ -588,7 +588,7 @@
       <div class="config-grid">
         <div class="field">
           <label for="apiBase">API BaseURL</label>
-          <input type="text" id="apiBase" value="http://localhost:8066" placeholder="http://localhost:8066" />
+          <input type="text" id="apiBase" value="" placeholder="http://localhost:8066" />
         </div>
         <div class="field">
           <label for="modelInput">模型名</label>
@@ -2456,6 +2456,25 @@
 
     // 初始 focus
     msgInput.focus();
+
+    // ========== 自动推导 API BaseURL ==========
+    // 场景: Nginx 反代到子路径 (如 /agent/agentinsight-researcher/) 时,
+    //       默认值 http://localhost:8066 会让浏览器请求用户本机, 导致 "Failed to fetch".
+    // 策略: 若 input 为空, 根据当前页面 URL 自动推导 BaseURL.
+    //       - 直连 (如 http://host:8066/ 或 http://host:8066/index.html) → origin
+    //       - 子路径反代 (如 http://host/agent/agentinsight-researcher/) → origin + 子路径前缀
+    //       - 末尾不保留斜杠 (前端代码会自动拼接 /v1/...)
+    (function initApiBase() {
+      const input = $('apiBase');
+      if (input.value.trim()) return;  // 用户已手动填写则不覆盖
+      const loc = window.location;
+      let base = loc.origin + loc.pathname;
+      // 去掉末尾 index.html / index.htm
+      base = base.replace(/\/index\.html?$/i, '/');
+      // 去掉末尾斜杠 (前端代码用 base + '/v1/...' 拼接)
+      base = base.replace(/\/+$/, '');
+      input.value = base;
+    })();
   </script>
 </body>
 </html>

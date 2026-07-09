@@ -1,0 +1,396 @@
+# agentinsight-researcher CI 流水线
+# 严格遵循 AGENTS.md 第 13 章 CI 流水线顺序:
+#   1. 构建镜像 + 单元测试 (失败即终止)
+#   2. docker compose up -d + 等待全部健康检查通过
+#   3. 功能测试 → API 测试 → 回归测试 → e2e 测试 (按序, 前者失败后者不执行)
+#   4. 任一环节失败阻断合并; 全部通过后 docker compose down -v 清理
+#
+# 容器编排使用 -p agentinsight-cicd 项目名 (AGENTS.md 第 12 章容器命名约定, CI 专用后缀避免与本地冲突)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # 支持手动触发 (评测 Job 等)
+
+# 同一分支的并发运行取消旧的, 节省资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  COMPOSE_PROJECT: agentinsight-cicd
+
+jobs:
+  # ==========================================================================
+  # Job 1: lint-and-unit-test (构建期门禁, 不依赖外部服务)
+  # ==========================================================================
+  lint-and-unit-test:
+    name: Lint & Unit Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Mypy type check
+        run: mypy src/ --strict
+
+      - name: Unit tests
+        run: pytest tests/unit/ -q -m unit --cov=src --cov-report=term-missing
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-coverage
+          path: .coverage
+          retention-days: 7
+
+  # ==========================================================================
+  # Job 2: integration-test (容器栈集成测试, AGENTS.md 第 13 章部署后测试)
+  # ==========================================================================
+  integration-test:
+    name: Integration Test (Container Stack)
+    needs: lint-and-unit-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Create minimal .env for container stack
+        # AGENTS.md 第 11 章: 密钥仅环境变量注入, 禁止入仓
+        # CI 中使用占位符; 如需真实 LLM 调用, 在 GitHub Secrets 配置后引用
+        run: |
+          cat > .env <<'ENVEOF'
+          # ========== CI 最小化环境变量 (占位符, 非真实凭据) ==========
+          ENV=dev
+          ENABLE_TEST_PAGE=true
+
+          # ========== LLM 网关 (占位符, CI 集成测试不依赖真实 LLM) ==========
+          FAST_LLM=zhipuai/glm-4-flash
+          SMART_LLM=deepseek/deepseek-v4-flash
+          STRATEGIC_LLM=deepseek/deepseek-v4-pro
+          MAX_TOTAL_TOKENS=128000
+
+          # ========== LLM API Key (占位符) ==========
+          DEEPSEEK_API_KEY=sk-ci-placeholder
+          ZHIPU_API_KEY=sk-ci-placeholder
+          OPENAI_API_KEY=sk-ci-placeholder
+          ANTHROPIC_API_KEY=sk-ci-placeholder
+
+          # ========== 图像生成 ==========
+          IMAGE_GENERATION_ENABLED=false
+          IMAGE_MODEL=deepseek/deepseek-v4-flash
+          IMAGE_API_KEY=
+
+          # ========== 向量库 Qdrant ==========
+          QDRANT_URL=http://qdrant:6333
+          QDRANT_API_KEY=ci-qdrant-placeholder
+
+          # ========== Embeddings ==========
+          EMBEDDINGS_BASE_URL=http://embeddings:8088
+          EMBEDDINGS_API_KEY=ci-embeddings-placeholder
+
+          # ========== Rerank ==========
+          RERANK_ENABLED=false
+          RERANK_BASE_URL=http://rerank:8089
+          RERANK_API_KEY=
+
+          # ========== PostgreSQL ==========
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_USER=agis
+          POSTGRES_PASSWORD=ci-postgres-placeholder
+          POSTGRES_DB=agents
+
+          # ========== Redis ==========
+          REDIS_URL=redis://redis:6379/0
+          REDIS_AUTH=
+
+          # ========== 可观测性 (CI 占位符, SDK 降级为 NoopSpan) ==========
+          AGENTINSIGHT_PUBLIC_KEY=
+          AGENTINSIGHT_SECRET_KEY=
+          AGENTINSIGHT_HOST=https://agent.goldebridge.com
+
+          # ========== 用户身份 ==========
+          DEFAULT_USER_ID=ci-test-user
+          SELF_HOST=True
+
+          # ========== 搜索引擎 API Key (占位符) ==========
+          BOCHA_API_KEY=
+          METASO_API_KEY=
+          TAVILY_API_KEY=
+          EXA_API_KEY=
+          SERPAPI_KEY=
+          SERPER_API_KEY=
+          SEARCHAPI_API_KEY=
+          GITHUB_TOKEN=
+          CROSSREF_MAILTO=
+          UNPAYWALL_EMAIL=
+
+          # ========== 抓取 ==========
+          FIRECRAWL_API_KEY=
+
+          # ========== CORS ==========
+          CORS_ALLOW_ORIGINS=http://localhost:8066
+
+          # ========== RAGAS 评测 ==========
+          EVAL_LLM_MODEL=deepseek-chat
+          EVAL_LLM_API_KEY=
+          EVAL_LLM_API_BASE=https://api.deepseek.com/v1
+          EVAL_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+          EVAL_EMBEDDING_API_BASE=http://localhost:8088/v1
+          EVAL_EMBEDDING_API_KEY=
+          ENVEOF
+
+      - name: Start container stack
+        # AGENTS.md 第 12 章: -p agentinsight 项目名; CI 用 -cicd 后缀避免与本地冲突
+        # --wait 等待所有服务健康检查通过, --build 构建 agent 镜像
+        run: docker compose -p ${{ env.COMPOSE_PROJECT }} up -d --wait --build
+
+      - name: Wait for agent health check
+        # AGENTS.md 第 13 章: 容器栈健康后执行测试
+        # 双重保险: --wait 已等待健康检查, 再用 retry 循环确认 /health 端点
+        run: |
+          echo "等待 agent /health 端点就绪..."
+          MAX_RETRIES=30
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8066/health || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ agent /health 就绪 (attempt $i/$MAX_RETRIES, HTTP $HTTP_CODE)"
+              exit 0
+            fi
+            echo "⏳ 等待中... (attempt $i/$MAX_RETRIES, HTTP $HTTP_CODE)"
+            sleep 5
+          done
+          echo "❌ agent /health 在 $MAX_RETRIES 次重试后仍未就绪"
+          docker compose -p ${{ env.COMPOSE_PROJECT }} ps
+          docker compose -p ${{ env.COMPOSE_PROJECT }} logs agent --tail 100
+          exit 1
+
+      - name: Show container stack status
+        run: docker compose -p ${{ env.COMPOSE_PROJECT }} ps
+
+      - name: Functional tests
+        # AGENTS.md 第 13 章: 功能测试在容器栈健康后执行
+        env:
+          AGENT_URL: http://localhost:8066
+        run: pytest tests/functional/ -q -m functional
+
+      - name: API tests
+        # AGENTS.md 第 13 章: API 测试覆盖 OpenAI 兼容端点
+        env:
+          AGENT_URL: http://localhost:8066
+        run: pytest tests/api/ -q -m api
+
+      - name: Regression tests
+        # AGENTS.md 第 13 章: 回归测试为合并门禁, 不推荐跳过
+        env:
+          AGENT_URL: http://localhost:8066
+        run: pytest tests/regression/ -q -m regression
+
+      - name: E2E tests
+        # AGENTS.md 第 13 章: e2e 覆盖完整链路 提问→检索→工具调用→流式响应→会话持久化
+        env:
+          AGENT_URL: http://localhost:8066
+        run: pytest tests/e2e/ -q -m e2e
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== agent logs (last 200 lines) ==="
+          docker compose -p ${{ env.COMPOSE_PROJECT }} logs agent --tail 200 || true
+          echo "=== postgres logs ==="
+          docker compose -p ${{ env.COMPOSE_PROJECT }} logs postgres --tail 50 || true
+          echo "=== qdrant logs ==="
+          docker compose -p ${{ env.COMPOSE_PROJECT }} logs qdrant --tail 50 || true
+          echo "=== embeddings logs ==="
+          docker compose -p ${{ env.COMPOSE_PROJECT }} logs embeddings --tail 50 || true
+
+      - name: Cleanup container stack
+        # AGENTS.md 第 13 章: 全部通过后 docker compose down -v 清理
+        if: always()
+        run: docker compose -p ${{ env.COMPOSE_PROJECT }} down -v
+
+  # ==========================================================================
+  # Job 3: evaluation (评测门禁, AGENTS.md 第 10 章)
+  # 仅 push 到 main 触发 (PR 不跑评测, 太慢); 支持 workflow_dispatch 手动触发
+  # 评测需要真实 LLM API Key, 需在 GitHub Secrets 配置 EVAL_LLM_API_KEY 等
+  # ==========================================================================
+  evaluation:
+    name: Evaluation Gate (RAGAS + DeepEval)
+    needs: integration-test
+    # 仅 push 到 main 或手动触发时运行 (PR 不跑评测)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true # 评测可能因缺少真实 API Key 而失败, 不阻断 PR 合并
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Create .env for evaluation
+        # 评测需要真实 LLM API Key, 从 GitHub Secrets 注入 (AGENTS.md 第 11 章)
+        env:
+          EVAL_LLM_API_KEY: ${{ secrets.EVAL_LLM_API_KEY }}
+          EVAL_EMBEDDING_API_KEY: ${{ secrets.EVAL_EMBEDDING_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          cat > .env <<ENVEOF
+          ENV=dev
+          AGENT_URL=http://localhost:8066
+          EVAL_LLM_MODEL=deepseek-chat
+          EVAL_LLM_API_KEY=${EVAL_LLM_API_KEY}
+          EVAL_LLM_API_BASE=https://api.deepseek.com/v1
+          EVAL_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+          EVAL_EMBEDDING_API_BASE=http://localhost:8088/v1
+          EVAL_EMBEDDING_API_KEY=${EVAL_EMBEDDING_API_KEY}
+          DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+          ENVEOF
+
+      - name: Start container stack for evaluation
+        run: docker compose -p ${{ env.COMPOSE_PROJECT }} up -d --wait --build
+
+      - name: Wait for agent health check
+        run: |
+          MAX_RETRIES=30
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8066/health || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ agent /health 就绪"
+              exit 0
+            fi
+            echo "⏳ 等待中... (attempt $i/$MAX_RETRIES)"
+            sleep 5
+          done
+          exit 1
+
+      - name: RAGAS evaluation
+        # AGENTS.md 第 10 章门禁: faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7
+        # evals/rag/run.py 存在, 直接运行
+        env:
+          AGENT_URL: http://localhost:8066
+        run: python -m evals.rag.run --dataset evals/rag/dataset.json
+
+      - name: DeepEval evaluation
+        # AGENTS.md 第 10 章门禁: 任务完成率 ≥0.9 / 工具调用正确率 ≥0.95 / 幻觉率 ≤0.1
+        # evals/agent/run.py 可能尚未实现, 条件执行
+        run: |
+          if [ -f evals/agent/run.py ]; then
+            echo "evals/agent/run.py 存在, 执行 DeepEval 评测..."
+            python -m evals.agent.run --dataset evals/agent/dataset.json
+          else
+            echo "⚠️ evals/agent/run.py 不存在, 跳过 DeepEval 评测"
+          fi
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-reports
+          path: |
+            evals/rag/results/
+            evals/agent/results/
+          retention-days: 30
+
+      - name: Cleanup container stack
+        if: always()
+        run: docker compose -p ${{ env.COMPOSE_PROJECT }} down -v
+
+  # ==========================================================================
+  # Job 4: build-and-push-docker (仅 main 分支 push 触发, 推送到 GHCR)
+  # ==========================================================================
+  build-and-push-docker:
+    name: Build & Push Docker Image (GHCR)
+    needs: integration-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # 推送到 GHCR 需要 packages: write 权限
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ github.sha }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

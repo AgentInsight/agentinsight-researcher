@@ -1,0 +1,25 @@
+# agentinsight-researcher 开发依赖源文件
+# 开发依赖源文件 - 使用 pip-compile 生成 requirements-dev.txt 锁定版本
+# 重新生成: pip-compile requirements-dev.in
+# 本文件在运行时依赖基础上追加: 评测 / 测试 / 代码质量 / 开发工具
+# 生产镜像只装 requirements.txt, 开发依赖不进入生产镜像 (见 Dockerfile)
+
+# 引用运行时依赖 (pip-compile 会合并并解析传递依赖)
+-r requirements.in
+
+# === 评测 (AGENTS.md 第 10 章, CI 门禁) ===
+ragas>=0.2
+deepeval>=2.0
+
+# === 测试 (AGENTS.md 第 13 章) ===
+# 注: httpx 已在 requirements.in (搜索引擎), 此处不重复声明
+pytest>=8.3
+pytest-asyncio>=0.24
+pytest-cov>=6.0
+
+# === 代码质量 (AGENTS.md 第 2 章) ===
+ruff>=0.8
+mypy>=1.13
+
+# === 开发工具 ===
+pip-tools>=7.4  # pip-compile / pip-sync, 用于生成与同步锁定文件

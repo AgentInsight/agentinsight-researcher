@@ -1,0 +1,101 @@
+# agentinsight-researcher 运行时依赖源文件
+# 运行时依赖源文件 - 使用 pip-compile 生成 requirements.txt 锁定版本
+# 重新生成: pip-compile requirements.in
+# 严格遵守 AGENTS.md 第 1/4/9/10 章技术栈与禁用清单
+# 禁用: langchain 全家桶(仅 langchain-core 可用) / AgentExecutor / AutoGen / CrewAI / LlamaIndex
+#        LangSmith / Langfuse / Pinecone / 厂商 SDK 直连 / Memcached / MySQL / pickle 持久化
+#
+# 本文件仅包含运行时必需依赖; 评测/测试/代码质量工具见 requirements-dev.in
+
+# === 编排内核 (AGENTS.md 第 5 章) ===
+langgraph>=1.2
+langgraph-checkpoint>=4.1
+langgraph-checkpoint-postgres>=2.0
+langchain-core>=1.4
+langchain-mcp-adapters>=0.1
+langchain-protocol>=0.0.18
+
+# === LLM 网关 (AGENTS.md 第 9 章, 禁厂商 SDK 直连) ===
+litellm>=1.6
+openai>=2.43  # 仅作 LiteLLM 底层依赖, 业务代码禁止直接使用
+
+# === MCP 工具协议 (AGENTS.md 第 9 章) ===
+mcp>=1.0
+
+# === Web 框架 (AGENTS.md 第 1 章) ===
+fastapi>=0.115
+uvicorn[standard]>=0.49
+sse-starlette>=2.1
+starlette>=0.40  # fastapi 底层依赖, 但 middleware.py 直接 import, 需显式声明
+python-multipart>=0.0.32
+aiofiles>=25.1
+
+# === 数据校验 (AGENTS.md 第 1 章) ===
+pydantic>=2.10
+pydantic-settings>=2.14
+
+# === 关系库 + 缓存 (AGENTS.md 第 1/6 章, Checkpointer+会话) ===
+psycopg[binary]>=3.2
+psycopg-pool>=3.2  # langgraph-checkpoint-postgres 依赖, checkpointer.py 直接 import
+redis>=5.0
+asyncpg>=0.30
+
+# === 向量库 (AGENTS.md 第 1/7 章) ===
+qdrant-client>=1.18
+
+# === Embeddings + Rerank (AGENTS.md 第 7 章, bge-large-zh-v1.5 固定 1024 维) ===
+# 远程 TEI 服务调用, 无需本地模型包; 仅需 HTTP 客户端
+
+# === FastEmbed 本地 Embeddings (上下文压缩用, bge-small-zh-v1.5 ONNX) ===
+fastembed>=0.4  # ONNX INT8 量化, 本地 CPU 推理, ~100MB 内存
+onnxruntime>=1.17  # FastEmbed 底层依赖
+
+# === BM25 + 中文分词 (AGENTS.md 第 7 章) ===
+rank-bm25>=0.2.2
+jieba>=0.42.1
+
+# === 可观测性 (AGENTS.md 第 10 章, 禁 LangSmith/Langfuse/OTel 原生 API) ===
+agentinsight-sdk>=0.1.5
+opentelemetry-sdk>=1.42  # 仅作 agentinsight-sdk 底层依赖, 业务代码禁止直接使用
+opentelemetry-exporter-otlp-proto-http>=1.42
+
+# === 搜索引擎 (中文优先, 用户需求 5) ===
+ddgs>=9.0  # 无需 Key 兜底 (duckduckgo_search v8+ 已重命名为 ddgs)
+httpx>=0.28  # 博查/Tavily/Exa/秘塔/CrossRef/GDELT/HackerNews/GitHub/Arxiv 通用 HTTP
+
+# === 网页抓取 (GPT Researcher 模式, 用户需求 12) ===
+beautifulsoup4>=4.12
+lxml>=5.0
+lxml-html-clean>=0.4
+readability-lxml>=0.8.4
+playwright>=1.49  # JS 渲染抓取(可选, 镜像内安装 chromium)
+PyMuPDF>=1.24  # PDF 抓取与解析
+trafilatura>=1.10  # 网页内容提取, 轻量级去噪, LLM 友好 Markdown 输出
+markdownify>=0.14.1  # HTML→Markdown 转换
+
+# === 文档加载 (用户需求 8, 文件上传) ===
+# 仅 langchain-core 允许, 文档加载器自研薄封装避免引入 langchain-community
+python-docx>=1.1  # DOCX 文件解析
+openpyxl>=3.1  # XLSX 文件解析
+python-pptx>=0.6  # PPTX 文件解析
+markitdown>=0.0.1a2  # Office 文档转 Markdown (P2-03)
+
+# === 报告输出 (用户需求 6, MD/HTML/PDF) ===
+jinja2>=3.1  # HTML 模板
+weasyprint>=62.0  # PDF 输出(纯 Python, 中文支持好)
+mistune>=3.0  # Markdown 解析
+
+# === Token 优化 (用户需求 10, GPT Researcher 模式) ===
+tiktoken>=0.7  # Token 计数
+
+# === JSON 容错 (GPT Researcher 模式) ===
+json-repair>=0.30
+json5>=0.9.25
+
+# === 工具库 ===
+tenacity>=9.0  # 重试
+orjson>=3.10  # 快速 JSON
+pyyaml>=6.0  # 配置文件
+python-dotenv>=1.0  # .env 加载
+cachetools>=5.5  # 缓存
+numpy>=2.0  # 语义路由矩阵化余弦相似度

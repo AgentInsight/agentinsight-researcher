@@ -82,9 +82,11 @@ ruff_*.txt
 # 数据
 data/
 sessions/
-/docs
 /.env.qa
 /models/
+
+# docs/ 目录已公开 (开源治理, 方案A: 公开面向用户的设计文档)
+# 如需临时排除特定文档, 使用 docs/ 具体文件路径而非整个目录
 
 # FastEmbed ONNX 模型文件 (按需下载, 不入仓, 部署时放入容器)
 # 模型下载: python scripts/convert_bge_small_zh_to_onnx.py

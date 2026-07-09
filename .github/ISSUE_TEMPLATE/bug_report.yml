@@ -1,0 +1,117 @@
+name: 🐛 Bug 报告
+description: 报告一个 Bug 帮助我们改进
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告 Bug! 请尽量填写完整信息以便我们快速定位。
+
+        ⚠️ **安全提醒**: 禁止在 Issue 中包含 API Key、Token、密码、JWT、用户 PII 等敏感信息
+        (详见 `AGENTS.md` 第 11 章安全合规红线)。如发现安全漏洞, 请通过
+        [Security Policy](https://github.com/AgentInsight/agentinsight-researcher/security/policy)
+        私下报告, 勿公开 Issue。
+
+        📖 提交前请先查阅 `README.md` 与 `AGENTS.md`, 确认非配置/使用问题。
+  - type: dropdown
+    id: report_type
+    attributes:
+      label: 报告类型
+      description: 请选择本次报告的类型
+      options:
+        - Bug (功能不符合预期)
+        - Feature (新功能建议)
+        - Question (使用问题)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: 请提供完整的环境信息, 帮助我们复现问题
+      value: |
+        - OS: [如 Windows 11 / Ubuntu 22.04 / macOS 14]
+        - Python: [如 3.12.1, 项目要求 ≥3.11]
+        - Docker: [如 24.0.7, 离线部署必填]
+        - Docker Compose: [如 2.23.3, 容器化部署必填]
+        - 项目版本: [git commit hash, 通过 `git rev-parse HEAD` 获取]
+        - 部署模式: [QA离线 / 生产联网 / 生产离线]
+        - Agent 名称: [如 researcher, 见 `agent_id`]
+        - LLM 模型: [如 deepseek/deepseek-chat, 经 LiteLLM 网关]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 请提供可复现的最小步骤, 必要时附带请求体/配置(脱敏后)
+      placeholder: |
+        1. 启动栈: `docker compose -p agentinsight -f docker-compose.yml up -d`
+        2. 发送请求: `POST /v1/chat/completions` body 如下(已脱敏)
+           ```json
+           { "session_id": "...", "messages": [...] }
+           ```
+        3. 观察到...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你预期应该发生什么
+      placeholder: 描述期望的行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么
+      placeholder: 描述实际行为, 含错误信息/异常堆栈(脱敏后)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        请粘贴相关日志或错误堆栈(可折叠)。
+        ⚠️ **禁止包含 API Key / Token / JWT / 密码 / 用户 PII**;
+        日志中的敏感字段请用 `***` 替换后再粘贴。
+      render: shell
+      placeholder: |
+        <details><summary>日志</summary>
+
+        ```
+        在此粘贴日志...
+        ```
+
+        </details>
+    validations:
+      required: false
+  - type: dropdown
+    id: production_impact
+    attributes:
+      label: 是否影响生产
+      description: 该问题是否影响生产环境
+      options:
+        - 是 (生产环境受影响, 需优先处理)
+        - 否 (仅开发/QA 环境)
+        - 不适用 (功能建议/使用问题)
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 自查清单
+      description: 提交前请确认
+      options:
+        - label: 我已查阅 `README.md` 与 `AGENTS.md`, 确认非配置/使用问题
+          required: true
+        - label: 我已搜索现有 Issue, 确认无重复报告
+          required: true
+        - label: 我已对日志/请求体中的 API Key、Token、密码、PII 等敏感信息脱敏
+          required: true
+        - label: 我使用的是项目支持的版本 (Python ≥3.11, LangGraph ≥1.2 等)
+          required: true

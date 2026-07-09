@@ -1,0 +1,64 @@
+# SearXNG 配置 (国内优化, 无 redis, 不开启限流)
+# 部署: bind mount 到容器 /etc/searxng/settings.yml (只读)
+# 使用默认配置作为基础, 按国内网络环境覆盖引擎开关与语言
+
+use_default_settings: true
+
+general:
+  instance_name: "AgentInsight SearXNG"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh-CN"
+  formats:
+    - html
+    - json
+
+server:
+  # secret_key: 容器间通信鉴权用, 生产环境请替换 (python -c "import secrets; print(secrets.token_hex(32))")
+  secret_key: "7b27f252d4b4800da343118e3f3ce850f0a70c00f8b75a0d8fbd51e9f1ff9c68"
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  image_proxy: true
+
+ui:
+  static_use_hash: true
+
+# 无需 redis (limiter=false, 无限流数据需持久化)
+
+engines:
+  # 关闭国内不稳定引擎
+  - name: Google
+    disabled: true
+  - name: Yahoo
+    disabled: true
+  - name: Yandex
+    disabled: true
+  # 开启国内可访问引擎 (显式声明)
+  - name: Bing
+    disabled: false
+  - name: Baidu
+    disabled: false
+  - name: Brave
+    disabled: false
+  - name: DuckDuckGo
+    disabled: false
+  - name: Wikipedia
+    disabled: false
+  - name: Wikidata
+    disabled: false
+  - name: Arxiv
+    disabled: false
+  - name: PubMed
+    disabled: false
+  - name: Semantic Scholar
+    disabled: false
+  - name: GitHub
+    disabled: false
+
+outgoing:
+  request_timeout: 10
+  max_request_timeout: 15

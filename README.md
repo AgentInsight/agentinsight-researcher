@@ -2,10 +2,16 @@
 
 > **中文优先的研究分析智能体** | **Chinese-first research analysis agent**
 
-[![Python](https://img.shields.io/badge/Python-≥3.11-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-≥0.115-green.svg)](https://fastapi.tiangolo.com/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-≥1.2-purple.svg)](https://langchain-ai.github.io/langgraph/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/AgentInsight/agentinsight-researcher/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentInsight/agentinsight-researcher/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/AgentInsight/agentinsight-researcher/branch/main/graph/badge.svg)](https://codecov.io/gh/AgentInsight/agentinsight-researcher)
+[![GitHub release](https://img.shields.io/github/v/release/AgentInsight/agentinsight-researcher)](https://github.com/AgentInsight/agentinsight-researcher/releases)
+[![GitHub issues](https://img.shields.io/github/issues/AgentInsight/agentinsight-researcher)](https://github.com/AgentInsight/agentinsight-researcher/issues)
+[![GitHub stars](https://img.shields.io/github/stars/AgentInsight/agentinsight-researcher)](https://github.com/AgentInsight/agentinsight-researcher)
+[![License](https://img.shields.io/github/license/AgentInsight/agentinsight-researcher)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-%E2%89%A53.11-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-%E2%89%A50.115-green.svg)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-%E2%89%A51.2-purple.svg)](https://langchain-ai.github.io/langgraph/)
+[![code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 
 [中文](#中文) | [English](#english)
 
@@ -1054,6 +1060,11 @@ docker compose -p agentinsight down -v
 
 [MIT License](LICENSE) — 商业友好,允许修改、分发、商用,但需保留版权声明和许可证。
 
+## 商标声明
+
+"AgentInsight" 是 AgentInsight 团队的商标。本项目使用该名称仅用于项目标识,
+不构成对商标的授权。第三方在派生项目中应避免使用 "AgentInsight" 商标,以免造成混淆。
+
 ---
 ---
 
@@ -2083,3 +2094,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for th
 ## License
 
 [MIT License](LICENSE) — Business-friendly, allows modification, distribution, and commercial use, but requires retaining the copyright notice and license.
+
+## Trademark Notice
+
+"AgentInsight" is a trademark of the AgentInsight team. This project uses the name for project identification only and does not constitute a trademark license. Third parties should avoid using the "AgentInsight" trademark in derivative projects to prevent confusion.

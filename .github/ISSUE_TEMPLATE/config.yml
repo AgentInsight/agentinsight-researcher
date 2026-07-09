@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 文档
+    url: https://github.com/AgentInsight/agentinsight-researcher/blob/main/README.md
+    about: 先查阅 README 和 AGENTS.md
+  - name: 💬 讨论
+    url: https://github.com/AgentInsight/agentinsight-researcher/discussions
+    about: 使用问题请在 Discussions 讨论
+  - name: 🔒 安全漏洞
+    url: https://github.com/AgentInsight/agentinsight-researcher/security/policy
+    about: 安全漏洞请私下报告，勿公开 Issue

@@ -144,7 +144,7 @@
 - **Minor**(0.X.0):向后兼容的功能新增
 - **Patch**(0.0.X):向后兼容的 Bug 修复
 
-详细变更请参考 [GitHub Releases](https://github.com/assafelovic/gpt-researcher/releases) 或 git log。
+详细变更请参考 [GitHub Releases](https://github.com/AgentInsight/agentinsight-researcher/releases) 或 git log。
 
 ---
 
@@ -288,4 +288,4 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Minor** (0.X.0): Backward-compatible feature additions
 - **Patch** (0.0.X): Backward-compatible bug fixes
 
-For detailed changes, refer to [GitHub Releases](https://github.com/assafelovic/gpt-researcher/releases) or git log.
+For detailed changes, refer to [GitHub Releases](https://github.com/AgentInsight/agentinsight-researcher/releases) or git log.
