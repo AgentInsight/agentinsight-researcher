@@ -93,3 +93,4 @@ sessions/
 test_results/
 tests/manual/
 /temp
+/evals/rag/results
