@@ -113,7 +113,7 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
         )
         await pool.open()
 
-        checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]  # mypy 无法从 kwargs 推断 row_factory=dict_row 的行类型
+        checkpointer = AsyncPostgresSaver(conn=pool)
         await checkpointer.setup()
 
         logger.info(

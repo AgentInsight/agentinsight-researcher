@@ -212,9 +212,7 @@ class FastEmbedClient:
         # 大批量: 分批并行
         batch_size = self._PARALLEL_BATCH_SIZE
         batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
-        batch_results = await asyncio.gather(
-            *[asyncio.to_thread(_embed_batch, b) for b in batches]
-        )
+        batch_results = await asyncio.gather(*[asyncio.to_thread(_embed_batch, b) for b in batches])
         flat: list[list[float]] = []
         for r in batch_results:
             flat.extend(r)

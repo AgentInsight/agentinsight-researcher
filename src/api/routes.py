@@ -28,8 +28,8 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from langchain_core.messages import AIMessage
-from pydantic import BaseModel, Field
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from pydantic import BaseModel, Field, StrictBool
 
 from src.api.middleware import (
     get_request_agent_id,
@@ -134,6 +134,80 @@ async def _has_report(session_id: str) -> bool:
     return False
 
 
+async def _load_chitchat_history(session_id: str) -> list[dict[str, str]]:
+    """从 chat graph checkpointer 加载对话历史 (会话持久化).
+
+    AGENTS.md 第 6 章: 会话级数据通过 Checkpointer 隔离, thread_id 从请求上下文注入.
+    ChitchatResponder 绕过 LangGraph 图, 需手动从 checkpointer 读取历史消息,
+    否则跨请求上下文丢失 (Bug: 会话持久化测试 test_session_id_consistency 失败).
+
+    Args:
+        session_id: 会话 ID (thread_id)
+
+    Returns:
+        历史消息列表 [{"role": "user"/"assistant", "content": "..."}]
+    """
+    try:
+        graph = await _get_chat_graph()
+        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        state_snapshot = await graph.aget_state(config)
+        if not state_snapshot or not state_snapshot.values:
+            return []
+        messages: list[BaseMessage] = state_snapshot.values.get("messages", []) or []
+        history: list[dict[str, str]] = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                history.append({"role": "user", "content": content})
+            elif isinstance(msg, AIMessage):
+                content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                history.append({"role": "assistant", "content": content})
+        return history
+    except Exception as e:  # noqa: BLE001
+        logger.warning("加载闲聊历史失败 (session=%s): %s", session_id, e)
+        return []
+
+
+async def _save_chitchat_response(
+    session_id: str,
+    query: str,
+    response: str,
+    *,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+) -> None:
+    """将 ChitchatResponder 的响应保存回 chat graph checkpointer (会话持久化).
+
+    AGENTS.md 第 6 章: 会话持久化到 Postgres Checkpointer.
+    ChitchatResponder 绕过 LangGraph 图, 需手动写入 checkpointer,
+    否则下一次请求无法读到本次对话上下文.
+
+    使用 graph.aupdate_state 增量写入 messages (add_messages reducer 自动合并),
+    不触发节点执行 (as_node=None).
+
+    Args:
+        session_id: 会话 ID (thread_id)
+        query: 用户查询 (保存为 HumanMessage)
+        response: ChitchatResponder 响应 (保存为 AIMessage)
+        user_id: 用户 ID (可选, 写入 state 元数据)
+        agent_id: Agent ID (可选, 写入 state 元数据)
+    """
+    try:
+        graph = await _get_chat_graph()
+        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        await graph.aupdate_state(
+            config,
+            {
+                "messages": [HumanMessage(content=query), AIMessage(content=response)],
+                "session_id": session_id,
+                "user_id": user_id,
+                "agent_id": agent_id,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("保存闲聊响应失败 (session=%s): %s", session_id, e)
+
+
 # ========== 请求/响应模型 (OpenAI 兼容) ==========
 
 
@@ -149,7 +223,7 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = "agentinsight-researcher"
     messages: list[ChatMessage]
-    stream: bool = False
+    stream: StrictBool = False
     temperature: float | None = None
     max_tokens: int | None = None
     # 扩展字段 (非 OpenAI 标准, 用于研究配置)
@@ -273,16 +347,25 @@ async def chat_completions(
             _infer_off_topic_category(query) if intent == QueryIntent.OFF_TOPIC else "greeting"
         )
         responder = get_chitchat_responder()
+        # 会话持久化: 从 checkpointer 加载历史并注入 ChitchatResponder (修复 test_session_id_consistency)
+        history = await _load_chitchat_history(session_id)
         if intent == QueryIntent.SHORT_QUERY:
             if request.stream:
                 return StreamingResponse(
                     _stream_chitchat(
                         responder.respond_short_query(
-                            query, session_id=session_id, user_id=user_id, stream=True
+                            query,
+                            session_id=session_id,
+                            user_id=user_id,
+                            stream=True,
+                            history=history,
                         ),
                         request,
                         session_id,
                         intent=intent.value,
+                        save_query=query,
+                        save_user_id=user_id,
+                        save_agent_id=agent_id,
                     ),
                     media_type="text/event-stream",
                     headers={
@@ -291,17 +374,27 @@ async def chat_completions(
                         "X-Session-Id": session_id,
                     },
                 )
-            return _with_session_id(
-                await _run_chitchat(
-                    responder.respond_short_query(
-                        query, session_id=session_id, user_id=user_id, stream=False
-                    ),
-                    request,
-                    session_id,
-                    intent=intent.value,
+            response = await _run_chitchat(
+                responder.respond_short_query(
+                    query,
+                    session_id=session_id,
+                    user_id=user_id,
+                    stream=False,
+                    history=history,
                 ),
+                request,
                 session_id,
+                intent=intent.value,
             )
+            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer
+            await _save_chitchat_response(
+                session_id,
+                query,
+                response.choices[0]["message"]["content"],
+                user_id=user_id,
+                agent_id=agent_id,
+            )
+            return _with_session_id(response, session_id)
         else:  # OFF_TOPIC
             if request.stream:
                 return StreamingResponse(
@@ -312,10 +405,14 @@ async def chat_completions(
                             session_id=session_id,
                             user_id=user_id,
                             stream=True,
+                            history=history,
                         ),
                         request,
                         session_id,
                         intent=intent.value,
+                        save_query=query,
+                        save_user_id=user_id,
+                        save_agent_id=agent_id,
                     ),
                     media_type="text/event-stream",
                     headers={
@@ -324,21 +421,28 @@ async def chat_completions(
                         "X-Session-Id": session_id,
                     },
                 )
-            return _with_session_id(
-                await _run_chitchat(
-                    responder.respond_off_topic(
-                        query,
-                        category=category,
-                        session_id=session_id,
-                        user_id=user_id,
-                        stream=False,
-                    ),
-                    request,
-                    session_id,
-                    intent=intent.value,
+            response = await _run_chitchat(
+                responder.respond_off_topic(
+                    query,
+                    category=category,
+                    session_id=session_id,
+                    user_id=user_id,
+                    stream=False,
+                    history=history,
                 ),
+                request,
                 session_id,
+                intent=intent.value,
             )
+            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer
+            await _save_chitchat_response(
+                session_id,
+                query,
+                response.choices[0]["message"]["content"],
+                user_id=user_id,
+                agent_id=agent_id,
+            )
+            return _with_session_id(response, session_id)
 
     # P1-Future-06: CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
     # 显式指定 report_type 时强制走 researcher graph (用户明确要新研究)
@@ -1040,17 +1144,25 @@ async def _stream_chitchat(
     session_id: str,
     *,
     intent: str = "short_query",
+    save_query: str | None = None,
+    save_user_id: str | None = None,
+    save_agent_id: str | None = None,
 ) -> Any:
     """流式 SSE 闲聊响应生成器 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0).
 
     从 ChitchatResponder 的 AsyncIterator 逐块 yield 内容, 包装为 SSE 格式.
     AGENTS.md 第 10 章: trace_agent 根 span.
 
+    会话持久化: 流式结束后将完整响应保存回 checkpointer (save_query 非空时).
+
     Args:
         content_iterator: ChitchatResponder 返回的 AsyncIterator[str]
         request: OpenAI 兼容请求
         session_id: 会话 ID
         intent: 意图类型 ("short_query" 或 "off_topic")
+        save_query: 用户查询 (非空时触发保存, 会话持久化)
+        save_user_id: 用户 ID (保存时注入 state 元数据)
+        save_agent_id: Agent ID (保存时注入 state 元数据)
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -1075,6 +1187,9 @@ async def _stream_chitchat(
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
 
+    # 收集流式内容 (用于会话持久化保存)
+    collected_content: list[str] = []
+
     span_name = f"agentinsight-researcher-{intent}"
     async with trace_agent(
         name=span_name,
@@ -1089,11 +1204,24 @@ async def _stream_chitchat(
         # 逐块 yield FAST_LLM 流式内容
         async for chunk in content_iterator:
             if chunk:
+                collected_content.append(chunk)
                 yield _sse_chunk({"content": chunk})
 
     # SSE 末块 (finish_reason)
     yield _sse_chunk({}, finish_reason="stop")
     yield "data: [DONE]\n\n"
+
+    # 会话持久化: 流式结束后保存完整响应回 checkpointer
+    if save_query is not None:
+        full_response = "".join(collected_content)
+        if full_response:
+            await _save_chitchat_response(
+                session_id,
+                save_query,
+                full_response,
+                user_id=save_user_id,
+                agent_id=save_agent_id,
+            )
 
 
 async def _run_chitchat(

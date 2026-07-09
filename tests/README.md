@@ -19,6 +19,9 @@
 > **集成测试** 跨分层落地: `unit/test_*_integration.py` (mock 化集成, 构建期) 与
 > `functional/test_*_e2e.py` (容器栈端到端, 部署后) 均承载集成场景.
 
+> **手动调试脚本** (`manual/`): 非自动化测试, 不纳入 CI 流水线, pytest 自动忽略
+> (`addopts = "--ignore=tests/manual"`), 已加入 `.gitignore` 不入仓. 详见第 9 节.
+
 ## 2. 7 类测试目录映射
 
 ```
@@ -33,6 +36,8 @@ tests/
 │   ├── test_tei_circuit_breaker.py         # 安全: TEI 熔断器
 │   ├── test_api_security.py                # 安全: API 鉴权/注入
 │   ├── test_security_injection.py          # 安全: Prompt Injection
+│   ├── test_metaso_searcher.py             # 秘塔搜索: payload/headers/响应解析 (mock httpx)
+│   ├── test_pdf_docx_fonts.py              # PDF/DOCX 字体: Dockerfile + debs 静态检查
 │   └── ...
 ├── functional/     # 功能测试 (部署后容器栈)
 │   ├── test_smoke_functional.py            # 冒烟: 容器栈健康检查
@@ -60,6 +65,8 @@ tests/
 │   ├── test_latency.py / test_throughput.py / test_load.py
 │   ├── test_performance_baseline.py
 │   └── test_performance_rag.py
+├── manual/         # 手动调试脚本 (非自动化测试, pytest --ignore 跳过, .gitignore 不入仓)
+│   └── README.md                          # 用途说明: 临时联调/排查脚本
 ├── conftest.py     # 全局配置: .env 加载 + 容器栈可达性自动跳过
 └── REPORT.md       # 测试报告
 ```
@@ -225,8 +232,112 @@ MCP 工具调用 (`src/skills/researcher/mcp_coordinator.py`) 测试分布在两
 - **mock 化**: 单元测试不依赖外部服务 (Postgres/Qdrant/Redis/LLM), 全部 mock.
 - **容器栈依赖**: 功能/回归/API/e2e/性能测试在 `docker compose up -d` 且全部容器
   `service_healthy` 后执行; 容器栈未运行时自动跳过 (`conftest.py` 钩子).
-- **CI 流水线顺序**:
+- **CI 流水线顺序** (AGENTS.md 第 13 章):
   1. 构建镜像 + 单元测试 (失败即终止)
   2. `docker compose up -d` + 等待全部健康检查通过
   3. 功能 → API → 回归 → e2e (按序, 前者失败后者不执行)
   4. 任一环节失败阻断合并; 全部通过后 `docker compose down -v` 清理
+
+## 7. 7 层测试分层执行命令与触发时机
+
+> 与 AGENTS.md 第 13 章对齐, 每层独立目录, 执行环境与触发时机严格区分.
+
+| 层级 | 目录 | 执行环境 | 触发时机 | 执行命令 |
+|------|------|---------|---------|---------|
+| 单元 | `unit/` | 本地 / 构建期 | 每次 commit、Docker build | `pytest tests/unit/ -v -m unit` |
+| 功能 | `functional/` | 部署后容器栈 | 容器栈 `service_healthy` 后 | `pytest tests/functional/ -v -m functional` |
+| API | `api/` | 部署后容器栈 | 容器栈健康后 | `pytest tests/api/ -v -m api` |
+| 回归 | `regression/` | 部署后容器栈 | 合并 main 前门禁 | `pytest tests/regression/ -v -m regression` |
+| e2e | `e2e/` | 部署后容器栈 | 合并 main 前 / 发布前 | `pytest tests/e2e/ -v -m e2e` |
+| 性能 | `performance/` | 部署后容器栈 | 延迟/吞吐/负载验证 | `pytest tests/performance/ -v -m performance` |
+| 探索性 | `exploratory/` | 部署后容器栈 | 边界/降级场景 (非门禁) | `pytest tests/exploratory/ -v -m exploratory` |
+
+**容器栈依赖测试执行流程** (功能/回归/API/e2e/性能/探索性):
+
+```bash
+# 1. 启动容器栈 (优先使用构建脚本, AGENTS.md 第 12 章)
+docker compose -p agentinsight -f docker-compose.yml up -d --wait
+# QA 模式: docker-build.qa.bat
+# 生产联网: docker-build.sh
+# 生产离线: docker-build.offline.sh
+
+# 2. 注入测试目标地址 (宿主机访问)
+set AGENT_URL=http://127.0.0.1:8066
+
+# 3. 执行容器栈依赖测试
+pytest tests/functional/ tests/api/ tests/regression/ tests/e2e/ -v
+
+# 4. 清理
+docker compose -p agentinsight down -v
+```
+
+> 容器栈未运行时, `tests/conftest.py` 的 `pytest_collection_modifyitems` 钩子
+> 自动跳过 `functional`/`regression`/`api`/`e2e`/`performance`/`exploratory`
+> 标记的测试, 避免大量连接失败噪声.
+
+## 8. 新增测试文件说明
+
+### 8.1 test_metaso_searcher.py (秘塔搜索 METASO 修复验证)
+
+**文件**: `tests/unit/test_metaso_searcher.py`
+**验证目标**: `src/skills/researcher/searchers/metaso.py` 的任务3 修复
+**mark**: `unit` (构建期执行, mock httpx, 不依赖真实 API)
+
+修复背景: 之前秘塔 API 调用错误使用 `{"num": int}` 且缺 `scope` 与 `Accept` 头,
+导致 API 拒绝或返回非网页数据. 修复后对齐官方文档.
+
+| 测试分组 | 用例数 | 验证点 |
+|---------|--------|--------|
+| api_key 未配置 | 1 | `api_key=None` → 返回 `[]`, 不发起 HTTP |
+| payload 构造 | 5 | `scope="webpage"` / `size=str(max_results)` / `includeSummary=True` / `q` 字段 |
+| headers 构造 | 3 | `Accept: application/json` / `Authorization: Bearer` / `Content-Type` |
+| 响应解析 (result.webpages) | 3 | `{"result":{"webpages":[...]}}` 结构 + name/link 字段回退 |
+| 响应解析 (裸结构) | 3 | `{"webpages":[...]}` / `{"results":[...]}` / `{"data":[...]}` 回退 |
+| 结果归一化与截断 | 3 | max_results 截断 / 缺 url 跳过 / 5 字段归一化 |
+| 额度已满 (429/402) | 3 | 抛 `QuotaExceededError` + Retry-After 头解析 |
+| 其他 HTTP 错误 | 3 | 500/403 返回空列表 + JSON 解析失败返回空列表 |
+| query_domains 过滤 | 1 | 后置按域名白名单过滤 |
+| 网络异常降级 | 1 | httpx 抛异常返回空列表, 不向调用方抛 |
+
+### 8.2 test_pdf_docx_fonts.py (PDF/DOCX 中文字体配置验证)
+
+**文件**: `tests/unit/test_pdf_docx_fonts.py`
+**验证目标**: 离线部署模式中文字体安装逻辑 (PDF/DOCX 报告不乱码)
+**mark**: `unit` (静态文件检查, 不构建 Docker 镜像)
+**skip 策略**: `Dockerfile.qa`/`Dockerfile.offline`/`docker-compose-qa.yaml`/
+`packages/debs/` 均在 `.gitignore` 中 (AGENTS.md 第 12 章三套构建模式, 不入仓),
+文件不存在时 `pytest.skip()` 而非失败.
+
+| 测试分组 | 用例数 | 验证点 |
+|---------|--------|--------|
+| Dockerfile.qa 字体 | 4 | 含 `fonts-noto-cjk` 关键词 / `dpkg -i` 安装逻辑 / `fc-list` 验证 / `fonts-wqy` |
+| Dockerfile.offline 字体 | 3 | 含 `fonts-noto-cjk` / `dpkg -i` / `fc-list` 验证 |
+| packages/debs 字体包 | 3 | 含 `fonts-noto-cjk*.deb` / `fonts-wqy-*.deb` / 至少 2 个 wqy (zenhei+microhei) |
+| compose-qa 健康检查 | 5 | embeddings/rerank 用 `CMD-SHELL` (非 CMD) + 含 curl + 非 CMD 形式 |
+
+**任务2 修复背景**: TEI 镜像 `ENTRYPOINT=[text-embeddings-router]`, `CMD` 形式健康检查
+会被拦截, 必须改用 `CMD-SHELL` + curl 绝对路径 (`/usr/bin/curl`) 绕过.
+
+## 9. tests/manual/ 目录
+
+> AGENTS.md 第 3 章临时文件管理约定: 手动调试脚本放在 `tests/manual/`.
+
+**性质**: 手动调试脚本, **非 pytest 自动化测试用例**, 不纳入 CI 流水线.
+
+**配置**: `pyproject.toml` 已配置 `addopts = "--ignore=tests/manual"`, pytest 自动忽略;
+本目录已加入 `.gitignore` (不入仓), 避免临时脚本污染仓库.
+
+**用途**:
+- 临时联调脚本 (真实 API 调用验证、容器栈手动冒烟)
+- 一次性问题排查脚本 (线上 bug 复现、日志分析)
+- 开发期临时验证产物
+
+**与自动化测试分层的区别**:
+
+| 目录 | 性质 | CI 执行 | 触发时机 |
+|------|------|---------|---------|
+| `tests/unit/` ~ `tests/exploratory/` | 自动化测试 | 是 | CI 流水线自动触发 |
+| `tests/manual/` | **手动调试脚本** | **否** | 开发者手动执行 |
+
+**使用约定**: 详见 `tests/manual/README.md`. 正式测试用例应放在 `tests/` 对应分层,
+不要长期沉淀在 `manual/`.

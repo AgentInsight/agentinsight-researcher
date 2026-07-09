@@ -93,9 +93,7 @@ class _PlaywrightPool:
         from playwright.async_api import async_playwright
 
         # v2: 30s 超时防止 chromium 启动挂起导致 _lock 无限持有
-        self._playwright = await asyncio.wait_for(
-            async_playwright().start(), timeout=30.0
-        )
+        self._playwright = await asyncio.wait_for(async_playwright().start(), timeout=30.0)
         self._browser = await asyncio.wait_for(
             self._playwright.chromium.launch(**launch_kwargs), timeout=30.0
         )

@@ -532,7 +532,7 @@ class EmbeddingsClient:
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i : i + batch_size]
             batch_meta = (
-                metadata_list[i : i + batch_size] if metadata_list else [None] * len(batch_texts)
+                metadata_list[i : i + batch_size] if metadata_list else [{} for _ in batch_texts]
             )
 
             # 构造 points 字典列表 (复用 QdrantManager.upsert_points 的入参格式)

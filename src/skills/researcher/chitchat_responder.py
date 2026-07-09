@@ -84,6 +84,7 @@ class ChitchatResponder:
         session_id: str | None = None,
         user_id: str | None = None,
         stream: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[str] | Coroutine[Any, Any, str]:
         """短查询响应.
 
@@ -95,6 +96,7 @@ class ChitchatResponder:
             query: 用户输入
             session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
             user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
+            history: 对话历史 (来自 checkpointer, [{"role":"user","content":...},{"role":"assistant","content":...}])
             stream: 是否流式响应
 
         Returns:
@@ -111,8 +113,10 @@ class ChitchatResponder:
               而非 AsyncIterator 的陷阱 (Bug: 闲聊流式响应 '*未收到内容*')
         """
         if stream:
-            return self._stream_short_query(query, session_id=session_id, user_id=user_id)
-        return self._run_short_query(query, session_id=session_id, user_id=user_id)
+            return self._stream_short_query(
+                query, session_id=session_id, user_id=user_id, history=history
+            )
+        return self._run_short_query(query, session_id=session_id, user_id=user_id, history=history)
 
     async def _run_short_query(
         self,
@@ -120,6 +124,7 @@ class ChitchatResponder:
         *,
         session_id: str | None = None,
         user_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         """非流式短查询响应."""
         async with trace_chain(
@@ -137,8 +142,11 @@ class ChitchatResponder:
                 )
                 messages: list[dict[str, str]] = [
                     {"role": "system", "content": template},
-                    {"role": "user", "content": query},
                 ]
+                # 注入对话历史 (来自 checkpointer, 支持会话持久化)
+                if history:
+                    messages.extend(history[-10:])  # 最近 10 条, 避免 token 过大
+                messages.append({"role": "user", "content": query})
                 response = await self._llm.achat(
                     messages,
                     tier=LLMTier.FAST,
@@ -176,6 +184,7 @@ class ChitchatResponder:
         *,
         session_id: str | None = None,
         user_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[str]:
         """流式短查询响应.
 
@@ -196,8 +205,11 @@ class ChitchatResponder:
                 )
                 messages: list[dict[str, str]] = [
                     {"role": "system", "content": template},
-                    {"role": "user", "content": query},
                 ]
+                # 注入对话历史 (来自 checkpointer, 支持会话持久化)
+                if history:
+                    messages.extend(history[-10:])  # 最近 10 条, 避免 token 过大
+                messages.append({"role": "user", "content": query})
                 total_chars = 0
                 async for chunk in self._llm.achat_stream(
                     messages,
@@ -231,6 +243,7 @@ class ChitchatResponder:
         session_id: str | None = None,
         user_id: str | None = None,
         stream: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[str] | Coroutine[Any, Any, str]:
         """离题闲聊响应.
 
@@ -249,6 +262,7 @@ class ChitchatResponder:
             category: 闲聊子类 (决定 prompt 模板)
             session_id: 会话 ID
             user_id: 用户 ID
+            history: 对话历史 (来自 checkpointer, [{"role":"user","content":...},{"role":"assistant","content":...}])
             stream: 是否流式响应
 
         Returns:
@@ -260,9 +274,19 @@ class ChitchatResponder:
         """
         if stream:
             return self._stream_off_topic(
-                query, category=category, session_id=session_id, user_id=user_id
+                query,
+                category=category,
+                session_id=session_id,
+                user_id=user_id,
+                history=history,
             )
-        return self._run_off_topic(query, category=category, session_id=session_id, user_id=user_id)
+        return self._run_off_topic(
+            query,
+            category=category,
+            session_id=session_id,
+            user_id=user_id,
+            history=history,
+        )
 
     async def _run_off_topic(
         self,
@@ -271,6 +295,7 @@ class ChitchatResponder:
         category: str = "greeting",
         session_id: str | None = None,
         user_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         """非流式离题响应."""
         async with trace_chain(
@@ -289,8 +314,11 @@ class ChitchatResponder:
                 )
                 messages: list[dict[str, str]] = [
                     {"role": "system", "content": template},
-                    {"role": "user", "content": query},
                 ]
+                # 注入对话历史 (来自 checkpointer, 支持会话持久化)
+                if history:
+                    messages.extend(history[-10:])  # 最近 10 条, 避免 token 过大
+                messages.append({"role": "user", "content": query})
                 response = await self._llm.achat(
                     messages,
                     tier=LLMTier.FAST,
@@ -329,6 +357,7 @@ class ChitchatResponder:
         category: str = "greeting",
         session_id: str | None = None,
         user_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncIterator[str]:
         """流式离题响应."""
         async with trace_chain(
@@ -347,8 +376,11 @@ class ChitchatResponder:
                 )
                 messages: list[dict[str, str]] = [
                     {"role": "system", "content": template},
-                    {"role": "user", "content": query},
                 ]
+                # 注入对话历史 (来自 checkpointer, 支持会话持久化)
+                if history:
+                    messages.extend(history[-10:])  # 最近 10 条, 避免 token 过大
+                messages.append({"role": "user", "content": query})
                 total_chars = 0
                 async for chunk in self._llm.achat_stream(
                     messages,

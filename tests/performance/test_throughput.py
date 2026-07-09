@@ -90,6 +90,7 @@ def test_embeddings_batch_10_latency(
     """验证批量 10 条文本嵌入延迟 < 5s (TEI /embed 批量).
 
     AGENTS.md 第 7 章: TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
+    TEI MAX_BATCH_REQUESTS=4, 10 条文本分 3 批 (4+4+2) 发送.
     """
     threshold_s = perf_thresholds["embeddings_batch_10_s"]
     headers = embeddings_auth_headers()
@@ -105,20 +106,24 @@ def test_embeddings_batch_10_latency(
         "MCP 协议在 AI Agent 工具调用中的实践",
         "PostgreSQL Checkpointer 会话持久化方案",
     ]
+    batch_size = 4  # TEI MAX_BATCH_REQUESTS=4
 
+    all_vectors: list[list[float]] = []
     with make_http_client(timeout=TEI_TIMEOUT) as client:
         start = time.perf_counter()
-        r = client.post(
-            f"{embeddings_url}/embed",
-            json={"inputs": texts},
-            headers=headers,
-        )
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            r = client.post(
+                f"{embeddings_url}/embed",
+                json={"inputs": batch},
+                headers=headers,
+            )
+            assert r.status_code == 200, f"/embed 批量非 200: {r.status_code} {r.text}"
+            all_vectors.extend(r.json())
         elapsed = time.perf_counter() - start
 
-    assert r.status_code == 200, f"/embed 批量非 200: {r.status_code} {r.text}"
-    vectors = r.json()
-    assert isinstance(vectors, list) and len(vectors) == len(texts)
-    for i, vec in enumerate(vectors):
+    assert len(all_vectors) == len(texts)
+    for i, vec in enumerate(all_vectors):
         assert len(vec) == VECTOR_DIM, f"第 {i} 个向量维度非 {VECTOR_DIM}: {len(vec)}"
     assert elapsed < threshold_s, f"批量 10 条嵌入延迟 {elapsed:.3f}s 超过阈值 {threshold_s}s"
     print(f"\n[embeddings_batch_10] {elapsed:.3f}s (阈值 {threshold_s}s)")

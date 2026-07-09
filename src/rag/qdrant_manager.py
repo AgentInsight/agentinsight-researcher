@@ -383,7 +383,7 @@ class QdrantManager:
         should_conditions = [
             FieldCondition(key="namespace", match=MatchValue(value=ns)) for ns in namespaces
         ]
-        query_filter = Filter(should=should_conditions)  # type: ignore[arg-type]  # qdrant Filter.should 期望 list[FieldCondition|...], list 不变性导致 list[FieldCondition] 不兼容
+        query_filter = Filter(should=should_conditions)
 
         # P0 阈值误用修复: score_threshold=None 时不应用阈值 (让 RRF + Rerank 筛选);
         # 仅当调用方显式传值 (如 rerank 启用场景) 才传入. 不再 fallback 到

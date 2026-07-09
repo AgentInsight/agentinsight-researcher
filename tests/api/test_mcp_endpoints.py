@@ -311,8 +311,6 @@ def test_update_nonexistent_config_returns_404() -> None:
     """PUT 不存在的 config_id → 404."""
     payload = _create_config_payload(enabled=False)
     with httpx.Client(timeout=API_TIMEOUT) as client:
-        r = client.put("/v1/mcp/999999", json=payload)  # 完整 URL 在下面
-        # 使用完整 URL
         r = client.put(f"{AGENT_URL}/v1/mcp/999999", json=payload)
     assert r.status_code == 404
 

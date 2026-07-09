@@ -136,7 +136,7 @@ class ChitchatConfigBundle:
             jinja2.TemplateNotFound: 模板不存在时抛出.
         """
         template = self._jinja_env.get_template(template_name)
-        return template.render(**kwargs)
+        return str(template.render(**kwargs))
 
     # ========== 兜底话术 ==========
 

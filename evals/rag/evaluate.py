@@ -9,19 +9,27 @@ AGENTS.md 第 4 章: 例外允许 langchain_openai (仅 RAGAS 评测内部使用
 AGENTS.md 第 10 章: 门禁 faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7.
 
 RAGAS 0.2+ API:
+- ragas.evaluate() (模块级函数, 非 dataset.evaluate())
 - EvaluationDataset + SingleTurnSample 组织评测样本
 - LangchainLLMWrapper 包装评估器 LLM
 - LangchainEmbeddingsWrapper 包装评估器 Embedding
+- 子进程隔离: ragas.evaluate() 内部用 asyncio + nest_asyncio, 与 Python 3.14 主事件循环
+  冲突 (RuntimeError "Timeout should be used inside a task"), 通过子进程完全隔离事件循环
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from typing import Any
 
 from evals import ResearcherClient
 
 logger = logging.getLogger(__name__)
+
+# 项目根目录 (3 级上: evals/rag/evaluate.py -> 项目根), 模块级预计算避免在 async 函数内做阻塞 I/O
+_PROJECT_ROOT = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir, os.pardir))
 
 
 class RAGASEvaluator:
@@ -93,60 +101,61 @@ class RAGASEvaluator:
             "error": None,
         }
 
-        # 2. 构建 RAGAS SingleTurnSample 并评估
+        # 2. 通过子进程运行 RAGAS 评估
+        # (修复 Python 3.14 + RAGAS nest_asyncio 冲突:
+        #  RuntimeError "Timeout should be used inside a task" / coroutine never awaited)
+        # 子进程完全隔离事件循环, 避免 nest_asyncio 与主事件循环冲突
         try:
-            from ragas import EvaluationDataset, SingleTurnSample
-            from ragas.metrics import (
-                AnswerRelevancy,
-                Faithfulness,
-                LLMContextPrecisionWithReference,
+            import json
+            import sys as _sys
+            from pathlib import Path
+
+            subprocess_script = Path(__file__).parent / "_subprocess_eval.py"
+            input_data = json.dumps(
+                {
+                    "question": question,
+                    "answer": answer,
+                    "contexts": contexts,
+                    "reference": ground_truth,
+                },
+                ensure_ascii=False,
             )
 
-            sample = SingleTurnSample(
-                user_input=question,
-                response=answer,
-                retrieved_contexts=contexts,
-                reference=ground_truth,
+            proc = await asyncio.create_subprocess_exec(
+                _sys.executable,
+                str(subprocess_script),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=_PROJECT_ROOT,
             )
-            dataset = EvaluationDataset([sample])
+            stdout, stderr = await proc.communicate(input=input_data.encode("utf-8"))
 
-            # 逐指标评估 (每个指标单独计算, 避免某项失败影响其他)
-            metrics = {
-                "faithfulness": Faithfulness(),
-                "answer_relevancy": AnswerRelevancy(),
-                "context_precision": LLMContextPrecisionWithReference(),
-            }
+            if proc.returncode != 0:
+                err_msg = stderr.decode("utf-8", errors="replace")[:500]
+                result["error"] = f"RAGAS 子进程退出码 {proc.returncode}: {err_msg}"
+                logger.error("RAGAS 子进程失败: %s", err_msg)
+            else:
+                output = json.loads(stdout.decode("utf-8"))
+                scores = output.get("scores", {})
+                errors = output.get("errors", {})
 
-            scores = {}
-            for name, metric in metrics.items():
-                try:
-                    score_result = dataset.evaluate(
-                        metrics=[metric],
-                        llm=self.evaluator_llm,
-                        embeddings=self.evaluator_embeddings,
-                    )
-                    # 提取分数 (to_pandas 返回 DataFrame)
-                    df = score_result.to_pandas()
-                    if name in df.columns and len(df) > 0:
-                        val = df[name].iloc[0]
-                        scores[name] = float(val) if val is not None else 0.0
-                    else:
-                        scores[name] = 0.0
-                        logger.warning("指标 %s 未返回有效分数", name)
-                except Exception as e:  # noqa: BLE001
-                    scores[name] = 0.0
-                    logger.warning("指标 %s 评估失败: %s", name, e)
-                    result["error"] = f"{name}: {e}"
+                result["faithfulness"] = scores.get("faithfulness", 0.0)
+                result["answer_relevancy"] = scores.get("answer_relevancy", 0.0)
+                result["context_precision"] = scores.get("context_precision", 0.0)
 
-            result["faithfulness"] = scores.get("faithfulness", 0.0)
-            result["answer_relevancy"] = scores.get("answer_relevancy", 0.0)
-            result["context_precision"] = scores.get("context_precision", 0.0)
+                # 记录子进程中的错误 (不阻断, 某些指标可能仍有效)
+                error_parts = [f"{k}: {v}" for k, v in errors.items() if v]
+                if error_parts:
+                    result["error"] = "; ".join(error_parts)
+                    logger.warning("RAGAS 子进程指标错误: %s", result["error"])
 
-        except ImportError as e:
-            result["error"] = f"RAGAS 库未安装或版本不兼容: {e}"
-            logger.error("RAGAS 库导入失败: %s", e)
         except Exception as e:  # noqa: BLE001
-            result["error"] = f"RAGAS 评估异常: {e}"
-            logger.error("RAGAS 评估异常: %s", e)
+            err_msg = str(e)
+            if hasattr(e, "exceptions"):
+                sub_msgs = [f"{type(sub).__name__}: {sub}" for sub in e.exceptions]
+                err_msg = f"{type(e).__name__}: {' | '.join(sub_msgs)}"
+            result["error"] = f"RAGAS 评估异常: {err_msg}"
+            logger.error("RAGAS 评估异常: %s", err_msg)
 
         return result

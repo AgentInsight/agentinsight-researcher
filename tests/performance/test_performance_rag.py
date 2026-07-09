@@ -58,6 +58,7 @@ def test_embeddings_batch_throughput_10_texts(
     """验证 Embedding batch 10 条文本的吞吐量 (吞吐 = texts/秒).
 
     AGENTS.md 第 7 章: TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
+    TEI MAX_BATCH_REQUESTS=4, 10 条文本分 3 批 (4+4+2) 发送.
     阈值: 10 条文本应在 5s 内完成 (吞吐 ≥ 2 texts/s).
     """
     threshold_s = perf_thresholds["embeddings_batch_10_s"]
@@ -74,21 +75,24 @@ def test_embeddings_batch_throughput_10_texts(
         "PostgreSQL Checkpointer 会话持久化方案",
     ]
     headers = embeddings_auth_headers()
+    batch_size = 4  # TEI MAX_BATCH_REQUESTS=4
 
+    all_vectors: list[list[float]] = []
     with make_http_client(timeout=TEI_TIMEOUT) as client:
         start = time.perf_counter()
-        r = client.post(
-            f"{embeddings_url}/embed",
-            json={"inputs": texts},
-            headers=headers,
-        )
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            r = client.post(
+                f"{embeddings_url}/embed",
+                json={"inputs": batch},
+                headers=headers,
+            )
+            assert r.status_code == 200, f"/embed 批量非 200: {r.status_code} {r.text[:200]}"
+            all_vectors.extend(r.json())
         elapsed = time.perf_counter() - start
 
-    assert r.status_code == 200, f"/embed 批量非 200: {r.status_code} {r.text[:200]}"
-    vectors = r.json()
-    assert isinstance(vectors, list)
-    assert len(vectors) == len(texts)
-    for i, vec in enumerate(vectors):
+    assert len(all_vectors) == len(texts)
+    for i, vec in enumerate(all_vectors):
         assert len(vec) == VECTOR_DIM, f"第 {i} 个向量维度非 {VECTOR_DIM}: {len(vec)}"
 
     # 吞吐量计算
@@ -108,25 +112,29 @@ def test_embeddings_batch_throughput_20_texts(
 ) -> None:
     """验证 Embedding batch 20 条文本的吞吐量 (大批量场景).
 
+    TEI MAX_BATCH_REQUESTS=4, 20 条文本分 5 批 (4*5) 发送.
     阈值: 20 条文本应在 10s 内完成 (吞吐 ≥ 2 texts/s).
     """
     texts = [f"测试文本 {i}: 人工智能研究第 {i} 章" for i in range(20)]
     threshold_s = 10.0
     headers = embeddings_auth_headers()
+    batch_size = 4  # TEI MAX_BATCH_REQUESTS=4
 
+    all_vectors: list[list[float]] = []
     with make_http_client(timeout=TEI_TIMEOUT) as client:
         start = time.perf_counter()
-        r = client.post(
-            f"{embeddings_url}/embed",
-            json={"inputs": texts},
-            headers=headers,
-        )
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            r = client.post(
+                f"{embeddings_url}/embed",
+                json={"inputs": batch},
+                headers=headers,
+            )
+            assert r.status_code == 200, f"/embed 批量 20 非 200: {r.status_code} {r.text[:200]}"
+            all_vectors.extend(r.json())
         elapsed = time.perf_counter() - start
 
-    assert r.status_code == 200, f"/embed 批量 20 非 200: {r.status_code} {r.text[:200]}"
-    vectors = r.json()
-    assert isinstance(vectors, list)
-    assert len(vectors) == 20
+    assert len(all_vectors) == 20
     throughput = 20 / elapsed if elapsed > 0 else 0
     assert elapsed < threshold_s, (
         f"批量 20 条嵌入耗时 {elapsed:.3f}s 超过阈值 {threshold_s}s (吞吐 {throughput:.2f} texts/s)"
@@ -140,9 +148,10 @@ def test_embeddings_batch_throughput_20_texts(
 def test_embeddings_concurrent_3_batches(
     embeddings_url: str,
 ) -> None:
-    """验证 3 个并发 batch 请求 (各 5 条) 的吞吐量.
+    """验证 3 个并发 batch 请求 (各 4 条) 的吞吐量.
 
     AGENTS.md 第 7 章: 客户端并发限流 embeddings_max_concurrent=3,
+    TEI MAX_BATCH_REQUESTS=4, 每批 4 条.
     3 个并发 batch 应在限流范围内, 不应触发 429.
     """
     import asyncio
@@ -161,7 +170,7 @@ def test_embeddings_concurrent_3_batches(
 
     async def _run_all() -> list[float]:
         async with httpx.AsyncClient(timeout=TEI_TIMEOUT) as client:
-            tasks = [_run_batch(client, [f"并发测试 {i}-{j}" for j in range(5)]) for i in range(3)]
+            tasks = [_run_batch(client, [f"并发测试 {i}-{j}" for j in range(4)]) for i in range(3)]
             return await asyncio.gather(*tasks)
 
     threshold_s = 15.0

@@ -39,7 +39,6 @@ from src.skills.researcher.searchers import (
     BaseSearcher,
     deduplicate_results,
     detect_region,
-    get_searchers,
 )
 
 logger = logging.getLogger(__name__)
@@ -660,7 +659,6 @@ class ResearchConductor:
                 if isinstance(r, BaseException):
                     logger.warning(f"{searcher.name} 调用失败: {r}")
                     continue
-                r = cast(list[dict[str, Any]], r)
                 all_results.extend(r)
 
             # P1-01: 跨搜索引擎 URL 去重
@@ -689,7 +687,9 @@ class ResearchConductor:
             # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
             # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
             context_parts: list[str] = []
-            mcp_contexts = await conduct_mcp_if_enabled(self.settings, sub_query, user_id, session_id)
+            mcp_contexts = await conduct_mcp_if_enabled(
+                self.settings, sub_query, user_id, session_id
+            )
             if mcp_contexts:
                 context_parts.append("\n\n".join(mcp_contexts))
 

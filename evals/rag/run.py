@@ -70,8 +70,15 @@ def _build_evaluator_llm() -> Any:
 
     AGENTS.md 第 4 章: 例外允许 langchain_openai (仅 RAGAS 评测内部使用).
     """
+    # 保存原始 asyncio (import ragas 会触发 nest_asyncio.apply(), 与 Python 3.14 冲突)
+    from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio
+
+    saved = save_original_asyncio()
+    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
     from langchain_openai import ChatOpenAI
     from ragas.llms import LangchainLLMWrapper
+
+    restore_original_asyncio(saved)
 
     model = os.getenv("EVAL_LLM_MODEL", "deepseek/deepseek-chat")
     api_key = os.getenv("EVAL_LLM_API_KEY", os.getenv("LLM_API_KEY", ""))
@@ -91,8 +98,14 @@ def _build_evaluator_embeddings() -> Any:
     优先使用本地 TEI (bge-large-zh-v1.5) 的 OpenAI 兼容端点;
     无配置时降级到 OpenAI embedding.
     """
+    from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio
+
+    saved = save_original_asyncio()
+    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
     from langchain_openai import OpenAIEmbeddings
     from ragas.embeddings import LangchainEmbeddingsWrapper
+
+    restore_original_asyncio(saved)
 
     embedding_model = os.getenv("EVAL_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
     embedding_base = os.getenv("EVAL_EMBEDDING_API_BASE")
@@ -144,9 +157,7 @@ async def run(
     gate_context_precision = GATE_CONTEXT_PRECISION
     if threshold_overrides:
         gate_faithfulness = threshold_overrides.get("faithfulness", gate_faithfulness)
-        gate_answer_relevancy = threshold_overrides.get(
-            "answer_relevancy", gate_answer_relevancy
-        )
+        gate_answer_relevancy = threshold_overrides.get("answer_relevancy", gate_answer_relevancy)
         gate_context_precision = threshold_overrides.get(
             "context_precision", gate_context_precision
         )
@@ -229,10 +240,16 @@ async def run(
 
     # 控制台摘要
     print("\n=== RAGAS 评测报告 ===")
-    print(f"查询数:         {summary['num_queries']} (有效 {n_valid}, 错误 {summary['num_errors']})")
+    print(
+        f"查询数:         {summary['num_queries']} (有效 {n_valid}, 错误 {summary['num_errors']})"
+    )
     print(f"faithfulness:   {summary['avg_faithfulness']:.4f} (门禁 ≥{gate_faithfulness})")
-    print(f"answer_relevancy: {summary['avg_answer_relevancy']:.4f} (门禁 ≥{gate_answer_relevancy})")
-    print(f"context_precision: {summary['avg_context_precision']:.4f} (门禁 ≥{gate_context_precision})")
+    print(
+        f"answer_relevancy: {summary['avg_answer_relevancy']:.4f} (门禁 ≥{gate_answer_relevancy})"
+    )
+    print(
+        f"context_precision: {summary['avg_context_precision']:.4f} (门禁 ≥{gate_context_precision})"
+    )
     print(f"门禁判定:       {'✅ 通过' if gate_passed else '❌ 不达标'}")
     print(f"总耗时:         {summary['total_elapsed_seconds']:.2f}s")
     print(f"报告已写入:     {report_path}")

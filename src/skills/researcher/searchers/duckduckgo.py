@@ -22,8 +22,7 @@ from src.skills.researcher.searchers import BaseSearcher, SearchRegion
 # settings 暂无 search_timeout 字段, 使用常量; 网络挂起时强制降级返回空列表, 避免研究流程卡死
 DUCKDUCKGO_TIMEOUT = 30
 
-# DDGS 可能为 None (两个包都未安装时), 需显式声明联合类型以满足 mypy strict
-DDGS: type[Any] | None
+# DDGS 可能为 None (两个包都未安装时), 类型由下方 try/except 导入 + None 赋值联合推断
 with _warnings.catch_warnings():
     _warnings.filterwarnings(
         "ignore",

@@ -89,7 +89,9 @@ class MetasoSearcher(BaseSearcher):
             # v1.1: 额度已满检测
             if resp.status_code in (429, 402):
                 reset_at = self._calc_quota_reset(resp)
-                span.update(metadata={"tool_name": "metaso", "success": False, "error": "quota_exceeded"})
+                span.update(
+                    metadata={"tool_name": "metaso", "success": False, "error": "quota_exceeded"}
+                )
                 raise QuotaExceededError(
                     engine="metaso",
                     reset_at=reset_at,
@@ -98,14 +100,22 @@ class MetasoSearcher(BaseSearcher):
 
             if resp.status_code != 200:
                 logger.warning(f"metaso HTTP {resp.status_code}: {resp.text[:200]}")
-                span.update(metadata={"tool_name": "metaso", "success": False, "error": f"http_{resp.status_code}"})
+                span.update(
+                    metadata={
+                        "tool_name": "metaso",
+                        "success": False,
+                        "error": f"http_{resp.status_code}",
+                    }
+                )
                 return []
 
             try:
                 data = resp.json()
             except Exception as e:
                 logger.warning(f"metaso JSON 解析失败: {e}; body[:200]={resp.text[:200]}")
-                span.update(metadata={"tool_name": "metaso", "success": False, "error": "json_parse"})
+                span.update(
+                    metadata={"tool_name": "metaso", "success": False, "error": "json_parse"}
+                )
                 return []
 
             results: list[dict[str, Any]] = []
@@ -121,7 +131,11 @@ class MetasoSearcher(BaseSearcher):
             # 首次调用记录实际响应结构 (方便排查), 后续不重复日志
             if not getattr(self, "_resp_struct_logged", False):
                 top_keys = list(data.keys())[:10] if isinstance(data, dict) else type(data).__name__
-                inner_keys = list(result_obj.keys())[:10] if isinstance(result_obj, dict) else type(result_obj).__name__
+                inner_keys = (
+                    list(result_obj.keys())[:10]
+                    if isinstance(result_obj, dict)
+                    else type(result_obj).__name__
+                )
                 logger.info(
                     f"metaso 响应结构: top_keys={top_keys}, inner_keys={inner_keys}, "
                     f"items_count={len(items) if isinstance(items, list) else 'N/A'}"
@@ -137,12 +151,7 @@ class MetasoSearcher(BaseSearcher):
                     continue
                 title = item.get("title") or item.get("name") or ""
                 url = item.get("url") or item.get("link") or ""
-                snippet = (
-                    item.get("snippet")
-                    or item.get("summary")
-                    or item.get("abstract")
-                    or ""
-                )
+                snippet = item.get("snippet") or item.get("summary") or item.get("abstract") or ""
                 if url:
                     results.append(self._normalize_result(title, url, snippet))
 

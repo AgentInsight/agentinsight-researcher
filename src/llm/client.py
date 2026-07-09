@@ -738,7 +738,9 @@ class LLMClient:
                     total_input_tokens = total_input_chars // 4
                     total_output_tokens = total_output_chars // 4
 
-                breakdown = self._compute_cost(original_used_model, total_input_tokens, total_output_tokens)
+                breakdown = self._compute_cost(
+                    original_used_model, total_input_tokens, total_output_tokens
+                )
                 cost_usd = breakdown["total_cost"]
 
                 span.update(

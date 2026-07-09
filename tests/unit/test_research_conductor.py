@@ -141,11 +141,11 @@ async def test_plan_research_handles_llm_error(
 
 @pytest.mark.asyncio
 @patch("src.skills.researcher.research_conductor.detect_region")
-@patch("src.skills.researcher.research_conductor.get_searchers")
+@patch("src.skills.researcher.searchers.get_searchers_async", new_callable=AsyncMock)
 @patch("src.skills.researcher.research_conductor.scrape_urls", new_callable=AsyncMock)
 async def test_process_sub_query_searches_and_scrapes(
     mock_scrape_urls: AsyncMock,
-    mock_get_searchers: MagicMock,
+    mock_get_searchers_async: AsyncMock,
     mock_detect_region: MagicMock,
     conductor: ResearchConductor,
     mock_context_manager: MagicMock,
@@ -154,11 +154,13 @@ async def test_process_sub_query_searches_and_scrapes(
 
     验证:
     1. detect_region 被调用 (区域检测)
-    2. get_searchers 被调用 (获取搜索引擎)
+    2. get_searchers_async 被调用 (获取搜索引擎, v2 改用异步版本)
     3. searcher.search 被调用 (执行搜索)
     4. scrape_urls 被调用 (抓取 URL 内容)
     5. context_manager.get_similar_content 被调用 (压缩 + 去重)
     6. 返回 {context, sources, urls} 结构
+
+    任务2 修复: 实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
     """
     # 模拟搜索引擎
     mock_searcher = MagicMock()
@@ -176,7 +178,7 @@ async def test_process_sub_query_searches_and_scrapes(
             },
         ]
     )
-    mock_get_searchers.return_value = [mock_searcher]
+    mock_get_searchers_async.return_value = [mock_searcher]
     mock_detect_region.return_value = "auto"
 
     # 模拟抓取结果
@@ -192,7 +194,7 @@ async def test_process_sub_query_searches_and_scrapes(
 
     # 验证搜索流程
     mock_detect_region.assert_called_once_with("test query")
-    mock_get_searchers.assert_called_once()
+    mock_get_searchers_async.assert_awaited_once()
     mock_searcher.search.assert_awaited_once()
 
     # 验证抓取流程
@@ -213,9 +215,9 @@ async def test_process_sub_query_searches_and_scrapes(
 
 @pytest.mark.asyncio
 @patch("src.skills.researcher.research_conductor.detect_region")
-@patch("src.skills.researcher.research_conductor.get_searchers")
+@patch("src.skills.researcher.searchers.get_searchers_async", new_callable=AsyncMock)
 async def test_process_sub_query_handles_search_failure(
-    mock_get_searchers: MagicMock,
+    mock_get_searchers_async: AsyncMock,
     mock_detect_region: MagicMock,
     conductor: ResearchConductor,
     mock_context_manager: MagicMock,
@@ -224,16 +226,18 @@ async def test_process_sub_query_handles_search_failure(
 
     asyncio.gather(return_exceptions=True) 捕获异常, all_results 为空,
     _process_sub_query 提前返回 {context:"", sources:[], urls:set()}.
+
+    任务2 修复: 实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
     """
     # 模拟搜索引擎抛异常
     mock_searcher = MagicMock()
     mock_searcher.search = AsyncMock(side_effect=Exception("search engine down"))
-    mock_get_searchers.return_value = [mock_searcher]
+    mock_get_searchers_async.return_value = [mock_searcher]
     mock_detect_region.return_value = "auto"
 
     result = await conductor._process_sub_query("test query")
 
-    # 验证返回空结果
+    # 验证返回空结果 (所有搜索失败 → all_results 为空 → 提前返回)
     assert result["context"] == ""
     assert result["sources"] == []
     assert result["urls"] == set()

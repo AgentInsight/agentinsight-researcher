@@ -119,10 +119,10 @@ class Publisher:
 
             # 设置默认中英文字体 (解决中文乱码)
             # 西文字体用 DejaVu Sans Mono 兼容, 中文用宋体/Noto
-            _CN_FONT = "Noto Sans CJK SC"
-            _EN_FONT = "DejaVu Sans"
+            cn_font = "Noto Sans CJK SC"
+            en_font = "DejaVu Sans"
             style = doc.styles["Normal"]
-            style.font.name = _EN_FONT
+            style.font.name = en_font
             style.font.size = Pt(11)
             # eastAsia 属性必须通过 XML 设置, 否则中文显示为方块
             rpr = style.element.get_or_add_rPr()
@@ -130,7 +130,7 @@ class Publisher:
             if rfonts is None:
                 rfonts = rpr.makeelement(qn("w:rFonts"), {})
                 rpr.append(rfonts)
-            rfonts.set(qn("w:eastAsia"), _CN_FONT)
+            rfonts.set(qn("w:eastAsia"), cn_font)
 
             if title:
                 doc.add_heading(title, level=0)

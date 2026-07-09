@@ -89,7 +89,9 @@ services:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - embeddings_models:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      # 任务2 修复: TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截
+      # 改用 CMD-SHELL + curl 绝对路径, 绕过 ENTRYPOINT 拦截
+      test: ["CMD-SHELL", "/usr/bin/curl -sf http://localhost:8088/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -120,7 +122,8 @@ services:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - rerank_models:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      # 任务2 修复: 同 embeddings, 用 CMD-SHELL + curl 绝对路径
+      test: ["CMD-SHELL", "/usr/bin/curl -sf http://localhost:8089/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

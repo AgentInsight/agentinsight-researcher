@@ -288,7 +288,7 @@ class LocalDocumentLoader(DocumentLoader):
         with open(path, encoding="utf-8", errors="ignore") as f:
             html = f.read()
         soup = BeautifulSoup(html, "html.parser")
-        return soup.get_text(separator="\n", strip=True)
+        return str(soup.get_text(separator="\n", strip=True))
 
 
 # ========== AzureBlobLoader (Azure Blob Storage, 可选依赖) ==========

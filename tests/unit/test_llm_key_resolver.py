@@ -66,9 +66,12 @@ def test_prefix_key_map_contains_zhipu_both_prefixes() -> None:
     assert _PREFIX_KEY_MAP["zhipuai/"] == "zhipu_api_key"
 
 
-def test_prefix_key_map_has_five_entries() -> None:
-    """_PREFIX_KEY_MAP 应含 5 个前缀 (deepseek/openai/anthropic/zhipu/zhipuai)."""
-    assert len(_PREFIX_KEY_MAP) == 5
+def test_prefix_key_map_has_six_entries() -> None:
+    """_PREFIX_KEY_MAP 应含 6 个前缀 (deepseek/openai/anthropic/zhipu/zhipuai/zai).
+
+    任务6 治本: 新增 zai/ (litellm 原生智谱 GLM 路由前缀).
+    """
+    assert len(_PREFIX_KEY_MAP) == 6
 
 
 # ========== resolve_api_key 各前缀解析 ==========
