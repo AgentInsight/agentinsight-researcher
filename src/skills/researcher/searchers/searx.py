@@ -63,7 +63,7 @@ class SearXNGSearcher(BaseSearcher):
         """
         # 可选参数从 kwargs 读取 (默认 categories=general, time_range 不过滤)
         time_range = kwargs.get("time_range")
-        categories = kwargs.get("categories", "general")
+        categories = kwargs.get("categories", "general,science,it,news")
         async with trace_tool(
             name="searxng-search",
             input={"query": query[:100], "max_results": max_results},
@@ -87,8 +87,12 @@ class SearXNGSearcher(BaseSearcher):
                     "X-Forwarded-For": "127.0.0.1",
                 }
                 # timeout 从 settings 读取 (默认 10.0, P0-1 优化替代硬编码 15.0)
-                async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
-                    response = await client.get(self._api_url, params=params, headers=headers)
+                async with httpx.AsyncClient(
+                    timeout=self.settings.search_timeout
+                ) as client:
+                    response = await client.get(
+                        self._api_url, params=params, headers=headers
+                    )
                     response.raise_for_status()
                     data = response.json()
 
@@ -111,5 +115,7 @@ class SearXNGSearcher(BaseSearcher):
                 return results
             except Exception as e:  # noqa: BLE001
                 logger.warning("SearXNG 搜索失败: %s", e)
-                span.update(metadata={"tool_name": "searxng", "success": False, "error": str(e)})
+                span.update(
+                    metadata={"tool_name": "searxng", "success": False, "error": str(e)}
+                )
                 return []

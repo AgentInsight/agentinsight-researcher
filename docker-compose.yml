@@ -141,20 +141,22 @@ services:
     environment:
       # SearXNG 镜像启动脚本通过 SEARXNG_PORT 覆盖 settings.yml 的 server.port
       SEARXNG_PORT: "8099"
-    # P0 修复: 启动时安装 curl_cffi (sogou_stealth 引擎依赖, 模拟 Chrome TLS 指纹)
-    # SearXNG Alpine 镜像无 pip, 需先用 venv 的 python3 -m ensurepip 安装 pip, 再装 curl_cffi
-    # curl_cffi 不可用时 sogou_stealth 自动降级为 httpx (可能触发 CAPTCHA, 但引擎仍可加载)
-    # SearXNG ENTRYPOINT (docker-entrypoint.sh) 仍会执行, 此 command 替换默认 CMD
-    command:
+    # P0 修复: 启动时安装 curl_cffi (sogou_stealth/baidu_stealth/quark_stealth 引擎依赖, 模拟 Chrome TLS 指纹)
+    # SearXNG 镜像 entrypoint.sh 最后一行 exec granian 会忽略 CMD, 必须用 entrypoint 覆盖
+    # 在原 entrypoint.sh 之前注入 ensurepip + pip install, 然后 exec 原 entrypoint (保留 volume/setup 逻辑)
+    # curl_cffi 不可用时 stealth 引擎自动降级为 httpx (可能触发 CAPTCHA, 但引擎仍可加载)
+    # 保留 || true 容错 (pip 失败不阻断 SearXNG 启动)
+    entrypoint:
       - "sh"
       - "-c"
       - |
-        /usr/local/searxng/.venv/bin/python3 -m ensurepip --upgrade 2>/dev/null || true
-        /usr/local/searxng/.venv/bin/python3 -m pip install --no-cache-dir curl_cffi 2>/dev/null || true
-        exec python -m searx.webapp
+        /usr/local/searxng/.venv/bin/python3 -m ensurepip --upgrade || true
+        /usr/local/searxng/.venv/bin/python3 -m pip install --no-cache-dir curl_cffi || true
+        exec /usr/local/searxng/entrypoint.sh
     volumes:
       # 配置文件 (含引擎开关/limiter/redis 配置)
       - ./config/searxng/settings.yml:/etc/searxng/settings.yml
+      - ./config/searxng/limiter.toml:/etc/searxng/limiter.toml
       # sogou_stealth 自定义引擎直接 bind mount 到 searx 包目录 (替代 cp 命令, 更可靠)
       - ./config/searxng/engines/sogou_stealth.py:/usr/local/searxng/searx/engines/sogou_stealth.py:ro
       # baidu_stealth / quark_stealth 自定义引擎 (curl_cffi Chrome TLS 指纹规避 CAPTCHA)

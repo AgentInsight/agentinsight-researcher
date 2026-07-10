@@ -6,6 +6,8 @@
 #
 # 国内可用引擎: baidu/sogou/360search/quark + cn.bing.com (官方推荐中国镜像)
 # 国外可用引擎 (实测连通): yandex/mojeek/mwmbl/github/stackoverflow/npm/crates.io/arxiv/pubmed/crossref
+# baidu: Cookie Warmup (搜索页完整 cookie 链) + curl_cffi + 浏览器 headers
+# quark: Cookie Warmup + cookie 复用计数 (8次) + 频率控制 (3s) + curl_cffi + 浏览器 headers
 
 use_default_settings:
   engines:
@@ -30,10 +32,8 @@ use_default_settings:
       - arxiv              # science
       - pubmed             # science
       - crossref           # science
-      - mwmbl              # general
       - github             # it/repos
       - yandex             # general
-      - mojeek             # general
       - stackoverflow      # it/q&a
       - npm                # it/packages
       - crates.io          # it/packages
@@ -186,11 +186,6 @@ engines:
   - name: crossref
     engine: crossref
     shortcut: cr
-    disabled: false
-
-  - name: mwmbl
-    engine: mwmbl
-    shortcut: mwm
     disabled: false
 
   - name: github

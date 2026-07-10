@@ -133,7 +133,7 @@ def request(query: str, params: dict[str, Any]) -> dict[str, Any]:
         curl_resp = curl_requests.get(
             url,
             headers=headers,
-            impersonate="chrome",  # 模拟 Chrome TLS 指纹 (BoringSSL)
+            impersonate="chrome146",  # 最新 Chrome 146 指纹 (curl_cffi 0.15.0, BoringSSL)
             timeout=10,
             allow_redirects=False,  # 不跟随重定向 (检测 302 CAPTCHA)
         )

@@ -1,0 +1,2 @@
+# SearXNG botdetection limiter 配置 (limiter=false 时此文件仅消除 missing config file 警告)
+# limiter=false (settings.yml server.limiter), botdetection 不启用限流, 此文件为空配置

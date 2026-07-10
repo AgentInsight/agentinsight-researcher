@@ -1,24 +1,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Baidu 搜索引擎 - curl_cffi 隐身模式 (规避 CAPTCHA 检测).
+"""Baidu 搜索引擎 - curl_cffi 隐身模式 + Cookie Warmup (规避 CAPTCHA 检测).
 
-问题: baidu 检测到 httpx 的 Python TLS 指纹后, 重定向到 wappass.baidu.com CAPTCHA 页面,
-      SearXNG 检测到后抛 SearxEngineCaptchaException (暂停服务).
-方案: 用 curl_cffi 模拟 Chrome TLS 指纹 (BoringSSL) 替代 httpx 发请求, 规避反爬检测。
-      curl_cffi 是本地工具 (非 SaaS), 通过 BoringSSL 模拟浏览器 TLS 握手。
+问题: baidu 检测到 Python httpx 请求 (无 BAIDUID cookie + IP 频率) 后,
+      重定向到 wappass.baidu.com CAPTCHA 页面, SearXNG 抛 SearxEngineCaptchaException.
+根因: baidu CAPTCHA 不是 TLS 指纹检测, 而是 IP 频率 + Cookie 缺失 + antiFlag 检测。
+      curl_cffi 的 TLS 指纹模拟对 baidu 无效 (baidu 不做 JA3 校验)。
+方案: 三重防护:
+      1. Cookie Warmup: 首次请求前 GET https://www.baidu.com/s?wd=test 预热完整 cookie 链
+         (BAIDUID + H_PS_PSSID + H_PS_645EC 等, 参考 baidu-serp-api 项目, 缓存 1h)
+      2. 完整浏览器 headers: Referer/Accept-Language/Accept 模拟真实浏览器
+      3. curl_cffi: 保留 TLS 指纹模拟作为额外防护 (虽然 baidu 不做 JA3, 但无害)
 
 部署:
   1. 本文件 bind mount 到 SearXNG 容器内 searx/engines/baidu_stealth.py
-  2. docker-compose 启动时安装 curl_cffi (见 searxng service command)
+  2. docker-compose 启动时安装 curl_cffi (见 searxng service entrypoint)
   3. settings.yml 中 baidu 引擎的 engine: baidu_stealth (替代 engine: baidu)
-
-原理:
-  - request(): 复用原 baidu URL 构建 + 用 curl_cffi 发请求 (Chrome 指纹) + 缓存响应到线程本地
-  - response(): 优先用 curl_cffi 缓存的响应解析, 降级用 SearXNG httpx 响应
-  - SearXNG 仍会用 httpx 发请求 (无法阻止), 但 response() 忽略 httpx 响应, 使用 curl_cffi 响应
 """
 
 import logging
 import threading
+import time
 from typing import Any
 
 # curl_cffi 可选导入 (容器启动时 pip install curl_cffi 安装)
@@ -51,6 +52,103 @@ logger = logging.getLogger(__name__)
 # 线程本地存储: 缓存 curl_cffi 响应 (SearXNG 引擎在线程池中同步运行, 每线程独立)
 _local = threading.local()
 
+# ========== Cookie Warmup 缓存 (进程级, 所有线程共享) ==========
+# BAIDUID cookie 预热: 首次请求前 GET https://www.baidu.com/ 获取 BAIDUID
+# baidu general 搜索缺少 BAIDUID cookie 是 CAPTCHA 触发的主要根因之一
+# 参考 SearXNG baidu.py get_image_cookies() 的实现模式 (仅 images 类别有, general 缺失)
+_BAIDUID_COOKIE_CACHE: dict[str, Any] | None = None
+_BAIDUID_COOKIE_EXPIRE: float = 0.0
+_BAIDUID_COOKIE_TTL = 3600  # 1 小时缓存 (与 SearXNG baidu.py COOKIE_CACHE_EXPIRATION_SECONDS 一致)
+_BAIDUID_LOCK = threading.Lock()
+
+# 预热 URL: 用搜索页 (而非首页) 获取更完整的 cookie 链
+# 参考 baidu-serp-api 项目: 搜索页会返回 BAIDUID + H_PS_PSSID + H_PS_645EC 等完整 cookie
+# 首页仅返回 BAIDUID, 缺少 H_PS_PSSID (会话 ID) 和 H_PS_645EC (与 rsv_t 同步的安全字段)
+_BAIDU_WARMUP_URL = "https://www.baidu.com/s?wd=test"
+
+# 完整浏览器 headers (模拟真实 Chrome 请求, 降低 antiFlag 触发率)
+_BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+    "image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Ch-Ua": '"Chromium";v="146", "Not?A_Brand";v="99", "Google Chrome";v="146"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.baidu.com/",
+}
+
+
+def _warmup_baiduid_cookie(headers: dict[str, str]) -> dict[str, str] | None:
+    """预热 BAIDUID cookie (GET https://www.baidu.com/ 获取 Set-Cookie).
+
+    baidu general 搜索缺少 BAIDUID cookie 是 CAPTCHA 触发的主要根因。
+    SearXNG baidu.py 仅为 images 类别做 cookie warmup, general 缺失。
+    本函数为 general 搜索补充 cookie warmup, 参考 get_image_cookies() 模式。
+
+    Args:
+        headers: 请求头字典 (用于 warmup 请求).
+
+    Returns:
+        BAIDUID cookie 字典, 或 None (warmup 失败时).
+    """
+    global _BAIDUID_COOKIE_CACHE, _BAIDUID_COOKIE_EXPIRE
+
+    # 1. 检查缓存是否有效
+    now = time.time()
+    if _BAIDUID_COOKIE_CACHE is not None and now < _BAIDUID_COOKIE_EXPIRE:
+        return _BAIDUID_COOKIE_CACHE
+
+    # 2. 加锁预热 (避免多线程同时 warmup)
+    with _BAIDUID_LOCK:
+        # double-check (可能其他线程已 warmup 完成)
+        now = time.time()
+        if _BAIDUID_COOKIE_CACHE is not None and now < _BAIDUID_COOKIE_EXPIRE:
+            return _BAIDUID_COOKIE_CACHE
+
+        # 3. warmup 请求 (用 curl_cffi 或降级 httpx)
+        warmup_headers = {**headers, **_BROWSER_HEADERS}
+        try:
+            if _HAS_CURL_CFFI:
+                from curl_cffi import requests as curl_requests
+
+                resp = curl_requests.get(
+                    _BAIDU_WARMUP_URL,
+                    headers=warmup_headers,
+                    impersonate="chrome146",
+                    timeout=10,
+                    allow_redirects=True,
+                )
+            else:
+                # 降级: 用 SearXNG 的 httpx (通过 searx.network)
+                from searx.network import get as http_get  # type: ignore[import-not-found]
+
+                resp = http_get(_BAIDU_WARMUP_URL, headers=warmup_headers, timeout=10)
+
+            # 4. 提取 BAIDUID cookie
+            cookies = dict(resp.cookies.items())
+            if cookies:
+                _BAIDUID_COOKIE_CACHE = cookies
+                _BAIDUID_COOKIE_EXPIRE = now + _BAIDUID_COOKIE_TTL
+                logger.info(
+                    "baidu_stealth: BAIDUID cookie warmup 成功 (%d cookies, TTL=%ds)",
+                    len(cookies),
+                    _BAIDUID_COOKIE_TTL,
+                )
+                return cookies
+            logger.warning("baidu_stealth: BAIDUID cookie warmup 未获取到 cookie")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("baidu_stealth: BAIDUID cookie warmup 失败: %s", e)
+
+        return None
+
 # ========== 引擎元数据 (复用原 baidu 配置) ==========
 if _HAS_ORIGINAL_BAIDU:
     about = _baidu.about
@@ -82,7 +180,12 @@ else:
 
 
 def request(query: str, params: dict[str, Any]) -> dict[str, Any]:
-    """构建 baidu 搜索请求, 用 curl_cffi 发送 (Chrome TLS 指纹).
+    """构建 baidu 搜索请求, 用 curl_cffi 发送 (Chrome TLS 指纹 + Cookie Warmup).
+
+    三重防护降低 CAPTCHA 触发率:
+    1. Cookie Warmup: 预热 BAIDUID cookie (baidu general 缺少 cookie 是 CAPTCHA 主因)
+    2. 完整浏览器 headers: Referer/Accept-Language/Sec-Ch-Ua 模拟真实浏览器
+    3. curl_cffi: TLS 指纹模拟 (额外防护, 虽然 baidu 不做 JA3 校验)
 
     若 curl_cffi 不可用, 降级为原 baidu 逻辑 (SearXNG 用 httpx 发请求, 可能触发 CAPTCHA).
 
@@ -100,12 +203,27 @@ def request(query: str, params: dict[str, Any]) -> dict[str, Any]:
     if _HAS_ORIGINAL_BAIDU:
         params = _baidu.request(query, params)
 
-    # 2. curl_cffi 不可用时降级 (SearXNG 用 httpx 发请求, 可能触发 CAPTCHA)
+    # 2. Cookie Warmup: 预热 BAIDUID cookie (baidu general 缺失 cookie 是 CAPTCHA 主因)
+    #    SearXNG baidu.py 仅为 images 类别做 warmup, general 缺失 — 本处补充
+    base_headers = dict(params.get("headers", {}))
+    warmup_cookies = _warmup_baiduid_cookie(base_headers)
+    if warmup_cookies:
+        # 合并 warmup cookie 与已有 cookie (已有优先, 避免覆盖 images cookie)
+        existing_cookies = params.get("cookies") or {}
+        merged = {**warmup_cookies, **existing_cookies}
+        params["cookies"] = merged
+
+    # 3. 注入完整浏览器 headers (降低 antiFlag 触发率)
+    for key, value in _BROWSER_HEADERS.items():
+        if key not in params.get("headers", {}):
+            params.setdefault("headers", {})[key] = value
+
+    # 4. curl_cffi 不可用时降级 (SearXNG 用 httpx 发请求, cookie+headers 已注入)
     if not _HAS_CURL_CFFI:
-        logger.warning("curl_cffi 未安装, baidu_stealth 降级为 httpx 请求 (可能触发 CAPTCHA)")
+        logger.warning("curl_cffi 未安装, baidu_stealth 降级为 httpx (cookie warmup 已生效)")
         return params
 
-    # 3. 用 curl_cffi 发送请求 (模拟 Chrome TLS 指纹, 规避反爬检测)
+    # 5. 用 curl_cffi 发送请求 (Chrome TLS 指纹 + warmup cookie + 浏览器 headers)
     url = params["url"]
     headers = dict(params.get("headers", {}))
     cookies = params.get("cookies")
@@ -116,7 +234,7 @@ def request(query: str, params: dict[str, Any]) -> dict[str, Any]:
             url,
             headers=headers,
             cookies=cookies,
-            impersonate="chrome",  # 模拟 Chrome TLS 指纹 (BoringSSL)
+            impersonate="chrome146",  # Chrome 146 TLS 指纹 (额外防护)
             timeout=10,
             allow_redirects=False,  # 不跟随重定向 (检测 CAPTCHA 重定向)
         )
@@ -124,9 +242,11 @@ def request(query: str, params: dict[str, Any]) -> dict[str, Any]:
         if curl_resp.status_code in (301, 302):
             location = curl_resp.headers.get("Location", "")
             if "wappass.baidu.com/static/captcha" in location:
+                # 降低 suspended_time: 3600→300 (配合 cookie warmup 快速重试)
                 raise SearxEngineCaptchaException(
-                    message="Baidu CAPTCHA (baidu_stealth: curl_cffi Chrome 指纹仍被检测)",
-                    suspended_time=3600,
+                    message="Baidu CAPTCHA (baidu_stealth: cookie warmup + curl_cffi 仍被检测, "
+                    "可能是 IP 频率限制, 建议配置代理轮换)",
+                    suspended_time=300,  # 5 分钟 (原 3600s 过于激进)
                 )
         # 缓存 curl_cffi 响应到线程本地
         _local.curl_response = curl_resp
