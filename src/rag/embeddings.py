@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import random
 import time
 import uuid
 from collections import OrderedDict
@@ -359,7 +360,8 @@ class EmbeddingsClient:
                     # P0-1 修复: 429 限流 + 5xx 服务端错误 → 指数退避重试
                     should_retry = (status == 429 or 500 <= status < 600) and attempt < max_retries
                     if should_retry:
-                        delay = base_delay * (2**attempt)
+                        # P2-13: 增加随机抖动避免 thundering herd (多客户端同步重试)
+                        delay = base_delay * (2**attempt) + random.uniform(0, base_delay)
                         logger.warning(
                             "Embedding HTTP %d, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
                             status,
@@ -395,7 +397,8 @@ class EmbeddingsClient:
                     last_error = e
                     self._circuit_breaker.record_failure()
                     if attempt < max_retries:
-                        delay = base_delay * (2**attempt)
+                        # P2-13: 增加随机抖动避免 thundering herd
+                        delay = base_delay * (2**attempt) + random.uniform(0, base_delay)
                         logger.warning(
                             "Embedding 网络错误 %s, 第 %d/%d 次重试 (延迟 %.2fs): text_count=%d",
                             type(e).__name__,

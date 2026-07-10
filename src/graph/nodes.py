@@ -229,11 +229,12 @@ async def report_generator_node(
             delta["report_image_b64"] = result["image_b64"]
 
         # P1-04: 回写 LLM 成本到 State (打通 LLMClient → State 最后一公里)
+        # P0-3: 读取 per-session allocator, 避免全局污染数据
         # 对标 GPTR add_costs() 让 final_state 含 costs 字段, 供 routes.py usage 读取.
         try:
             from src.llm.token_budget import get_token_budget_allocator
 
-            allocator = await get_token_budget_allocator()
+            allocator = await get_token_budget_allocator(state.get("session_id", ""))
             total_cost = await allocator.get_total_cost()
             step_costs = await allocator.get_step_costs()
             delta["total_cost_usd"] = total_cost.get("total_cost_usd", 0.0)

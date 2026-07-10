@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS research_reports (
 CREATE INDEX IF NOT EXISTS idx_research_reports_session ON research_reports(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_user ON research_reports(user_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
+-- P1-7: 复合索引 (agent_id + user_id), 符合 AGENTS.md 第 7 章多 Agent 数据隔离约定
+CREATE INDEX IF NOT EXISTS idx_research_reports_agent_user ON research_reports(agent_id, user_id);
+-- P1-7: session + agent + user 三列复合索引, 加速按会话检索报告
+CREATE INDEX IF NOT EXISTS idx_research_reports_session_agent_user ON research_reports(session_id, agent_id, user_id);
 -- 迁移: 已有 research_reports 表补充 P1-Future-09 新增列 (PostgreSQL 9.6+)
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_id UUID DEFAULT gen_random_uuid();
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS query TEXT;

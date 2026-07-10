@@ -48,6 +48,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["openai-compatible"])
 
+# P0-4: 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _create_background_task(coro: Any) -> asyncio.Task[Any]:
+    """创建后台任务并保留引用 (P0-4: 防止 GC 静默取消).
+
+    标准模式: set + done_callback(discard), 任务完成后自动从集合移除.
+    """
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 # ========== LangGraph 图单例 (延迟构建, 复用) ==========
 _compiled_graph: Any | None = None
@@ -767,7 +781,8 @@ async def _stream_research(
                                 else ""
                             )
                             if token:
-                                asyncio.create_task(
+                                # P0-4: 保留 Task 引用防止 GC 取消 (扣点任务有副作用)
+                                _create_background_task(
                                     get_agentinsight_client().deduct_agent_usage(token)
                                 )
                         # 非 markdown 格式: 跳过逐段推送 (publisher 节点会推送最终格式)
@@ -845,39 +860,45 @@ async def _stream_research(
             if normalized_sources:
                 yield _sse_chunk({"sources": normalized_sources})
 
-            # P2-7: 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
-            # graph 完成后调用 report_store.save_report, 保存失败仅 warn 不影响响应
-            # (用户已收到报告内容, 不返回 500; AGENTS.md 第 5 章节点纯函数约束)
-            try:
-                from src.memory.report_store import get_report_store
+            # P1-4: 报告持久化移到后台任务 (不阻塞 [DONE], 先 yield [DONE] 再后台持久化)
+            # P0-4: 保留 Task 引用防止 GC 取消
+            async def _persist_report() -> None:
+                try:
+                    from src.memory.report_store import get_report_store
 
-                _report_store = get_report_store()
-                _saved_report_id = await _report_store.save_report(
-                    session_id=session_id,
-                    user_id=initial_state.get("user_id", ""),
-                    agent_id=initial_state.get("agent_id", ""),
-                    query=initial_state.get("query", ""),
-                    report_md=final_state.get("report_md", ""),
-                    report_format=final_state.get("report_format", "markdown"),
-                    sources=(final_state.get("curated_sources") or final_state.get("sources", [])),
-                    agent_role=final_state.get("agent_role_server"),
-                )
-                if _saved_report_id:
-                    yield _sse_chunk({"report_id": _saved_report_id})
-                    # IP-based 用户报告生成成功后异步递增每日计数 (不阻塞流式响应)
-                    # 仅 self_host=True 且 user_id 以 "ip_" 前缀标识的匿名用户才计数
-                    _uid = initial_state.get("user_id", "")
-                    _aid = initial_state.get("agent_id", "")
-                    if _uid.startswith("ip_") and _aid:
-                        from src.api.ip_user_resolver import increment_daily_report_count
+                    _report_store = get_report_store()
+                    _saved_report_id = await _report_store.save_report(
+                        session_id=session_id,
+                        user_id=initial_state.get("user_id", ""),
+                        agent_id=initial_state.get("agent_id", ""),
+                        query=initial_state.get("query", ""),
+                        report_md=final_state.get("report_md", ""),
+                        report_format=final_state.get("report_format", "markdown"),
+                        sources=(
+                            final_state.get("curated_sources") or final_state.get("sources", [])
+                        ),
+                        agent_role=final_state.get("agent_role_server"),
+                    )
+                    if _saved_report_id:
+                        # IP-based 用户报告生成成功后异步递增每日计数
+                        _uid = initial_state.get("user_id", "")
+                        _aid = initial_state.get("agent_id", "")
+                        if _uid.startswith("ip_") and _aid:
+                            from src.api.ip_user_resolver import increment_daily_report_count
 
-                        asyncio.create_task(increment_daily_report_count(_uid, _aid))
-            except Exception:
-                logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
+                            await increment_daily_report_count(_uid, _aid)
+                except Exception:
+                    logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
+
+            _create_background_task(_persist_report())
 
         except Exception as e:
             logger.exception("研究流水线执行失败")
             yield _sse_chunk({"content": f"\n\n**研究执行失败**: {str(e)[:200]}"})
+            # P1-6: 错误时 finish_reason="error" (客户端可据此区分失败)
+            yield _sse_chunk({}, finish_reason="error")
+            yield "data: [DONE]\n\n"
+            return
 
     # SSE 末块 (finish_reason)
     yield _sse_chunk({}, finish_reason="stop")
@@ -912,9 +933,14 @@ async def _run_research(
     ):
         file_path: str | None = None
         report_id: str | None = None
+        settings = get_settings()
         try:
             graph = await _get_graph(multi_agent=request.multi_agent)
-            final_state = await graph.ainvoke(initial_state, config=graph_config)
+            # P1-5: graph.ainvoke 超时保护 (防止节点卡死永久挂起, 外部评审补充)
+            final_state = await asyncio.wait_for(
+                graph.ainvoke(initial_state, config=graph_config),
+                timeout=settings.graph_total_timeout,
+            )
             fmt = request.report_format or "markdown"
             # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
             final_formats = final_state.get("report_formats") or {}
@@ -1450,6 +1476,10 @@ async def _stream_chat(
         except Exception as e:
             logger.exception("对话追问流式执行失败")
             yield _sse_chunk({"content": f"\n\n**对话执行失败**: {str(e)[:200]}"})
+            # P1-6: 错误时 finish_reason="error"
+            yield _sse_chunk({}, finish_reason="error")
+            yield "data: [DONE]\n\n"
+            return
 
     # SSE 末块 (finish_reason)
     yield _sse_chunk({}, finish_reason="stop")
@@ -1481,9 +1511,14 @@ async def _run_chat(
         session_id=session_id,
         user_id=initial_state.get("user_id"),
     ):
+        settings = get_settings()
         try:
             graph = await _get_chat_graph()
-            final_state = await graph.ainvoke(initial_state, config=graph_config)
+            # P1-5: graph.ainvoke 超时保护
+            final_state = await asyncio.wait_for(
+                graph.ainvoke(initial_state, config=graph_config),
+                timeout=settings.graph_total_timeout,
+            )
 
             # 从 messages 中提取最新 AIMessage 作为回答
             content = ""
@@ -1524,6 +1559,40 @@ async def _run_chat(
 
 # ========== 文件上传 (用户需求 8) ==========
 
+# P1-13: 文件 magic number 签名表 (纯 Python, 无外部依赖, 避免新增 python-magic)
+_FILE_MAGIC_SIGNATURES: dict[str, list[bytes]] = {
+    "pdf": [b"%PDF"],
+    # OOXML (docx/xlsx/pptx) 是 ZIP 格式: PK\x03\x04 (含文件) 或 PK\x05\x06 (空)
+    "docx": [b"PK\x03\x04", b"PK\x05\x06"],
+    "xlsx": [b"PK\x03\x04", b"PK\x05\x06"],
+    "pptx": [b"PK\x03\x04", b"PK\x05\x06"],
+    # 文本格式: UTF-8 可解码即通过 (无固定 magic)
+    "md": [],
+    "txt": [],
+    "html": [],
+    "csv": [],
+}
+
+
+def _validate_magic_number(data: bytes, ext: str) -> bool:
+    """校验文件 magic number (P1-13: 防止恶意文件伪装扩展名).
+
+    纯 Python 实现, 不依赖 python-magic / filetype 库 (AGENTS.md: 避免不必要依赖).
+    """
+    signatures = _FILE_MAGIC_SIGNATURES.get(ext)
+    if signatures is None:
+        # 未注册扩展名 (已由扩展名白名单过滤), 跳过
+        return True
+    if not signatures:
+        # 文本格式: 验证前 1KB 是否可 UTF-8 解码
+        try:
+            data[:1024].decode("utf-8")
+            return True
+        except UnicodeDecodeError:
+            return False
+    # 二进制格式: 校验 magic 前缀
+    return any(data.startswith(sig) for sig in signatures)
+
 
 @router.post("/files")
 async def upload_file(
@@ -1536,28 +1605,55 @@ async def upload_file(
     uploaded_files 字段引用.
 
     AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离.
-    AGENTS.md 第 11 章: 安全约束 (大小/扩展名白名单).
+    AGENTS.md 第 11 章: 安全约束 (大小/扩展名白名单/magic number).
     """
     settings = get_settings()
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
 
-    # 校验文件大小
-    contents = await file.read()
-    size_mb = len(contents) / (1024 * 1024)
-    if size_mb > settings.max_upload_size_mb:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件大小 {size_mb:.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
-        )
-
-    # 校验扩展名 (AGENTS.md 第 11 章: 白名单)
+    # 校验扩展名 (AGENTS.md 第 11 章: 白名单, 先于 I/O 校验)
     ext = Path(file.filename or "").suffix.lstrip(".").lower()
     if ext not in settings.allowed_extensions_list:
         raise HTTPException(
             status_code=415,
             detail=f"不支持的文件类型: .{ext}, 允许: {', '.join(settings.allowed_extensions_list)}",
         )
+
+    # P2-1: 优先用 file.size 早期校验大小 (UploadFile.size 由 Content-Length 注入)
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    if file.size is not None and file.size > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件大小 {file.size / (1024 * 1024):.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
+        )
+
+    # P2-1: 分块流式读取 (避免全量读入内存), 同时校验大小 + magic number
+    chunk_size = 1024 * 1024  # 1MB
+    chunks: list[bytes] = []
+    total_bytes = 0
+    magic_checked = False
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件大小 {total_bytes / (1024 * 1024):.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
+            )
+        # P1-13: 首个 chunk 校验 magic number (防止恶意文件伪装扩展名)
+        if not magic_checked:
+            if not _validate_magic_number(chunk, ext):
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"文件内容与扩展名 .{ext} 不匹配 (magic number 校验失败)",
+                )
+            magic_checked = True
+        chunks.append(chunk)
+
+    contents = b"".join(chunks)
+    size_mb = total_bytes / (1024 * 1024)
 
     # 生成文件 ID (agent_id:user_id:uuid 三级分键)
     file_id = f"{agent_id}:{user_id}:{uuid.uuid4().hex[:16]}"
@@ -1584,7 +1680,7 @@ async def upload_file(
         content={
             "file_id": file_id,
             "filename": file.filename,
-            "size_bytes": len(contents),
+            "size_bytes": total_bytes,
             "size_mb": round(size_mb, 4),
             "extension": ext,
             "uploaded_at": int(time.time()),

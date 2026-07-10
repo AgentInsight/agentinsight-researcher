@@ -7,9 +7,14 @@ AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from src.config.settings import Settings
+from src.llm.client import LLMResponse, LLMTier
+from src.skills.researcher.prompts import DefaultPromptFamily
 from src.skills.researcher.source_curator import SourceCurator
 
 pytestmark = pytest.mark.unit
@@ -184,3 +189,195 @@ def test_score_credibility_score_clamped_to_0(curator: SourceCurator) -> None:
     source = {"url": "", "content": ""}
     score = curator._score_credibility(source)
     assert score >= 0.0
+
+
+# ========== curate_sources: max_tokens / prompt 精简 / reason 兼容 (P0/P2 优化) ==========
+
+
+@pytest.fixture()
+def mock_llm() -> MagicMock:
+    """Mock LLMClient (achat 为 AsyncMock, 返回 LLMResponse)."""
+    llm = MagicMock()
+    llm.achat = AsyncMock()
+    return llm
+
+
+@pytest.fixture()
+def curator_with_llm(
+    mock_llm: MagicMock,
+) -> SourceCurator:
+    """构造 SourceCurator (注入 mock LLM + 真实 DefaultPromptFamily).
+
+    用于 curate_sources 集成测试, 验证:
+    - max_tokens=2000 (P0 优化: 4000→2000)
+    - curator prompt 精简 (仅输出 index+score, 不输出 reason)
+    - reason 字段为空时的兼容解析
+    """
+    settings = Settings(_env_file=None)
+    return SourceCurator(
+        settings=settings,
+        llm=mock_llm,
+        prompt_family=DefaultPromptFamily(),
+    )
+
+
+def _make_sources(n: int = 3) -> list[dict[str, Any]]:
+    """构造 n 条来源 (含足够内容避免短内容扣分干扰)."""
+    return [
+        {
+            "url": f"https://arxiv.org/abs/2401.0000{i}",
+            "title": f"来源 {i}",
+            "snippet": f"这是来源 {i} 的摘要内容, 含相关数据" + "a" * 300,
+            "content": f"来源 {i} 正文, 增长 20% 的数据" + "a" * 300,
+        }
+        for i in range(1, n + 1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_uses_max_tokens_2000(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 curate_sources 调用 LLM 时 max_tokens=2000 (P0 优化: 4000→2000).
+
+    P0 优化 (trace 4ad14970): 策展 JSON 仅需 index+score, 不需要长输出,
+    max_tokens 从 4000 降至 2000 节省 token 成本.
+    """
+    mock_llm.achat.return_value = LLMResponse(
+        content='[{"index": 1, "score": 9}]',
+        model="test",
+    )
+
+    await curator_with_llm.curate_sources("测试查询", _make_sources(3), max_results=3)
+
+    mock_llm.achat.assert_awaited_once()
+    call_kwargs = mock_llm.achat.call_args.kwargs
+    assert call_kwargs["max_tokens"] == 2000
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_uses_smart_tier(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 curate_sources 使用 SMART tier (策展需复杂推理)."""
+    mock_llm.achat.return_value = LLMResponse(
+        content='[{"index": 1, "score": 9}]',
+        model="test",
+    )
+
+    await curator_with_llm.curate_sources("测试查询", _make_sources(2), max_results=2)
+
+    call_kwargs = mock_llm.achat.call_args.kwargs
+    assert call_kwargs["tier"] == LLMTier.SMART
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_prompt_only_index_and_score_no_reason(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 curator prompt 精简: 仅输出 index+score, 不输出 reason (P2 优化).
+
+    P2 优化 (trace 4ad14970): prompt 明确要求 "不需要 reason",
+    减少 LLM 输出 token, 对应 max_tokens 4000→2000 优化.
+    """
+    mock_llm.achat.return_value = LLMResponse(
+        content='[{"index": 1, "score": 9}]',
+        model="test",
+    )
+
+    await curator_with_llm.curate_sources("测试查询", _make_sources(2), max_results=2)
+
+    # 捕获传给 LLM 的 prompt (messages[0]["content"])
+    messages = mock_llm.achat.call_args.args[0]
+    prompt = messages[0]["content"]
+
+    # 验证 prompt 要求输出 index 与 score
+    assert "index" in prompt
+    assert "score" in prompt
+    # 验证 prompt 明确声明不需要 reason
+    assert "reason" in prompt
+    assert "不需要" in prompt or "no reason" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_reason_empty_compatible(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 LLM 返回不含 reason 字段时, curator_reason 兼容为空字符串.
+
+    P2 优化后 prompt 仅要求 index+score, LLM 可能不返回 reason.
+    curate_sources 用 item.get("reason", "") 兼容解析, curator_reason 应为 "".
+    """
+    mock_llm.achat.return_value = LLMResponse(
+        content='[{"index": 1, "score": 9}, {"index": 2, "score": 7}]',
+        model="test",
+    )
+
+    result = await curator_with_llm.curate_sources("测试查询", _make_sources(3), max_results=3)
+
+    assert len(result) >= 1
+    # 所有结果的 curator_reason 应为空字符串 (LLM 未返回 reason)
+    for source in result:
+        assert source.get("curator_reason", "") == ""
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_reason_present_when_provided(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 LLM 返回含 reason 字段时, curator_reason 正常保留 (向后兼容).
+
+    虽然 P2 优化后 prompt 不要求 reason, 但解析逻辑仍兼容含 reason 的输出.
+    """
+    mock_llm.achat.return_value = LLMResponse(
+        content='[{"index": 1, "score": 9, "reason": "高度相关"}]',
+        model="test",
+    )
+
+    result = await curator_with_llm.curate_sources("测试查询", _make_sources(2), max_results=2)
+
+    assert len(result) >= 1
+    # 含 reason 时应正常保留
+    assert result[0]["curator_reason"] == "高度相关"
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_empty_list_returns_empty(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试空来源列表时直接返回空列表, 不调用 LLM."""
+    result = await curator_with_llm.curate_sources("测试查询", [], max_results=5)
+
+    assert result == []
+    mock_llm.achat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_curate_sources_fallback_on_parse_failure(
+    curator_with_llm: SourceCurator,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 LLM 返回无法解析的 JSON 时, 降级按可信度排序返回.
+
+    curate_sources 解析失败时, 不抛异常, 用 _score_credibility 排序返回原列表.
+    """
+    mock_llm.achat.return_value = LLMResponse(
+        content="这不是有效的 JSON",
+        model="test",
+    )
+
+    sources = _make_sources(3)
+    result = await curator_with_llm.curate_sources("测试查询", sources, max_results=3)
+
+    # 降级返回按可信度排序的结果
+    assert len(result) == 3
+    # 每条应含 credibility_score 与 combined_score
+    for s in result:
+        assert "credibility_score" in s
+        assert "combined_score" in s

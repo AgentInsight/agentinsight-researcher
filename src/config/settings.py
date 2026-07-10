@@ -427,6 +427,7 @@ class Settings(BaseSettings):
     # HumanAgent 通过 WebSocket 推送计划给前端, 阻塞等待用户反馈 (asyncio.Future, 带超时).
     human_review_enabled: bool = False  # 默认关闭, 启用后需前端 WebSocket 配合
     human_review_timeout: int = 300  # 等待用户反馈超时 (秒), 超时自动通过
+    graph_total_timeout: int = 300  # graph.ainvoke 总超时 (秒, P1-5: 防止节点卡死永久挂起)
     max_plan_revisions: int = 3  # 研究计划修订上限, 达上限强制通过 (守卫防死循环)
 
     # ========== WebSocket 双向实时通信 (P2-Future-02) ==========

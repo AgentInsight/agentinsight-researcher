@@ -88,6 +88,16 @@ class _FakeQdrantClient:
         self.calls["create_collection"].append(kwargs)
         return None
 
+    async def create_payload_index(
+        self,
+        collection_name: str,
+        field_name: str,
+        field_schema: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        """P0-14: 模拟 create_payload_index (namespace payload 索引创建)."""
+        pass
+
     async def upsert(self, **kwargs: Any) -> Any:
         self.calls["upsert"].append(kwargs)
         return None

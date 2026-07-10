@@ -211,22 +211,38 @@ class TokenBudgetAllocator:
             }
 
 
-# ========== 全局单例 ==========
-_allocator: TokenBudgetAllocator | None = None
-_allocator_lock = asyncio.Lock()
+# ========== per-session 单例 (P0-2: 避免跨会话预算串扰) ==========
+# key = session_id, value = TokenBudgetAllocator 实例
+_allocators: dict[str, TokenBudgetAllocator] = {}
+_allocators_lock = asyncio.Lock()
 
 
-async def get_token_budget_allocator() -> TokenBudgetAllocator:
-    """获取全局 TokenBudgetAllocator 单例.
+async def get_token_budget_allocator(session_id: str = "") -> TokenBudgetAllocator:
+    """获取指定会话的 TokenBudgetAllocator (P0-2: per-session 隔离).
 
-    从 settings.max_total_tokens 读取总预算.
+    每个 session_id 拥有独立的 allocator 实例, 避免:
+    - 会话 A 消耗 planner 预算后会话 B 的 planner 命中超支阈值
+    - 跨会话 _step_costs 累积导致 get_total_cost 返回全局累计
+
+    Args:
+        session_id: 会话 ID. 空字符串使用 "_default" 兜底.
+
+    Returns:
+        该会话专属的 TokenBudgetAllocator 实例.
     """
-    global _allocator
-    if _allocator is None:
-        async with _allocator_lock:
-            if _allocator is None:
-                from src.config.settings import get_settings
+    sid = session_id or "_default"
+    if sid in _allocators:
+        return _allocators[sid]
+    async with _allocators_lock:
+        if sid not in _allocators:
+            from src.config.settings import get_settings
 
-                settings = get_settings()
-                _allocator = TokenBudgetAllocator(settings.max_total_tokens)
-    return _allocator
+            settings = get_settings()
+            _allocators[sid] = TokenBudgetAllocator(settings.max_total_tokens)
+        return _allocators[sid]
+
+
+async def cleanup_token_budget_allocator(session_id: str) -> None:
+    """清理指定会话的 allocator (会话结束时调用, 防止内存泄漏)."""
+    async with _allocators_lock:
+        _allocators.pop(session_id, None)

@@ -87,7 +87,7 @@ def test_get_session_cost_accumulation():
     settings = Settings(_env_file=None)
     client = LLMClient(settings)
     # 初始状态 (含 step_costs 空字典)
-    assert client.get_session_cost() == {
+    assert client.get_session_cost("test-session") == {
         "call_count": 0,
         "input_tokens": 0,
         "output_tokens": 0,
@@ -95,10 +95,10 @@ def test_get_session_cost_accumulation():
         "step_costs": {},
     }
     # 手动累加 (模拟 achat 成功后调用, 按 step 分步累计)
-    client._accumulate("planner", 1000, 500, 0.0028)
-    client._accumulate("researcher", 2000, 800, 0.0056)
-    client._accumulate("planner", 500, 200, 0.0014)
-    stats = client.get_session_cost()
+    client._accumulate("test-session", "planner", 1000, 500, 0.0028)
+    client._accumulate("test-session", "researcher", 2000, 800, 0.0056)
+    client._accumulate("test-session", "planner", 500, 200, 0.0014)
+    stats = client.get_session_cost("test-session")
     assert stats["call_count"] == 3
     assert stats["input_tokens"] == 3500
     assert stats["output_tokens"] == 1500
@@ -113,10 +113,10 @@ def test_step_costs_rounding():
     settings = Settings(_env_file=None)
     client = LLMClient(settings)
     # 累加会产生浮点误差的值
-    client._accumulate("step", 0, 0, 0.0001)
-    client._accumulate("step", 0, 0, 0.0002)
-    client._accumulate("step", 0, 0, 0.0003)
-    stats = client.get_session_cost()
+    client._accumulate("test-session", "step", 0, 0, 0.0001)
+    client._accumulate("test-session", "step", 0, 0, 0.0002)
+    client._accumulate("test-session", "step", 0, 0, 0.0003)
+    stats = client.get_session_cost("test-session")
     assert stats["step_costs"]["step"] == pytest.approx(0.0006)
 
 

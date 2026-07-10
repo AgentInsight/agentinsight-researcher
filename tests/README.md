@@ -26,47 +26,167 @@
 
 ```
 tests/
-├── unit/           # 单元测试 (构建期, 不依赖外部服务)
+├── unit/           # 单元测试 (构建期, 不依赖外部服务, 全部 mock)
+│   ├── conftest.py
+│   │
+│   │ # ── 冒烟 / 配置 ──
 │   ├── test_smoke.py                       # 冒烟: 模块导入 + 配置加载
-│   ├── test_v4p3_integration.py            # 集成: V4-P3 三层路由 (mock 化)
+│   ├── test_config.py                      # Settings SSOT 配置校验
+│   │
+│   │ # ── API / 路由层 ──
+│   ├── test_server.py                      # FastAPI app 装配 + lifespan
+│   ├── test_routes.py                      # /v1/chat/completions 路由
+│   ├── test_api_middleware.py              # 中间件 (CORS/安全头/限流)
+│   ├── test_api_security.py                # 安全: API 鉴权
+│   ├── test_api_websocket.py               # /v1/ws/{session_id} WebSocket
+│   ├── test_api_mcp_routes.py              # /v1/mcp CRUD 路由
+│   ├── test_api_agent_discovery.py         # Agent 发现端点
+│   ├── test_api_feedback_queue.py          # /v1/feedback 人在回路队列
+│   ├── test_ip_user_resolver.py            # IP-based 用户身份解析 (SHA256, 不存储原 IP)
+│   ├── test_daily_report_limit.py          # 每日报告限额 (IP 限流)
+│   │
+│   │ # ── Graph / 编排层 ──
+│   ├── test_graph_builder.py               # StateGraph 构建器
+│   ├── test_graph_edges.py                 # 条件边 / 路由
+│   ├── test_graph_nodes.py                 # 节点纯函数
+│   ├── test_state.py                       # State schema + reducer
+│   ├── test_multi_agent_builder.py         # 多 Agent 构建 (Supervisor/Swarm)
+│   ├── test_agents_supervisor.py           # Supervisor 子图
+│   ├── test_agents_reviewer.py             # Reviewer 子智能体
+│   ├── test_agents_reviser.py              # Reviser 子智能体
+│   ├── test_agents_fact_checker.py         # FactChecker 子智能体
+│   ├── test_chat_builder.py                # ChatBuilder 消息组装
+│   │
+│   │ # ── Skills / 技能层 ──
 │   ├── test_skills_context_manager.py      # ContextManager 静态纯函数
 │   ├── test_skills_mcp_coordinator.py      # MCPCoordinator 缓存键生成
-│   ├── test_bm25_filter.py / test_bm25_integration.py
-│   ├── test_llmlingua_compressor.py
-│   ├── test_tei_circuit_breaker.py         # 安全: TEI 熔断器
-│   ├── test_api_security.py                # 安全: API 鉴权/注入
-│   ├── test_security_injection.py          # 安全: Prompt Injection
+│   ├── test_skills_prompts.py              # PromptFamily 模板
+│   ├── test_skills_query_classifier.py     # 查询分类器
+│   ├── test_skills_searchers.py            # 搜索器基类
+│   ├── test_skills_source_curator.py       # SourceCurator 可信度评分 (_score_credibility)
+│   ├── test_source_curator.py              # SourceCurator.curate_sources 综合排序
+│   ├── test_skills_report_generator.py     # ReportGenerator 报告生成
+│   ├── test_skills_publisher.py            # Publisher 导出分发
+│   ├── test_skills_image_generator.py      # ImageGenerator 图片生成
+│   │
+│   │ # ── RAG / 检索层 ──
+│   ├── test_retriever.py                   # Retriever 混合检索
+│   ├── test_rag_retriever_extended.py      # Retriever 扩展 (过滤/降级)
+│   ├── test_rag_embeddings.py              # Embeddings (TEI 客户端)
+│   ├── test_rag_qdrant_manager.py          # QdrantManager 集合/命名空间
+│   ├── test_rag_fallback_integration.py    # RAG 降级集成
+│   ├── test_qdrant_namespace.py            # namespace 隔离 (共享/私有)
+│   ├── test_bm25_filter.py                 # BM25Filter 关键词过滤
+│   ├── test_bm25_integration.py            # BM25 集成
+│   ├── test_bm25_redis_cache.py            # BM25 Redis 缓存
+│   ├── test_score_threshold.py             # 分数阈值过滤
+│   ├── test_embeddings_migration.py        # Embeddings 模型迁移 (bge-large→bge-base 768维)
+│   │
+│   │ # ── Scrapers / 抓取层 ──
+│   ├── test_scrapers.py                    # 抓取器基类
+│   ├── test_scraper_routing.py             # 抓取器路由
+│   ├── test_trafilatura_scraper.py         # Trafilatura 抓取器
+│   ├── test_bs_markdownify_scraper.py      # BS+markdownify 抓取器
+│   ├── test_normalize_markdown.py          # Markdown 归一化
+│   ├── test_close_http_client.py           # 共享 httpx 客户端关闭 (lifespan shutdown)
+│   ├── test_searcher_registry.py           # 搜索器注册表
 │   ├── test_metaso_searcher.py             # 秘塔搜索: payload/headers/响应解析 (mock httpx)
+│   ├── test_searxng_config.py              # SearXNG keep_only 21 引擎配置 (mwmbl 已移除)
+│   ├── test_duckduckgo_removed.py          # DuckDuckGo 移除验证 (SearXNG 替代)
+│   │
+│   │ # ── LLM / 网关层 ──
+│   ├── test_llm.py                         # LLMClient (LiteLLM 网关)
+│   ├── test_llm_key_resolver.py            # LLM 密钥解析
+│   ├── test_llm_classify_fallback.py       # LLM 分类降级
+│   ├── test_token_budget.py                # Token 预算
+│   │
+│   │ # ── Memory / 会话层 ──
+│   ├── test_memory_checkpointer.py         # PostgresSaver Checkpointer
+│   ├── test_memory_db_initializer.py       # DB 初始化 (init.sql 幂等)
+│   ├── test_memory_report_store.py         # 报告存储
+│   ├── test_checkpointer_unified.py        # 统一 Checkpointer
+│   │
+│   │ # ── MCP / 工具层 ──
+│   ├── test_mcp_research_integration.py    # MCP 研究集成
+│   ├── test_mcp_transport_modes.py         # MCP 传输模式 (stdio/sse)
+│   │
+│   │ # ── 可观测性 ──
+│   ├── test_tracing.py                     # AgentInsight 6 类 trace span
+│   ├── test_tracing_extended.py            # 追踪扩展 (span 传播/降级)
+│   ├── test_agentinsight_client.py         # AgentInsight 客户端
+│   │
+│   │ # ── 研究流程 / 性能优化 ──
+│   ├── test_research_conductor.py          # ResearchConductor 主流程
+│   ├── test_deep_research.py               # 深度研究
+│   ├── test_v4p3_integration.py            # 集成: V4-P3 三层路由 (mock 化)
+│   ├── test_v2_gptr_alignment.py           # V2 对齐 GPTR 7 项优化
+│   ├── test_gptr_borrow.py                 # GPTR 借鉴: 池化/域名限流/图片评分
+│   ├── test_phase4.py                      # Phase 4 (文件上传+动态角色+静态页)
+│   ├── test_context_compression.py         # 上下文压缩
+│   ├── test_fast_fail.py                   # 快速失败
+│   ├── test_fast_tier.py                   # ReportGenerator FAST tier 降级
+│   ├── test_chapter_parallel.py            # 章节并行
+│   ├── test_pipeline_parallel.py           # 流水线并行化 (plan_research 与私有数据并行)
+│   ├── test_publisher_export.py            # Publisher 导出
+│   ├── test_human_node_integration.py      # 人在回路节点
+│   ├── test_chitchat_responder.py          # 闲聊响应器
+│   ├── test_redis_client.py                # Redis 客户端
 │   ├── test_pdf_docx_fonts.py              # PDF/DOCX 字体: Dockerfile + debs 静态检查
-│   └── ...
+│   ├── test_tei_circuit_breaker.py         # 安全: TEI 熔断器
+│   └── __init__.py
 ├── functional/     # 功能测试 (部署后容器栈)
 │   ├── test_smoke_functional.py            # 冒烟: 容器栈健康检查
 │   ├── test_container_health.py            # 容器健康检查
-│   ├── test_qdrant_service.py / test_embeddings_service.py
+│   ├── test_qdrant_service.py              # Qdrant 服务
+│   ├── test_embeddings_service.py          # Embeddings 服务
+│   ├── test_postgres_service.py            # PostgreSQL 服务
+│   ├── test_redis_service.py               # Redis 服务
+│   ├── test_openai_compat_endpoint.py      # OpenAI 兼容端点
 │   ├── test_mcp_research_flow.py           # MCP HTTP 端到端 (真实容器)
-│   └── test_mcp_research_e2e.py            # MCP 协调器端到端 (mock MCP Server)
+│   ├── test_mcp_research_e2e.py            # MCP 协调器端到端 (mock MCP Server)
+│   └── __init__.py
 ├── regression/     # 回归测试 (合并 main 前门禁)
-│   ├── test_research_basic_report.py
-│   ├── test_session_persistence.py
-│   └── test_short_query.py
+│   ├── test_research_basic_report.py       # 基础研究报告
+│   ├── test_session_persistence.py         # 会话持久化
+│   ├── test_short_query.py                 # 短查询
+│   └── __init__.py
 ├── api/            # API 端到端 (OpenAI 兼容接口)
 │   ├── test_chat_completions.py            # /v1/chat/completions 流式 + 非流式
 │   ├── test_mcp_endpoints.py               # /v1/mcp CRUD
 │   ├── test_security.py                    # 安全: Bearer JWT 身份解析
 │   ├── test_security_injection.py          # 安全: 注入防护
-│   ├── test_feedback.py / test_files.py
+│   ├── test_feedback.py                    # /v1/feedback 人在回路
+│   ├── test_files.py                       # 文件上传
+│   ├── test_reports.py                     # 报告查询/下载
+│   ├── test_tool_permissions.py            # 工具权限隔离 (read/write/execute/network)
+│   └── __init__.py
 ├── e2e/            # 端到端 (完整链路)
 │   ├── test_api_flow.py                    # 提问 → 检索 → 工具 → 流式 → 持久化
-│   └── test_page_flow.py                   # 前端测试页面联调
+│   ├── test_page_flow.py                   # 前端测试页面联调
+│   ├── test_human_in_loop.py               # 人在回路完整链路
+│   ├── test_mcp_e2e_example.py             # MCP 端到端示例
+│   └── __init__.py
 ├── exploratory/    # 探索性 (边界/降级)
 │   ├── test_degradation.py                 # 降级场景
-│   └── test_edge_cases.py                  # 边界用例
+│   ├── test_edge_cases.py                  # 边界用例
+│   ├── test_config_combinations.py         # 配置组合
+│   └── __init__.py
 ├── performance/    # 性能 (延迟/吞吐/负载)
-│   ├── test_latency.py / test_throughput.py / test_load.py
-│   ├── test_performance_baseline.py
-│   └── test_performance_rag.py
+│   ├── conftest.py                         # performance 层 fixture
+│   ├── test_latency.py                     # 延迟
+│   ├── test_throughput.py                  # 吞吐
+│   ├── test_load.py                        # 负载
+│   ├── test_concurrent_load.py             # 并发负载
+│   ├── test_performance_baseline.py        # 性能基线
+│   ├── test_performance_rag.py             # RAG 性能
+│   ├── test_v4p3_performance.py            # V4-P3 三层路由性能
+│   ├── test_context_compression_perf.py    # 上下文压缩性能
+│   └── __init__.py
 ├── manual/         # 手动调试脚本 (非自动化测试, pytest --ignore 跳过, .gitignore 不入仓)
-│   └── README.md                          # 用途说明: 临时联调/排查脚本
+│   ├── README.md                           # 用途说明: 临时联调/排查脚本
+│   ├── test_smoke.py                       # 手动冒烟脚本
+│   ├── test_all_formats.py                 # 全格式导出验证
+│   └── __init__.py
 ├── conftest.py     # 全局配置: .env 加载 + 容器栈可达性自动跳过
 └── REPORT.md       # 测试报告
 ```

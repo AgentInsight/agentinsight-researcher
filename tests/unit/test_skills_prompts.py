@@ -244,3 +244,172 @@ def test_get_prompt_family_default_when_no_arg() -> None:
     """测试无参数时默认返回 DefaultPromptFamily."""
     family = get_prompt_family()
     assert isinstance(family, DefaultPromptFamily)
+
+
+# ========== curator_prompt 格式精简 (P2 优化: 仅 index+score, 移除 reason) ==========
+
+
+def test_default_curator_prompt_contains_index_and_score(
+    default_family: DefaultPromptFamily,
+) -> None:
+    """测试中文版 curator_prompt 要求输出 index 与 score 字段.
+
+    P2 优化 (trace 4ad14970): prompt 仅要求 index+score, 减少 LLM 输出 token.
+    """
+    prompt = default_family.curator_prompt("研究问题", "来源列表", "分析师", 5)
+    assert "index" in prompt
+    assert "score" in prompt
+
+
+def test_default_curator_prompt_no_reason_required(
+    default_family: DefaultPromptFamily,
+) -> None:
+    """测试中文版 curator_prompt 明确声明不需要 reason 字段.
+
+    P2 优化: prompt 含 "不需要 reason" 明确声明, 对应 max_tokens 4000→2000.
+    """
+    prompt = default_family.curator_prompt("研究问题", "来源列表", "分析师", 5)
+    assert "reason" in prompt
+    assert "不需要" in prompt
+
+
+def test_default_curator_prompt_example_format(
+    default_family: DefaultPromptFamily,
+) -> None:
+    """测试中文版 curator_prompt 示例格式仅含 index+score (无 reason).
+
+    示例 JSON 应为 {"index": 1, "score": 9} 格式, 不含 reason 字段.
+    """
+    prompt = default_family.curator_prompt("研究问题", "来源列表", "分析师", 5)
+    # 验证示例格式含 index 与 score
+    assert '"index": 1' in prompt or "'index': 1" in prompt
+    assert '"score": 9' in prompt or "'score': 9" in prompt
+    # 验证示例不含 reason
+    assert '"reason"' not in prompt
+    assert "'reason'" not in prompt
+
+
+def test_default_curator_prompt_includes_max_results(
+    default_family: DefaultPromptFamily,
+) -> None:
+    """测试中文版 curator_prompt 含 max_results 参数."""
+    prompt = default_family.curator_prompt("研究问题", "来源列表", "分析师", 7)
+    assert "7" in prompt
+
+
+def test_default_curator_prompt_includes_query_and_sources(
+    default_family: DefaultPromptFamily,
+) -> None:
+    """测试中文版 curator_prompt 含查询与来源文本."""
+    prompt = default_family.curator_prompt("新能源市场", "[1] 来源A", "分析师", 5)
+    assert "新能源市场" in prompt
+    assert "[1] 来源A" in prompt
+
+
+def test_english_curator_prompt_contains_index_and_score(
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试英文版 curator_prompt 要求输出 index 与 score 字段."""
+    prompt = english_family.curator_prompt("question", "sources", "role", 5)
+    assert "index" in prompt
+    assert "score" in prompt
+
+
+def test_english_curator_prompt_no_reason_required(
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试英文版 curator_prompt 明确声明不需要 reason 字段.
+
+    P2 优化: prompt 含 "no reason needed" 明确声明.
+    """
+    prompt = english_family.curator_prompt("question", "sources", "role", 5)
+    assert "reason" in prompt
+    assert "no reason" in prompt.lower()
+
+
+def test_english_curator_prompt_example_format(
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试英文版 curator_prompt 示例格式仅含 index+score (无 reason)."""
+    prompt = english_family.curator_prompt("question", "sources", "role", 5)
+    assert '"index": 1' in prompt or "'index': 1" in prompt
+    assert '"score": 9' in prompt or "'score': 9" in prompt
+    assert '"reason"' not in prompt
+    assert "'reason'" not in prompt
+
+
+# ========== 中文版与英文版 curator_prompt 一致性 ==========
+
+
+def test_curator_prompt_zh_en_both_contain_index_score(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 均含 index 与 score 字段要求."""
+    zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 5)
+    en_prompt = english_family.curator_prompt("query", "sources", "role", 5)
+    assert "index" in zh_prompt
+    assert "index" in en_prompt
+    assert "score" in zh_prompt
+    assert "score" in en_prompt
+
+
+def test_curator_prompt_zh_en_both_declare_no_reason(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 均明确声明不需要 reason (P2 优化一致性)."""
+    zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 5)
+    en_prompt = english_family.curator_prompt("query", "sources", "role", 5)
+    # 中文版含 "不需要 reason"
+    assert "不需要" in zh_prompt
+    assert "reason" in zh_prompt
+    # 英文版含 "no reason"
+    assert "no reason" in en_prompt.lower()
+
+
+def test_curator_prompt_zh_en_both_example_no_reason(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 示例 JSON 均不含 reason 字段."""
+    zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 5)
+    en_prompt = english_family.curator_prompt("query", "sources", "role", 5)
+    # 两版示例均不含 reason
+    assert '"reason"' not in zh_prompt
+    assert '"reason"' not in en_prompt
+
+
+def test_curator_prompt_zh_en_both_contain_max_results(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 均含 max_results 数值."""
+    zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 8)
+    en_prompt = english_family.curator_prompt("query", "sources", "role", 8)
+    assert "8" in zh_prompt
+    assert "8" in en_prompt
+
+
+def test_curator_prompt_zh_en_both_contain_query_and_sources(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 均含查询与来源文本."""
+    zh_prompt = default_family.curator_prompt("新能源", "[1] 来源", "角色", 5)
+    en_prompt = english_family.curator_prompt("新能源", "[1] 来源", "role", 5)
+    assert "新能源" in zh_prompt
+    assert "新能源" in en_prompt
+    assert "[1] 来源" in zh_prompt
+    assert "[1] 来源" in en_prompt
+
+
+def test_curator_prompt_zh_en_both_contain_quantitative_value(
+    default_family: DefaultPromptFamily,
+    english_family: EnglishPromptFamily,
+) -> None:
+    """测试中英版 curator_prompt 均含 Quantitative Value 评估维度 (对标 GPTR)."""
+    zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 5)
+    en_prompt = english_family.curator_prompt("query", "sources", "role", 5)
+    assert "Quantitative Value" in zh_prompt
+    assert "Quantitative Value" in en_prompt

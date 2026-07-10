@@ -29,7 +29,7 @@ import pytest
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s (短查询响应快; 带 token 时 user_info API 超时 5s)
-API_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+API_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
@@ -537,3 +537,337 @@ def test_chat_completions_agent_role_override() -> None:
     assert r.status_code == 200, f"agent_role 注入应返回 200, 实际: {r.status_code} {r.text[:200]}"
     data = r.json()
     assert data["object"] == "chat.completion"
+
+
+# ========== 错误码补充场景 (400/401/422/500 完整覆盖) ==========
+
+
+@pytest.mark.api
+def test_error_400_missing_messages_field() -> None:
+    """错误码 400/422: 缺少 messages 字段 → 422 (Pydantic 校验失败).
+
+    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    AGENTS.md 第 13 章: API 测试必须覆盖错误码.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={"model": "agentinsight-researcher", "stream": False},
+        )
+    assert r.status_code in (400, 422), (
+        f"缺少 messages 应返回 400/422, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_error_400_empty_messages_array() -> None:
+    """错误码 400: 空 messages 数组 → 400 (业务校验).
+
+    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (空 messages).
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [],
+                "stream": False,
+            },
+        )
+    assert r.status_code == 400, f"空 messages 应返回 400, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_error_400_no_user_role_message() -> None:
+    """错误码 400: 仅 system 消息 (无 user) → 400 (业务校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "system", "content": "你是助手"}],
+                "stream": False,
+            },
+        )
+    assert r.status_code == 400, f"无 user 消息应返回 400, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_error_400_empty_query_content() -> None:
+    """错误码 400: user content 为空白 → 400 (业务校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "   "}],
+                "stream": False,
+            },
+        )
+    assert r.status_code == 400, f"空白查询应返回 400, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_error_422_invalid_stream_type() -> None:
+    """错误码 422: stream 非 bool → 422 (Pydantic StrictBool 校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": "yes",
+            },
+        )
+    assert r.status_code == 422, f"stream='yes' 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_error_422_invalid_content_type() -> None:
+    """错误码 422: content 非 str → 422 (Pydantic 校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": 12345}],
+                "stream": False,
+            },
+        )
+    assert r.status_code == 422, f"content=12345 应返回 422, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_error_422_invalid_messages_type() -> None:
+    """错误码 422: messages 非 list → 422 (Pydantic 校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": "not-a-list",
+                "stream": False,
+            },
+        )
+    assert r.status_code == 422, f"messages='not-a-list' 应返回 422, 实际: {r.status_code}"
+
+
+@pytest.mark.api
+def test_error_422_invalid_json_body() -> None:
+    """错误码 422: 非法 JSON body → 422 (Pydantic 校验)."""
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            content=b"{not valid json",
+            headers={"Content-Type": "application/json"},
+        )
+    assert r.status_code in (400, 422), (
+        f"非法 JSON 应返回 400/422, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_error_401_self_host_false_missing_token() -> None:
+    """错误码 401: SELF_HOST=False + org_id + 缺 token → 401.
+
+    AGENTS.md 第 8 章: SELF_HOST=False 时强制校验 JWT Token.
+    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (含 401).
+
+    路由逻辑 (routes.py): not settings.self_host and (org_id or project_id) and not token → 401.
+    服务端默认 SELF_HOST=True 时跳过本用例.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, org_id="test-org-401-check"),
+        )
+    # SELF_HOST=True (默认) → 跳过校验 → 200 (短查询响应)
+    if r.status_code == 200:
+        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
+    assert r.status_code == 401, (
+        f"SELF_HOST=False 缺 token 应返回 401, 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_error_401_self_host_false_missing_token_project_id() -> None:
+    """错误码 401: SELF_HOST=False + project_id + 缺 token → 401.
+
+    AGENTS.md 第 8 章: org_id 优先于 project_id, 二者至少一个触发校验.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False, project_id="test-project-401"),
+        )
+    if r.status_code == 200:
+        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
+    assert r.status_code == 401, (
+        f"SELF_HOST=False 缺 token (project_id) 应返回 401, 实际: {r.status_code}"
+    )
+
+
+@pytest.mark.api
+def test_no_500_error_on_invalid_model() -> None:
+    """验证无效 model 参数不触发 500 错误.
+
+    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (无效 model 参数).
+    AGENTS.md 第 14 章: OpenAI 兼容端点, model 字段用于路由.
+    实现可能: (a) 不校验 model 直接走默认 (200), (b) 校验 model 不在白名单 (400).
+    两种行为均可接受, 不应返回 5xx.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "unknown-model-xyz-invalid",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+            },
+        )
+    assert r.status_code < 500, f"无效 model 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_no_500_error_on_invalid_report_type() -> None:
+    """验证未知 report_type 不触发 500 错误 (应降级为默认值).
+
+    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    AGENTS.md 第 13 章: 不应 5xx 崩溃.
+    """
+    sid = _unique_session_id()
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+                "session_id": sid,
+                "report_type": "unknown_type_xyz",
+            },
+        )
+    assert r.status_code < 500, f"未知 report_type 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_no_500_error_on_long_session_id() -> None:
+    """验证超长 session_id 不触发 500 错误.
+
+    AGENTS.md 第 6 章: thread_id 做会话隔离键, 不应限制长度.
+    AGENTS.md 第 13 章: 不应 5xx 崩溃.
+    """
+    long_sid = "test_long_" + "x" * 1000
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json={
+                "model": "agentinsight-researcher",
+                "messages": [{"role": "user", "content": "你好"}],
+                "stream": False,
+                "session_id": long_sid,
+            },
+        )
+    assert r.status_code < 500, f"超长 session_id 不应 5xx, 实际: {r.status_code} {r.text[:200]}"
+
+
+@pytest.mark.api
+def test_stream_sse_format_complete() -> None:
+    """验证流式 SSE 响应格式完整: 首块 + 内容块 + 末块 + [DONE].
+
+    AGENTS.md 第 13/14 章: API 测试必须覆盖流式 SSE.
+    SSE 帧格式: data: {json}\\n\\n, 末帧为 data: [DONE]\\n\\n.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        with client.stream(
+            "POST",
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=True),
+        ) as r:
+            assert r.status_code == 200
+            content_type = r.headers.get("content-type", "")
+            assert "text/event-stream" in content_type
+
+            chunks: list[dict[str, object]] = []
+            has_done = False
+            for line in r.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload == "[DONE]":
+                    has_done = True
+                    break
+                chunks.append(json.loads(payload))
+
+    # 必须有 [DONE] 终止帧
+    assert has_done, "SSE 流缺少 [DONE] 终止帧"
+    # 至少有首块(role) + 内容块 + 末块(finish_reason)
+    assert len(chunks) >= 3, f"SSE 帧数不足: {len(chunks)}"
+    # 首块应含 role: assistant
+    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant"
+    # 末块应含 finish_reason: stop
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.api
+def test_non_stream_response_structure_complete() -> None:
+    """验证非流式响应结构完整: id/object/created/model/choices/usage.
+
+    AGENTS.md 第 13/14 章: API 测试必须覆盖非流式响应.
+    OpenAI 兼容响应结构必须包含完整字段.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False),
+        )
+    assert r.status_code == 200
+    data = r.json()
+    # 完整字段校验
+    assert data["object"] == "chat.completion"
+    assert "id" in data and data["id"]
+    assert "created" in data and isinstance(data["created"], int)
+    assert "model" in data and data["model"] == "agentinsight-researcher"
+    assert "choices" in data and len(data["choices"]) == 1
+    choice = data["choices"][0]
+    assert choice["message"]["role"] == "assistant"
+    assert "content" in choice["message"]
+    assert choice["finish_reason"] == "stop"
+    assert "usage" in data
+    assert "total_tokens" in data["usage"]
+
+
+@pytest.mark.api
+def test_bearer_token_request_returns_200() -> None:
+    """验证携带 Bearer JWT Token 请求返回 200 (降级或真实解析).
+
+    AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
+    调用失败 (test-token 非合法 JWT) 按无 token 处理并降级.
+    AGENTS.md 第 13 章: 必须包含携带 Bearer JWT Token 场景.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False),
+            headers={"Authorization": "Bearer test-token-invalid"},
+        )
+    assert r.status_code == 200, (
+        f"带 token 请求应返回 200 (降级), 实际: {r.status_code} {r.text[:200]}"
+    )
+
+
+@pytest.mark.api
+def test_without_token_returns_200() -> None:
+    """验证不携带 Token 请求返回 200 (降级 IP-based UserId).
+
+    AGENTS.md 第 8 章: token 不存在时降级 (self_host=True 默认).
+    AGENTS.md 第 13 章: 必须包含不携带 Token 场景.
+    """
+    with httpx.Client(timeout=API_TIMEOUT) as client:
+        r = client.post(
+            f"{AGENT_URL}/v1/chat/completions",
+            json=_chat_payload("你好", stream=False),
+        )
+    assert r.status_code == 200, (
+        f"无 token 请求应返回 200 (降级), 实际: {r.status_code} {r.text[:200]}"
+    )

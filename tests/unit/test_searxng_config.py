@@ -2,7 +2,7 @@
 
 验证 SearXNG 元搜索引擎配置的正确性:
 1. use_default_settings.engines.keep_only 模式已启用
-2. 指定 22 个引擎全部在 keep_only 列表中 (国内 14 + 国外 8)
+2. 指定 21 个引擎全部在 keep_only 列表中 (国内 13 + 国外 8)
 3. google / duckduckgo 不在 keep_only 列表 (从根源排除)
 4. bing 系列强制使用 cn.bing.com (中国可访问镜像)
 5. secret_key 已配置 (容器间通信鉴权)
@@ -24,9 +24,9 @@ pytestmark = pytest.mark.unit
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SEARXNG_SETTINGS = _PROJECT_ROOT / "config" / "searxng" / "settings.yml"
 
-# 用户指定的 22 个保留引擎 (国内 14 + 国外 8; mojeek 已移除因 HTTP 403)
+# 用户指定的 21 个保留引擎 (国内 13 + 国外 8; mojeek 已移除因 HTTP 403, mwmbl 已移除)
 _EXPECTED_ENGINES = {
-    # 国内引擎 (14 个)
+    # 国内引擎 (13 个)
     "baidu",
     "baidu images",
     "bing",
@@ -40,11 +40,10 @@ _EXPECTED_ENGINES = {
     "360search videos",
     "quark",
     "quark images",
-    # 国外可用引擎 (8 个, 与国内 14 个合计 22 个; mojeek 已移除因 HTTP 403)
+    # 国外可用引擎 (8 个, 与国内 13 个合计 21 个; mojeek 已移除因 HTTP 403, mwmbl 已移除)
     "arxiv",
     "pubmed",
     "crossref",
-    "mwmbl",
     "github",
     "yandex",
     "stackoverflow",
@@ -240,7 +239,7 @@ def test_limiter_disabled() -> None:
 
 
 def test_all_expected_engines_explicitly_enabled() -> None:
-    """keep_only 中的 22 个引擎在 engines 段均显式 disabled: false."""
+    """keep_only 中的 21 个引擎在 engines 段均显式 disabled: false."""
     settings = _load_searxng_settings()
     engines = settings.get("engines", [])
     engines_by_name = {e.get("name"): e for e in engines if isinstance(e, dict)}
@@ -309,7 +308,7 @@ def test_search_formats_includes_json() -> None:
 
 
 def test_keep_only_engine_count_matches() -> None:
-    """keep_only 列表引擎总数与用户指定一致 (22 个)."""
+    """keep_only 列表引擎总数与用户指定一致 (21 个)."""
     settings = _load_searxng_settings()
     keep_only = settings["use_default_settings"]["engines"]["keep_only"]
     flat_keep_only: set[str] = set()
@@ -320,6 +319,6 @@ def test_keep_only_engine_count_matches() -> None:
             for sub_item in item:
                 if isinstance(sub_item, str):
                     flat_keep_only.add(sub_item.strip())
-    assert len(flat_keep_only) >= 22, (
-        f"keep_only 引擎总数应 >= 22 (用户指定), 实际: {len(flat_keep_only)}"
+    assert len(flat_keep_only) >= 21, (
+        f"keep_only 引擎总数应 >= 21 (用户指定), 实际: {len(flat_keep_only)}"
     )

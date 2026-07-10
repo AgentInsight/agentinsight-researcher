@@ -23,6 +23,7 @@ WebSocket 消息类型 (对标 GPTR 8 类):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, ClassVar
 
@@ -118,9 +119,11 @@ class WebSocketManager:
     """
 
     _instance: ClassVar[WebSocketManager | None] = None
+    _MAX_CONNECTIONS: ClassVar[int] = 100  # P1-2: 并发连接上限, 防止内存无界增长
 
     def __init__(self) -> None:
         self._active_connections: dict[str, WebSocket] = {}
+        self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
         """接受连接并存储 (覆盖同 session_id 旧连接).
@@ -166,6 +169,12 @@ class WebSocketManager:
         elif settings.env == "dev":
             logger.warning("DEV: WebSocket JWT 鉴权已关闭 (不安全), session_id=%s", session_id)
 
+        # P1-2: 并发连接上限, 防止内存无界增长
+        if len(self._active_connections) >= self._MAX_CONNECTIONS:
+            logger.warning("WebSocket 连接数已达上限 %d, 拒绝新连接", self._MAX_CONNECTIONS)
+            await websocket.close(code=1013, reason="Try again later")
+            return False
+
         old = self._active_connections.get(session_id)
         if old is not None:
             try:
@@ -189,23 +198,68 @@ class WebSocketManager:
     async def send_message(self, session_id: str, message: dict[str, Any]) -> bool:
         """发送 JSON 消息到指定 session.
 
-        返回是否成功 (False 表示无连接或发送失败).
+        P1-2: 增加 5s 超时, 防止 TCP 窗口满时无限阻塞.
+
+        Returns:
+            是否成功 (False 表示无连接或发送失败).
         """
         ws = self._active_connections.get(session_id)
         if ws is None:
             return False
         try:
-            await ws.send_json(message)
+            # P1-2: 5s 超时防止慢客户端阻塞
+            await asyncio.wait_for(ws.send_json(message), timeout=5.0)
             return True
+        except asyncio.TimeoutError:  # noqa: UP041
+            logger.warning("WebSocket 发送超时 session=%s, 断开慢客户端", session_id)
+            self.disconnect(session_id)
+            return False
         except Exception as e:  # noqa: BLE001
             logger.warning("WebSocket 发送失败 session=%s: %s", session_id, e)
             self.disconnect(session_id)
             return False
 
     async def broadcast(self, session_ids: list[str], message: dict[str, Any]) -> None:
-        """批量发送到多个 session."""
-        for sid in session_ids:
-            await self.send_message(sid, message)
+        """批量发送到多个 session (P1-2: 并行 + 超时).
+
+        P1-2: 原 for 循环串行 await, 慢客户端阻塞其他客户端.
+        改用 asyncio.gather 并行发送, return_exceptions 避免单失败中断.
+        """
+        if not session_ids:
+            return
+        await asyncio.gather(
+            *[self.send_message(sid, message) for sid in session_ids],
+            return_exceptions=True,
+        )
+
+    def start_heartbeat(self) -> None:
+        """启动服务端心跳任务 (P1-2: 检测并清理死连接)."""
+        if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+    async def stop_heartbeat(self) -> None:
+        """停止心跳任务."""
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            self._heartbeat_task = None
+
+    async def _heartbeat_loop(self) -> None:
+        """心跳循环: 每 30s ping 所有连接, 超时/失败则断开 (P1-2)."""
+        while True:
+            await asyncio.sleep(30)
+            dead_sessions: list[str] = []
+            for sid, ws in list(self._active_connections.items()):
+                try:
+                    await asyncio.wait_for(ws.send_json({"type": "ping"}), timeout=5.0)
+                except Exception:  # noqa: BLE001
+                    dead_sessions.append(sid)
+            for sid in dead_sessions:
+                logger.info("WebSocket 心跳超时, 断开死连接: session_id=%s", sid)
+                self.disconnect(sid)
 
 
 _ws_manager: WebSocketManager | None = None
@@ -245,6 +299,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     if not connected:
         # V4-P0-03: Origin/JWT 校验失败, connect() 已发送 close 帧, 直接返回
         return
+
+    # P1-2: 启动心跳检测
+    manager.start_heartbeat()
 
     # 发送连接成功消息
     await manager.send_message(

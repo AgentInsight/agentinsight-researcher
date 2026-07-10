@@ -127,13 +127,9 @@ class LLMClient:
     """
 
     settings: Settings = field(default_factory=get_settings)
-    # 会话级累计成本追踪 (实例变量, 每次 achat/achat_stream 成功后累加)
-    _call_count: int = field(default=0, init=False)
-    _total_input_tokens: int = field(default=0, init=False)
-    _total_output_tokens: int = field(default=0, init=False)
-    _total_cost_usd: float = field(default=0.0, init=False)
-    # P1-Future-01: 分步成本追踪 {step: cost_usd}, 每项保留 6 位小数
-    _step_costs: dict[str, float] = field(default_factory=dict, init=False)
+    # P0-1: 成本追踪改为 per-session 隔离 (全局单例不再累积跨会话成本)
+    # key = session_id, value = {call_count, input_tokens, output_tokens, cost_usd, step_costs}
+    _session_costs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
 
     # P1-Future-05: tier 降级链映射. FAST 失败后无降级 (None), 抛出原异常.
     _FALLBACK_TIER: ClassVar[dict[LLMTier, LLMTier | None]] = {
@@ -248,32 +244,64 @@ class LLMClient:
         }
 
     def _accumulate(
-        self, step: str, input_tokens: int, output_tokens: int, cost_usd: float
+        self,
+        session_id: str,
+        step: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
     ) -> None:
-        """累加会话级成本统计 (每次 achat/achat_stream 成功后调用).
+        """累加 per-session 成本统计 (每次 achat/achat_stream 成功后调用).
 
+        P0-1: 成本按 session_id 隔离, 全局单例不再累积跨会话成本.
         P1-Future-01: 同时按 step 累计分步成本, 供 get_session_cost 返回分布.
         """
-        self._call_count += 1
-        self._total_input_tokens += input_tokens
-        self._total_output_tokens += output_tokens
-        self._total_cost_usd += cost_usd
-        self._step_costs[step] = round(self._step_costs.get(step, 0.0) + cost_usd, 6)
+        sid = session_id or "_default"
+        if sid not in self._session_costs:
+            self._session_costs[sid] = {
+                "call_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+                "step_costs": {},
+            }
+        sc = self._session_costs[sid]
+        sc["call_count"] += 1
+        sc["input_tokens"] += input_tokens
+        sc["output_tokens"] += output_tokens
+        sc["cost_usd"] = round(sc["cost_usd"] + cost_usd, 6)
+        sc["step_costs"][step] = round(sc["step_costs"].get(step, 0.0) + cost_usd, 6)
 
-    def get_session_cost(self) -> dict[str, Any]:
-        """返回会话级累计成本统计.
+    def get_session_cost(self, session_id: str = "") -> dict[str, Any]:
+        """返回指定会话的累计成本统计 (P0-1: per-session 隔离).
 
-        含: call_count / input_tokens / output_tokens / cost_usd / step_costs.
-        每次成功 achat/achat_stream 后自动累加; 失败调用不计入.
-        step_costs: {step: cost_usd} 分步成本分布 (P1-Future-01).
+        Args:
+            session_id: 会话 ID. 空字符串返回空统计 (不返回全局累计).
+
+        Returns:
+            含 call_count / input_tokens / output_tokens / cost_usd / step_costs.
         """
+        sid = session_id or "_default"
+        sc = self._session_costs.get(sid)
+        if sc is None:
+            return {
+                "call_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+                "step_costs": {},
+            }
         return {
-            "call_count": self._call_count,
-            "input_tokens": self._total_input_tokens,
-            "output_tokens": self._total_output_tokens,
-            "cost_usd": round(self._total_cost_usd, 6),
-            "step_costs": dict(self._step_costs),
+            "call_count": sc["call_count"],
+            "input_tokens": sc["input_tokens"],
+            "output_tokens": sc["output_tokens"],
+            "cost_usd": round(sc["cost_usd"], 6),
+            "step_costs": dict(sc["step_costs"]),
         }
+
+    def cleanup_session_cost(self, session_id: str) -> None:
+        """清理指定会话的成本数据 (会话结束时调用, 防止内存泄漏)."""
+        self._session_costs.pop(session_id, None)
 
     async def _achat_with_tier(
         self,
@@ -544,19 +572,20 @@ class LLMClient:
                         },
                     )
                     # 累计会话级 + 分步成本 (成功后)
+                    # P0-1: 成本按 session_id 隔离, 不再累积到全局单例
                     self._accumulate(
+                        session_id or "",
                         step,
                         response.input_tokens,
                         response.output_tokens,
                         response.cost_usd,
                     )
                     # P1-04: 同步回写 TokenBudgetAllocator (统一两套成本系统)
-                    # 对标 GPTR add_costs() 分步归因, 升级为预算上限管控.
-                    # 失败不阻断主流程 (BudgetExceededError 仅 warning log, 不抛出).
+                    # P0-2: allocator 按 session_id 隔离, 避免跨会话预算串扰
                     try:
                         from src.llm.token_budget import get_token_budget_allocator
 
-                        allocator = await get_token_budget_allocator()
+                        allocator = await get_token_budget_allocator(session_id or "")
                         await allocator.add_cost(
                             step,
                             prompt_tokens=response.input_tokens,
@@ -762,12 +791,20 @@ class LLMClient:
                 )
 
                 # 累计会话级 + 分步成本 (成功后)
-                self._accumulate(step, total_input_tokens, total_output_tokens, cost_usd)
+                # P0-1: 成本按 session_id 隔离, 不再累积到全局单例
+                self._accumulate(
+                    session_id or "",
+                    step,
+                    total_input_tokens,
+                    total_output_tokens,
+                    cost_usd,
+                )
                 # P1-04: 同步回写 TokenBudgetAllocator (流式分支)
+                # P0-2: allocator 按 session_id 隔离
                 try:
                     from src.llm.token_budget import get_token_budget_allocator
 
-                    allocator = await get_token_budget_allocator()
+                    allocator = await get_token_budget_allocator(session_id or "")
                     await allocator.add_cost(
                         step,
                         prompt_tokens=total_input_tokens,

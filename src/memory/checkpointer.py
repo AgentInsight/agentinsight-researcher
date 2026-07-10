@@ -130,3 +130,23 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
             exc_info=True,
         )
         raise RuntimeError(f"PostgresSaver 初始化失败: {exc}") from exc
+
+
+async def close_checkpointer_pool() -> None:
+    """关闭 Checkpointer 的 psycopg 连接池 (应用 shutdown 时调用, P1-10).
+
+    幂等: 无实例时直接返回.
+    """
+    global _checkpointer_instance
+    if _checkpointer_instance is not None:
+        try:
+            # AsyncPostgresSaver 内部持有 AsyncConnectionPool
+            # 通过 conn 属性获取 pool 并关闭
+            pool = getattr(_checkpointer_instance, "conn", None)
+            if pool is not None and hasattr(pool, "close"):
+                await pool.close()
+            logger.info("Checkpointer psycopg 连接池已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("关闭 Checkpointer 连接池失败: %s", e)
+        finally:
+            _checkpointer_instance = None

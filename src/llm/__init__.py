@@ -8,6 +8,7 @@ from src.llm.token_budget import (
     BudgetExceededError,
     StepCost,
     TokenBudgetAllocator,
+    cleanup_token_budget_allocator,
     get_token_budget_allocator,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "BudgetExceededError",
     "StepCost",
     "TokenBudgetAllocator",
+    "cleanup_token_budget_allocator",
     "get_token_budget_allocator",
 ]

@@ -86,9 +86,22 @@ async def init_database(settings: Settings | None = None) -> bool:
     try:
         conn = await asyncpg.connect(dsn)
         try:
-            # asyncpg.execute 可执行多语句 SQL (含 CREATE TABLE/INDEX/EXTENSION)
-            await conn.execute(sql)
-            logger.info("PostgreSQL 业务表初始化完成 (init.sql 已执行, 幂等)")
+            # P2-3: 按分号拆分逐条执行, 独立事务隔离错误
+            # 原 conn.execute(sql) 在非 autocommit 模式下隐式开启事务,
+            # 中间失败会回滚全部已执行的 DDL. 拆分后每条独立执行.
+            statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+            failed_count = 0
+            for stmt in statements:
+                try:
+                    await conn.execute(stmt)
+                except Exception as stmt_err:  # noqa: BLE001
+                    # 单条失败不阻断后续 (DDL 幂等, 可能是列已存在等)
+                    logger.debug("SQL 语句执行跳过 (可能已存在): %s", str(stmt_err)[:200])
+                    failed_count += 1
+            logger.info(
+                "PostgreSQL 业务表初始化完成 (init.sql 已执行, 幂等, %d 条跳过)",
+                failed_count,
+            )
             return True
         finally:
             await conn.close()
@@ -119,7 +132,7 @@ def _replace_db_in_dsn(dsn: str, new_db: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
 
 
-__all__ = ["get_pool", "init_database"]
+__all__ = ["get_pool", "init_database", "close_pool"]
 
 
 async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
@@ -159,6 +172,7 @@ async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
             min_size=min(2, pool_size),
             max_size=pool_size,
             command_timeout=30,
+            max_inactive_connection_lifetime=300,  # P1-9: 回收闲置连接 (5分钟)
         )
         logger.info(
             "asyncpg 连接池已初始化 (业务表 CRUD, min=%d max=%d)",
@@ -166,3 +180,15 @@ async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
             pool_size,
         )
         return _pool_instance
+
+
+async def close_pool() -> None:
+    """关闭 asyncpg 连接池 (应用 shutdown 时调用, P1-10).
+
+    幂等: 无实例时直接返回.
+    """
+    global _pool_instance
+    if _pool_instance is not None:
+        await _pool_instance.close()
+        _pool_instance = None
+        logger.info("asyncpg 连接池已关闭")

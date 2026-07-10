@@ -10,6 +10,8 @@ import pytest
 
 from src.config.settings import Settings, get_settings
 
+pytestmark = pytest.mark.unit
+
 
 def test_settings_defaults(monkeypatch):
     """测试默认配置 (隔离环境变量干扰)."""
@@ -115,3 +117,48 @@ def test_get_settings_cached():
     s1 = get_settings()
     s2 = get_settings()
     assert s1 is s2
+
+
+# ========== FastEmbed ONNX 线程配置 (P0, trace 4ad14970 优化) ==========
+
+
+def test_fastembed_onnx_intra_threads_default(monkeypatch):
+    """测试 fastembed_onnx_intra_threads 默认值为 0 (自动, 使用 cpu_count)."""
+    monkeypatch.delenv("FASTEMBED_ONNX_INTRA_THREADS", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.fastembed_onnx_intra_threads == 0
+
+
+def test_fastembed_onnx_inter_threads_default(monkeypatch):
+    """测试 fastembed_onnx_inter_threads 默认值为 0 (自动, 使用 cpu_count//2)."""
+    monkeypatch.delenv("FASTEMBED_ONNX_INTER_THREADS", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.fastembed_onnx_inter_threads == 0
+
+
+def test_search_cache_ttl_default(monkeypatch):
+    """测试 search_cache_ttl 默认值为 300 (5 分钟)."""
+    monkeypatch.delenv("SEARCH_CACHE_TTL", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.search_cache_ttl == 300
+
+
+def test_fastembed_onnx_intra_threads_from_env(monkeypatch):
+    """测试 FASTEMBED_ONNX_INTRA_THREADS 环境变量覆盖."""
+    monkeypatch.setenv("FASTEMBED_ONNX_INTRA_THREADS", "8")
+    settings = Settings(_env_file=None)
+    assert settings.fastembed_onnx_intra_threads == 8
+
+
+def test_fastembed_onnx_inter_threads_from_env(monkeypatch):
+    """测试 FASTEMBED_ONNX_INTER_THREADS 环境变量覆盖."""
+    monkeypatch.setenv("FASTEMBED_ONNX_INTER_THREADS", "4")
+    settings = Settings(_env_file=None)
+    assert settings.fastembed_onnx_inter_threads == 4
+
+
+def test_search_cache_ttl_from_env(monkeypatch):
+    """测试 SEARCH_CACHE_TTL 环境变量覆盖."""
+    monkeypatch.setenv("SEARCH_CACHE_TTL", "600")
+    settings = Settings(_env_file=None)
+    assert settings.search_cache_ttl == 600

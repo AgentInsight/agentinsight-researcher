@@ -54,4 +54,8 @@ filterwarnings = [
     "ignore:unclosed transport <_ProactorSocketTransport:ResourceWarning",
     "ignore:unclosed transport <asyncio._SSLProtocolTransport:ResourceWarning",
     "ignore:Enable tracemalloc to get traceback:ResourceWarning",
+    # agentinsight SDK pydantic v1 兼容层在 Python 3.14 下的警告 (第三方库, 等待 SDK 升级)
+    "ignore::UserWarning:agentinsight.api.core.pydantic_utilities",
+    # jieba 依赖 pkg_resources (已被 setuptools 弃用, 等待 jieba 升级)
+    "ignore::UserWarning:jieba._compat",
 ]

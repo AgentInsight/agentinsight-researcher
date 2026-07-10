@@ -108,6 +108,8 @@ class QdrantManager:
             from qdrant_client.http.models import (
                 Distance,
                 HnswConfigDiff,
+                OptimizersConfigDiff,
+                PayloadSchemaType,
                 ScalarQuantization,
                 ScalarQuantizationConfig,
                 ScalarType,
@@ -139,6 +141,17 @@ class QdrantManager:
                 ),
                 hnsw_config=hnsw_config,
                 quantization_config=quantization_config,
+                optimizers_config=OptimizersConfigDiff(
+                    indexing_threshold=10000,
+                    flush_interval_sec=5,
+                ),
+            )
+            # P0-14: 为 namespace 字段创建 payload 索引 (大集合过滤性能关键)
+            # 所有检索都按 namespace payload 字段过滤, 无索引时全扫描
+            await self._client.create_payload_index(
+                collection_name=self.settings.qdrant_collection,
+                field_name="namespace",
+                field_schema=PayloadSchemaType.KEYWORD,
             )
             self._collection_ready = True
 

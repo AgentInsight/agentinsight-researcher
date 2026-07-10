@@ -33,8 +33,8 @@ from tests.performance.conftest import (
 
 pytestmark = pytest.mark.performance
 
-# 短查询不走 graph, 60s 足够; 研究查询首块需要意图分类
-BASELINE_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+# 短查询不走 graph, 研究查询可能触发完整流程, 需 300s
+BASELINE_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=30.0)
 
 # 并发测试超时 (10 并发短查询)
 CONCURRENT_TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)

@@ -19,14 +19,35 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
 
 from src.api.agent_discovery import router as discovery_router
 from src.api.mcp_routes import router as mcp_router
-from src.api.middleware import JWTAuthMiddleware, SecurityHeadersMiddleware
+from src.api.middleware import (
+    JWTAuthMiddleware,
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+    close_jwt_middleware,
+)
 from src.api.routes import router as api_router
+from src.common.exceptions import AgentError
 from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+# P0-4: 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _create_background_task(coro: object) -> asyncio.Task[None]:
+    """创建后台任务并保留引用 (P0-4: 防止 GC 静默取消).
+
+    标准模式: set + done_callback(discard), 任务完成后自动从集合移除.
+    """
+    task: asyncio.Task[None] = asyncio.create_task(coro)  # type: ignore[arg-type]
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 @asynccontextmanager
@@ -59,8 +80,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await _ensure_qdrant_collection()  # 同步等待, 确保集合就绪后再启动
 
-    # 阶段 2: 初始化 LangGraph 图 (延迟到首次请求构建, 避免启动时连 Postgres)
-    # 阶段 3: 可预热图
+    # P1-OPT-009: LangGraph 图预热 (后台任务触发首次构建, 首次请求直接复用单例)
+    # 见下方 _warmup_graph() 后台任务, 消除首次请求 20-50ms 编译开销
 
     # P2 清理: 启动时一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据
     # QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 实施后, 第二层 Embeddings+Qdrant 语义匹配
@@ -73,7 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001
             logger.warning("Qdrant 旧种子清理失败 (不阻断启动): %s", e)
 
-    asyncio.create_task(_cleanup_legacy_chat_seeds())
+    _create_background_task(_cleanup_legacy_chat_seeds())
 
     # P0-03: Embeddings 批量预热 (后台执行, 不阻塞启动)
     # 触发 TEI 模型加载, 避免首次真实调用冷启动; 失败不阻断启动
@@ -85,7 +106,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001
             logger.warning("Embeddings 预热失败 (不阻断): %s", e)
 
-    asyncio.create_task(_warmup_embeddings())
+    _create_background_task(_warmup_embeddings())
 
     # P1: FastEmbed 模型预热 (trace 4ad14970 优化, 消除首次调用 10s+ 冷启动延迟)
     # 触发 ONNX 模型加载 + ONNX Runtime 线程初始化, 避免首次请求冷启动; 失败不阻断启动
@@ -99,7 +120,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001
             logger.warning("FastEmbed 预热失败 (不阻断): %s", e)
 
-    asyncio.create_task(_warmup_fastembed())
+    _create_background_task(_warmup_fastembed())
+
+    # P1-OPT-009: 全局单图编译 (启动时预热, 首次请求直接复用, 消除 20-50ms 编译开销)
+    # 复用 routes._get_graph() 全局单例 (懒加载), 后台触发首次构建; 失败不阻断启动
+    # 单例机制已在 src/api/routes.py 实现 (_compiled_graph + _get_graph), 这里仅预热
+    async def _warmup_graph() -> None:
+        try:
+            from src.api.routes import _get_graph
+
+            await _get_graph()  # 触发首次构建并存入全局单例
+            logger.info("LangGraph 研究图已预热 (全局单例, QPS 预期 +44%%)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("图预热失败 (不阻断启动, 首次请求时重试): %s", e)
+
+    _create_background_task(_warmup_graph())
 
     yield
 
@@ -123,6 +158,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from src.skills.researcher.scrapers import close_shared_http_client
 
     await close_shared_http_client()
+
+    # P1-1: 关闭 JWTAuthMiddleware 的 httpx.AsyncClient (P1-3: 纯 ASGI middleware 无法从 app 获取实例)
+    await close_jwt_middleware()
+
+    # P1-10: 关闭 asyncpg 业务表连接池 (优雅 shutdown, 避免连接泄漏)
+    from src.memory.db_initializer import close_pool
+
+    await close_pool()
+
+    # P1-10: 关闭 Checkpointer 的 psycopg 连接池 (优雅 shutdown)
+    from src.memory.checkpointer import close_checkpointer_pool
+
+    await close_checkpointer_pool()
 
     logger.info("agentinsight-researcher 关闭")
 
@@ -157,6 +205,9 @@ def create_app() -> FastAPI:
     # 安全响应头中间件 (AGENTS.md 第 11 章, 不可绕过)
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # P0-10: 统一请求追踪 ID 中间件 (纯 ASGI, 注入 X-Request-ID)
+    app.add_middleware(RequestIDMiddleware)
+
     # 健康检查 (AGENTS.md 第 12 章, 容器健康检查端点)
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -180,6 +231,42 @@ def create_app() -> FastAPI:
         from src.api.websocket import router as ws_router
 
         app.include_router(ws_router)
+
+    # P0-9: 全局异常处理器 (结构化 JSON 错误响应, 符合 OpenAI 兼容 API 规范)
+    @app.exception_handler(AgentError)
+    async def agent_error_handler(request: Request, exc: AgentError) -> JSONResponse:
+        """捕获 Agent 系统自定义异常, 返回结构化错误响应."""
+        logger.warning(
+            "AgentError: %s (code=%s, http_status=%s)",
+            exc.message,
+            exc.code,
+            exc.http_status,
+        )
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={
+                "error": {
+                    "message": exc.message,
+                    "type": exc.__class__.__name__,
+                    "code": exc.code,
+                }
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        """捕获所有未处理异常, 返回 500 JSON (避免 Starlette 默认格式泄露堆栈)."""
+        logger.exception("Unhandled exception: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "message": "Internal Server Error",
+                    "type": "internal_error",
+                    "code": "internal_error",
+                }
+            },
+        )
 
     # 前端测试页面 (AGENTS.md 第 14 章)
     if settings.enable_test_page:
