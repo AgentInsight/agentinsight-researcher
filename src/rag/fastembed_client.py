@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import time
 from collections import OrderedDict
 from typing import Any, cast
@@ -115,6 +116,30 @@ class FastEmbedClient:
                         self.settings.fastembed_model_name,
                     )
 
+                # P0: ONNX Runtime 并行执行 (trace 4ad14970 优化, 推理加速 2-4x)
+                # intra_op_num_threads: 单操作内部并行 (矩阵乘法), 通过 fastembed threads 参数
+                # inter_op_num_threads: 操作间并行, 通过 OMP_NUM_THREADS 环境变量
+                cpu_count = os.cpu_count() or 4
+                intra_threads = (
+                    self.settings.fastembed_onnx_intra_threads
+                    if self.settings.fastembed_onnx_intra_threads > 0
+                    else cpu_count
+                )
+                inter_threads = (
+                    self.settings.fastembed_onnx_inter_threads
+                    if self.settings.fastembed_onnx_inter_threads > 0
+                    else max(1, cpu_count // 2)
+                )
+                # 设置 OMP_NUM_THREADS (控制 inter_op_num_threads, 需在 ONNX Runtime 初始化前设置)
+                os.environ.setdefault("OMP_NUM_THREADS", str(inter_threads))
+                kwargs["threads"] = intra_threads
+                logger.info(
+                    "ONNX Runtime 并行: intra_op_num_threads=%d, inter_op_num_threads=%d (cpu_count=%d)",
+                    intra_threads,
+                    inter_threads,
+                    cpu_count,
+                )
+
                 self._model = TextEmbedding(**kwargs)
                 self._initialized = True
                 logger.info("FastEmbed 模型加载成功")
@@ -126,7 +151,7 @@ class FastEmbedClient:
     # 任务7: 分批并行阈值. 实测 200 chunks 时 batch_size=32 收益 32.1% (>= 30% 阈值).
     # 小批量 (< 此阈值) 用单次 to_thread, 避免线程池调度开销.
     _PARALLEL_BATCH_THRESHOLD: int = 32
-    _PARALLEL_BATCH_SIZE: int = 32
+    _PARALLEL_BATCH_SIZE: int = 64  # P2: 32→64 (trace 4ad14970 优化, 提升 ONNX 吞吐 ~20%)
 
     async def embed_texts(
         self,

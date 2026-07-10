@@ -132,7 +132,12 @@ services:
   searxng:
     # 元搜索引擎 (替代 DuckDuckGo 直连, 国内可用), 聚合 Bing/Baidu/Brave 等
     # 仅绑定 127.0.0.1, agent 容器通过 compose 网络以服务名 searxng:8099 访问
-    image: docker.io/searxng/searxng:latest
+    # 自定义镜像: 构建时预装 curl_cffi (替代启动时 pip install, 加速容器启动)
+    # 生产联网模式: Dockerfile.searxng 构建时联网 pip install curl_cffi
+    build:
+      context: .
+      dockerfile: Dockerfile.searxng
+    image: agentinsight-searxng:latest
     restart: always
     ports:
       - "127.0.0.1:8099:8099"
@@ -141,18 +146,6 @@ services:
     environment:
       # SearXNG 镜像启动脚本通过 SEARXNG_PORT 覆盖 settings.yml 的 server.port
       SEARXNG_PORT: "8099"
-    # P0 修复: 启动时安装 curl_cffi (sogou_stealth/baidu_stealth/quark_stealth 引擎依赖, 模拟 Chrome TLS 指纹)
-    # SearXNG 镜像 entrypoint.sh 最后一行 exec granian 会忽略 CMD, 必须用 entrypoint 覆盖
-    # 在原 entrypoint.sh 之前注入 ensurepip + pip install, 然后 exec 原 entrypoint (保留 volume/setup 逻辑)
-    # curl_cffi 不可用时 stealth 引擎自动降级为 httpx (可能触发 CAPTCHA, 但引擎仍可加载)
-    # 保留 || true 容错 (pip 失败不阻断 SearXNG 启动)
-    entrypoint:
-      - "sh"
-      - "-c"
-      - |
-        /usr/local/searxng/.venv/bin/python3 -m ensurepip --upgrade || true
-        /usr/local/searxng/.venv/bin/python3 -m pip install --no-cache-dir curl_cffi || true
-        exec /usr/local/searxng/entrypoint.sh
     volumes:
       # 配置文件 (含引擎开关/limiter/redis 配置)
       - ./config/searxng/settings.yml:/etc/searxng/settings.yml

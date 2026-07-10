@@ -21,10 +21,13 @@ P1-Future-04: planner prompt 经 PromptFamily 策略注入 (支持中英多语�
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from typing import Any, cast
 
 from src.common.json_utils import safe_json_parse
+from src.common.redis_client import get_redis_client
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
 from src.observability.tracing import trace_chain
@@ -608,6 +611,71 @@ class ResearchConductor:
             query_domains=query_domains,
         )
 
+    async def _cached_search(
+        self,
+        searcher: BaseSearcher,
+        query: str,
+        *,
+        max_results: int,
+        query_domains: list[str] | None,
+        user_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """带 Redis 缓存的搜索 (相同 query+engine 5min TTL, trace 4ad14970 优化).
+
+        子主题嵌套研究常重复搜索相同 query+engine, Redis 缓存避免重复调用.
+        Redis 不可用时降级为直接搜索 (无缓存).
+
+        Args:
+            searcher: 搜索引擎实例
+            query: 搜索查询词
+            max_results: 最大结果数
+            query_domains: 域名过滤列表
+            user_id: 用户 ID (用于 Redis key 隔离)
+
+        Returns:
+            搜索结果列表
+        """
+        # 缓存 key: {agent_id}:{user_id}:search:result:{engine}:{query_hash}
+        query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        agent_id = self.settings.agent_name
+        uid = user_id or "anonymous"
+        cache_key = f"{agent_id}:{uid}:search:result:{searcher.name}:{query_hash}"
+
+        # 1. 尝试读缓存
+        redis = await get_redis_client(self.settings)
+        if redis is not None:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    logger.debug(
+                        "搜索缓存命中: engine=%s, query=%s",
+                        searcher.name,
+                        query[:50],
+                    )
+                    return cast(list[dict[str, Any]], json.loads(cached))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("搜索缓存读取失败 (降级直接搜索): %s", e)
+
+        # 2. 缓存未命中: 直接搜索
+        result = await searcher.search(
+            query,
+            max_results=max_results,
+            query_domains=query_domains,
+        )
+
+        # 3. 写入缓存 (仅缓存非空结果, TTL=5min)
+        if redis is not None and result:
+            try:
+                await redis.setex(
+                    cache_key,
+                    self.settings.search_cache_ttl,
+                    json.dumps(result, ensure_ascii=False, default=str),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("搜索缓存写入失败 (不阻断): %s", e)
+
+        return result
+
     async def _process_sub_query(
         self,
         sub_query: str,
@@ -642,12 +710,14 @@ class ResearchConductor:
         logger.info(f"sub_query 搜索引擎列表 (region={region}): {active_engines}")
 
         try:
-            # 2. 并行搜索 (多个搜索引擎)
+            # 2. 并行搜索 (多个搜索引擎) + P1 Redis 缓存 (相同 query+engine 5min TTL)
             search_tasks = [
-                s.search(
+                self._cached_search(
+                    s,
                     sub_query,
                     max_results=self.settings.max_search_results_per_query,
                     query_domains=query_domains,
+                    user_id=user_id,
                 )
                 for s in searchers
             ]

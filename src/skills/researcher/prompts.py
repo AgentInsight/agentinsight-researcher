@@ -433,6 +433,7 @@ class DefaultPromptFamily(PromptFamily):
         # - 强调 "Quantitative Value" (GPTR 出现 5 次)
         # - 5 维评估 (Relevance/Credibility/Currency/Objectivity/Quantitative Value)
         # - "Err on the side of inclusion" (宁多勿少)
+        # P2: prompt 精简 (trace 4ad14970 优化), 仅输出 index+score, 不输出 reason
         return f"""{agent_role}
 
 你的任务是: 评估以下搜索来源的相关性与可信度, 选出最值得引用的 {max_results} 条.
@@ -442,7 +443,7 @@ class DefaultPromptFamily(PromptFamily):
 2. **可信度 (Credibility)**: 来源权威性 (官方机构 > 学术期刊 > 行业媒体 > 自媒体)
 3. **时效性 (Currency)**: 信息新鲜度 (优先近 12 个月数据)
 4. **客观性 (Objectivity)**: 是否存在明显立场偏见或商业推广
-5. **数据丰富度 (Quantitative Value)**: 是否含具体数字/百分比/金额/统计指标 (Quantitative Value 是核心评估维度, 含统计数据的来源优先级显著高于纯文字描述)
+5. **数据丰富度 (Quantitative Value)**: 是否含具体数字/百分比/金额/统计指标 (含统计数据的来源优先级显著高于纯文字描述)
 
 【原则】: Err on the side of inclusion (宁多勿少) — 数据丰富的来源即使相关性略低也优先保留.
 
@@ -451,8 +452,8 @@ class DefaultPromptFamily(PromptFamily):
 来源列表:
 {sources_text}
 
-请返回 JSON 数组, 每项含 index (1-based) 与 score (0-10) 与 reason (含数据丰富度说明):
-[{{"index": 1, "score": 9, "reason": "官方权威数据, 含市场规模 1.2 万亿元与 CAGR 18.5% 统计指标"}}, ...]
+请返回 JSON 数组, 每项仅含 index (1-based) 与 score (0-10), 不需要 reason:
+[{{"index": 1, "score": 9}}, ...]
 
 仅返回最相关的 {max_results} 条的 JSON 数组:"""
 
@@ -817,6 +818,7 @@ Generate the complete research report (Markdown format):"""
         max_results: int,
     ) -> str:
         # V2-P1: align with GPTR SourceCurator (5 dimensions + Quantitative Value)
+        # P2: prompt 精简 (trace 4ad14970 优化), 仅输出 index+score, 不输出 reason
         return f"""{agent_role}
 
 Your task is: evaluate the relevance and credibility of the following search sources, and select the top {max_results} most worthy of citation.
@@ -826,7 +828,7 @@ Your task is: evaluate the relevance and credibility of the following search sou
 2. **Credibility**: source authority (official > academic journals > industry media > blogs)
 3. **Currency**: information freshness (prioritize last 12 months)
 4. **Objectivity**: whether there is obvious bias or commercial promotion
-5. **Quantitative Value**: whether it contains specific numbers/percentages/amounts/statistics (Quantitative Value is a core evaluation dimension; sources with statistics are significantly prioritized over pure text descriptions)
+5. **Quantitative Value**: whether it contains specific numbers/percentages/amounts/statistics (sources with statistics are significantly prioritized over pure text descriptions)
 
 【Principle】: Err on the side of inclusion — data-rich sources are preferred even if relevance is slightly lower.
 
@@ -835,8 +837,8 @@ Research question: {query}
 Source list:
 {sources_text}
 
-Return a JSON array, each item containing index (1-based), score (0-10), and reason (with quantitative value description):
-[{{"index": 1, "score": 9, "reason": "authoritative official data, contains $1.2T market size and 18.5% CAGR statistics"}}, ...]
+Return a JSON array, each item containing only index (1-based) and score (0-10), no reason needed:
+[{{"index": 1, "score": 9}}, ...]
 
 Return only the JSON array of the top {max_results} most relevant sources:"""
 

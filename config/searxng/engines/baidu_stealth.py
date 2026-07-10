@@ -149,6 +149,7 @@ def _warmup_baiduid_cookie(headers: dict[str, str]) -> dict[str, str] | None:
 
         return None
 
+
 # ========== 引擎元数据 (复用原 baidu 配置) ==========
 if _HAS_ORIGINAL_BAIDU:
     about = _baidu.about

@@ -260,6 +260,17 @@ class Settings(BaseSettings):
     )
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度
+    # P0: ONNX Runtime 并行执行 (trace 4ad14970 优化, 推理加速 2-4x)
+    # intra_op_num_threads: 单操作内部并行线程数 (矩阵乘法等)
+    # inter_op_num_threads: 操作间并行线程数 (独立操作并行)
+    fastembed_onnx_intra_threads: int = (
+        0  # 0=自动 (cpu_count), 环境变量: FASTEMBED_ONNX_INTRA_THREADS
+    )
+    fastembed_onnx_inter_threads: int = (
+        0  # 0=自动 (cpu_count//2), 环境变量: FASTEMBED_ONNX_INTER_THREADS
+    )
+    # P1: 搜索结果 Redis 缓存 TTL (相同 query+engine, 秒)
+    search_cache_ttl: int = 300  # 5 分钟, 环境变量: SEARCH_CACHE_TTL
 
     # ========== 搜索引擎 (用户需求 5, 中文优先) ==========
     bocha_api_key: str | None = None

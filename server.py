@@ -87,6 +87,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     asyncio.create_task(_warmup_embeddings())
 
+    # P1: FastEmbed 模型预热 (trace 4ad14970 优化, 消除首次调用 10s+ 冷启动延迟)
+    # 触发 ONNX 模型加载 + ONNX Runtime 线程初始化, 避免首次请求冷启动; 失败不阻断启动
+    async def _warmup_fastembed() -> None:
+        try:
+            from src.rag.fastembed_client import get_fastembed_client
+
+            client = get_fastembed_client()
+            await client.embed_texts(["预热"])
+            logger.info("FastEmbed 模型预热完成 (ONNX Runtime 已初始化)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("FastEmbed 预热失败 (不阻断): %s", e)
+
+    asyncio.create_task(_warmup_fastembed())
+
     yield
 
     # P0-5: 关闭全局 Redis 单例 (由 common.redis_client 统一工厂创建, lifespan 统一关闭)

@@ -367,10 +367,25 @@ class ContextManager:
                 query_emb = all_embs[0]
                 doc_embs = all_embs[1:]
 
-                # P1-8: 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
+                # P1-8 + P1(trace 4ad14970): 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
+                # 旧版仅缓存 sha256(doc_text), 与 compute_embedding_batch 查询 key sha256(chunk) 不匹配
+                # 新版拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
+                from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
+
                 for doc_text, doc_emb in zip(documents, doc_embs, strict=False):
-                    cache_key = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
-                    self._written_compressor._chunk_cache[cache_key] = doc_emb
+                    # 缓存 doc 级 (单 chunk 场景命中)
+                    doc_cache_key = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
+                    self._written_compressor._chunk_cache[doc_cache_key] = doc_emb
+                    # 拆分为 chunk 级, 与 compute_embedding_batch 查询 key 对齐 (多 chunk 场景命中)
+                    doc_chunks = recursive_split(
+                        doc_text,
+                        separators=DEFAULT_SEPARATORS,
+                        chunk_size=self.settings.embeddings_filter_chunk_size,
+                        chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
+                    ) or [doc_text]
+                    for chunk_text in doc_chunks:
+                        chunk_cache_key = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+                        self._written_compressor._chunk_cache[chunk_cache_key] = doc_emb
 
                 similarities: list[tuple[float, str]] = []
                 for doc, emb in zip(documents, doc_embs, strict=False):

@@ -114,7 +114,11 @@ def _warmup_quark_cookie(headers: dict[str, str]) -> dict[str, str] | None:
 
     # 1. 检查缓存是否有效 (TTL 未过期 + 使用次数未超限)
     now = time.time()
-    if _QUARK_COOKIE_CACHE is not None and now < _QUARK_COOKIE_EXPIRE and _QUARK_COOKIE_USE_COUNT < _QUARK_COOKIE_MAX_USES:
+    if (
+        _QUARK_COOKIE_CACHE is not None
+        and now < _QUARK_COOKIE_EXPIRE
+        and _QUARK_COOKIE_USE_COUNT < _QUARK_COOKIE_MAX_USES
+    ):
         _QUARK_COOKIE_USE_COUNT += 1
         return _QUARK_COOKIE_CACHE
 
@@ -122,7 +126,11 @@ def _warmup_quark_cookie(headers: dict[str, str]) -> dict[str, str] | None:
     with _QUARK_LOCK:
         # double-check (可能其他线程已 warmup 完成)
         now = time.time()
-        if _QUARK_COOKIE_CACHE is not None and now < _QUARK_COOKIE_EXPIRE and _QUARK_COOKIE_USE_COUNT < _QUARK_COOKIE_MAX_USES:
+        if (
+            _QUARK_COOKIE_CACHE is not None
+            and now < _QUARK_COOKIE_EXPIRE
+            and _QUARK_COOKIE_USE_COUNT < _QUARK_COOKIE_MAX_USES
+        ):
             _QUARK_COOKIE_USE_COUNT += 1
             return _QUARK_COOKIE_CACHE
 

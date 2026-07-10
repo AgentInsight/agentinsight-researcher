@@ -48,6 +48,7 @@ packages/nodejs/
 packages/npm-pkgs/
 packages/playwright-browsers/
 packages/uv/
+packages/searxng-wheels/
 !packages/wheels/.gitkeep
 !packages/debs/.gitkeep
 !packages/models/.gitkeep
@@ -56,6 +57,7 @@ packages/uv/
 !packages/npm-pkgs/.gitkeep
 !packages/playwright-browsers/.gitkeep
 !packages/uv/.gitkeep
+!packages/searxng-wheels/.gitkeep
 
 # QA 模式构建文件 (AGENTS.md 第 12 章三套构建模式, 不入仓)
 docker-compose-qa.yaml

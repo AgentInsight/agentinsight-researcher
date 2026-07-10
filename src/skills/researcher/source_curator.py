@@ -201,7 +201,7 @@ class SourceCurator:
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.2,
-                max_tokens=4000,  # P1-6: 8000→4000 (预过滤后输入已减少, 输出上限同步缩减)
+                max_tokens=2000,  # P0: 4000→2000 (trace 4ad14970 优化, 策展 JSON 仅需 index+score, 不需要长输出)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="curator-llm",

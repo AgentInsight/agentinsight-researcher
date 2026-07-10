@@ -1,0 +1,36 @@
+# SearXNG 自定义镜像 (构建时预装 curl_cffi, 替代启动时 pip install)
+# 严格遵循 AGENTS.md 第 12 章: 构建时预装依赖, 非运行时下载
+#
+# curl_cffi 用于 sogou_stealth/baidu_stealth/quark_stealth 引擎 (模拟 Chrome TLS 指纹规避 CAPTCHA)
+# SearXNG 镜像 entrypoint.sh 最后一行 exec granian 会忽略 CMD, 故必须构建时预装
+#
+# 双模式安装 (与 Dockerfile.qa Node.js/uv "有则装无则跳过" 模式一致):
+# - 离线模式 (QA/生产离线): packages/searxng-wheels/ 存在 wheel, --no-index 离线安装
+# - 联网模式 (生产联网): packages/searxng-wheels/ 无 wheel (仅 .gitkeep), 联网 pip install
+#
+# 预下载 wheel (QA/离线模式必需): powershell -ExecutionPolicy Bypass -File scripts\prepare-searxng-packages.ps1
+
+FROM docker.io/searxng/searxng:latest
+
+# SearXNG venv Python 路径 (Alpine 镜像, venv 在 /usr/local/searxng/.venv)
+ARG SEARXNG_VENV_PY=/usr/local/searxng/.venv/bin/python3
+
+# 复制预下载的 wheel (离线模式); 若目录仅有 .gitkeep 则联网安装
+COPY packages/searxng-wheels/ /tmp/searxng-wheels/
+
+# 安装 curl_cffi 到 SearXNG venv
+# 离线模式: --no-index --find-links 从本地 wheel 安装 (AGENTS.md 第 12 章离线硬约束)
+# 联网模式: 联网 pip install (ensurepip 确保 pip 可用, 生产联网模式允许联网)
+# 安装失败不阻断构建 (|| true), stealth 引擎将降级为 httpx (可能触发 CAPTCHA 但引擎仍可加载)
+RUN if ls /tmp/searxng-wheels/*.whl 2>/dev/null 1>&2; then \
+        echo "[SearXNG] 离线安装 curl_cffi (从 packages/searxng-wheels/)"; \
+        $SEARXNG_VENV_PY -m pip install --no-index --find-links=/tmp/searxng-wheels curl_cffi || true; \
+    else \
+        echo "[SearXNG] 联网安装 curl_cffi (packages/searxng-wheels/ 无 wheel)"; \
+        $SEARXNG_VENV_PY -m ensurepip --upgrade || true; \
+        $SEARXNG_VENV_PY -m pip install --no-cache-dir curl_cffi || true; \
+    fi && \
+    rm -rf /tmp/searxng-wheels && \
+    # 验证安装结果 (不阻断构建)
+    $SEARXNG_VENV_PY -c "import curl_cffi; print(f'[SearXNG] curl_cffi {curl_cffi.__version__} 已安装')" 2>/dev/null || \
+    echo "[SearXNG][WARNING] curl_cffi 未安装, stealth 引擎将降级为 httpx (可能触发 CAPTCHA)"
