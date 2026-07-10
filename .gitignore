@@ -96,3 +96,5 @@ test_results/
 tests/manual/
 /temp
 /evals/rag/results
+/docker-build.offline.self.sh
+/docker-compose-offline-self.yaml
