@@ -74,9 +74,10 @@ def _build_evaluator_llm() -> Any:
     from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio
 
     saved = save_original_asyncio()
-    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
     from langchain_openai import ChatOpenAI
     from ragas.llms import LangchainLLMWrapper
+
+    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
 
     restore_original_asyncio(saved)
 
@@ -101,9 +102,10 @@ def _build_evaluator_embeddings() -> Any:
     from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio
 
     saved = save_original_asyncio()
-    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
     from langchain_openai import OpenAIEmbeddings
     from ragas.embeddings import LangchainEmbeddingsWrapper
+
+    import evals.rag._compat_shim  # noqa: F401 — 修复 langchain_community 0.4+ 兼容性
 
     restore_original_asyncio(saved)
 

@@ -47,7 +47,7 @@ def main() -> None:
         ],
         "stream": True,
         "report_type": "deep_research",  # 深度研究 (触发多 Agent 流水线)
-        "multi_agent": True,             # 显式启用多 Agent Supervisor 模式
+        "multi_agent": True,  # 显式启用多 Agent Supervisor 模式
         "report_format": "markdown",
         "tone": "objective",
         # 自定义行业 persona (优先级高于 LLM 自动生成)
@@ -77,7 +77,7 @@ def main() -> None:
         for line in response.iter_lines():
             if not line or not line.startswith("data: "):
                 continue
-            data_str = line[len("data: "):]
+            data_str = line[len("data: ") :]
 
             if data_str == "[DONE]":
                 break
@@ -120,7 +120,9 @@ def main() -> None:
     if sources:
         print("\n来源 Top 5:")
         # 按 score 降序取前 5
-        for i, src in enumerate(sorted(sources, key=lambda x: x.get("score", 0), reverse=True)[:5], 1):
+        for i, src in enumerate(
+            sorted(sources, key=lambda x: x.get("score", 0), reverse=True)[:5], 1
+        ):
             print(f"  {i}. [{src.get('score', 0):.2f}] {src.get('title', '')}")
             print(f"     {src.get('url', '')}")
     if report_id:

@@ -373,13 +373,17 @@ async def test_update_bm25_corpus_non_empty_initializes_bm25(
 # ========== _bm25_cache_uid 共享/私有 namespace 区分 ==========
 
 
-def test_bm25_cache_uid_shared_namespace_uses_default_user(
+def test_bm25_cache_uid_shared_namespace_uses_anonymous(
     retriever: HybridRetriever,
 ) -> None:
-    """_bm25_cache_uid: 共享 namespace 用 default_user_id (跨用户共享缓存)."""
+    """_bm25_cache_uid: 共享 namespace 用 anonymous 常量 (跨用户共享缓存).
+
+    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层共享 namespace
+    缓存键用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
+    """
     retriever._qdrant.build_data_shared_namespace = MagicMock(return_value="agent-data")
     uid = retriever._bm25_cache_uid("agent-data", user_id="user123")
-    assert uid == retriever.settings.default_user_id
+    assert uid == "anonymous"
 
 
 def test_bm25_cache_uid_private_namespace_uses_user_id(
@@ -394,7 +398,7 @@ def test_bm25_cache_uid_private_namespace_uses_user_id(
 def test_bm25_cache_uid_private_namespace_none_user_falls_back(
     retriever: HybridRetriever,
 ) -> None:
-    """_bm25_cache_uid: 用户私有 namespace + user_id=None → default_user_id."""
+    """_bm25_cache_uid: 用户私有 namespace + user_id=None → anonymous 常量."""
     retriever._qdrant.build_data_shared_namespace = MagicMock(return_value="agent-data")
     uid = retriever._bm25_cache_uid("agent-data:user123", user_id=None)
-    assert uid == retriever.settings.default_user_id
+    assert uid == "anonymous"

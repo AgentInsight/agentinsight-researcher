@@ -1,4 +1,4 @@
-﻿# agentinsight-researcher 运行时依赖锁定文件
+# agentinsight-researcher 运行时依赖锁定文件
 # 此文件由 pip-compile 从 requirements.in 生成, 请勿手动修改。
 # 重新生成: pip-compile requirements.in
 # 严格遵守 AGENTS.md 第 1/4/9/10 章技术栈与禁用清单
@@ -73,6 +73,7 @@ playwright==1.61.0  # JS 渲染抓取(可选, 镜像内安装 chromium)
 PyMuPDF==1.28.0  # PDF 抓取与解析
 trafilatura==2.1.0  # 网页内容提取, 轻量级去噪, LLM 友好 Markdown 输出
 markdownify==1.2.3  # HTML→Markdown 转换
+curl_cffi>=0.7  # CAPTCHA 重试: 模拟 Chrome TLS+HTTP2 指纹绕过 CDN 反爬 (纯本地, 非 SaaS)
 
 # === 文档加载 (用户需求 8, 文件上传) ===
 # 仅 langchain-core 允许, 文档加载器自研薄封装避免引入 langchain-community

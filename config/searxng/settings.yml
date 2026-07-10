@@ -63,6 +63,17 @@ ui:
 
 # 无需 redis (limiter=false, 无限流数据需持久化)
 
+# botdetection 配置 (P0 修复: 解决 "X-Forwarded-For nor X-Real-IP header is set!" 警告)
+# 即使 limiter=false, SearXNG 的 ProxyFix 中间件仍会检查 X-Forwarded-For 头并记录警告。
+# trusted_proxies 配置 Docker 网络网段, 使 ProxyFix 信任来自 agent 容器的 X-Forwarded-For 头。
+# 配合 src/skills/researcher/searchers/searx.py 中添加 X-Forwarded-For 请求头使用。
+botdetection:
+  trusted_proxies:
+    - 127.0.0.1
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
 # =============================================================================
 # engines 部分覆盖 keep_only 保留引擎的运行时配置
 # 说明: 仅 keep_only 列表中的引擎会被加载; google/duckduckgo 等未列入的引擎
@@ -93,9 +104,10 @@ engines:
     base_url: https://cn.bing.com
     timeout: 10.0
 
-  # baidu: 显式启用
+  # baidu: 显式启用 (P0 修复: engine 改用 baidu_stealth, curl_cffi Chrome TLS 指纹规避 CAPTCHA)
+  # baidu_stealth 自定义引擎文件: config/searxng/engines/baidu_stealth.py
   - name: baidu
-    engine: baidu
+    engine: baidu_stealth
     shortcut: bd
     disabled: false
     timeout: 10.0
@@ -119,9 +131,11 @@ engines:
     disabled: false
     timeout: 10.0
 
-  # sogou: 显式启用
+  # sogou: 显式启用 (P0 修复: engine 改用 sogou_stealth, curl_cffi Chrome TLS 指纹规避 CAPTCHA)
+  # sogou_stealth 自定义引擎文件: config/searxng/engines/sogou_stealth.py
+  # 部署时 cp 到 SearXNG 容器内 searx/engines/sogou_stealth.py (见 docker-compose command)
   - name: sogou
-    engine: sogou
+    engine: sogou_stealth
     shortcut: sogou
     disabled: false
     timeout: 10.0
@@ -144,15 +158,16 @@ engines:
     disabled: false
     timeout: 10.0
 
-  # quark: 显式启用
+  # quark: 显式启用 (P0 修复: engine 改用 quark_stealth, curl_cffi Chrome TLS 指纹规避 Alibaba CAPTCHA)
+  # quark_stealth 自定义引擎文件: config/searxng/engines/quark_stealth.py
   - name: quark
-    engine: quark
+    engine: quark_stealth
     shortcut: qk
     disabled: false
     timeout: 10.0
 
   - name: quark images
-    engine: quark
+    engine: quark_stealth
     shortcut: qki
     disabled: false
     timeout: 10.0
@@ -186,11 +201,6 @@ engines:
   - name: yandex
     engine: yandex
     shortcut: yd
-    disabled: false
-
-  - name: mojeek
-    engine: mojeek
-    shortcut: mjk
     disabled: false
 
   - name: stackoverflow

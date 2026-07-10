@@ -556,6 +556,75 @@ async def chat_completions(
     # LangGraph 配置: thread_id 做会话隔离 (AGENTS.md 第 6 章)
     graph_config = {"configurable": {"thread_id": session_id}}
 
+    # IP-based 用户每日报告限额检查 (仅 self_host=True + IP-based 用户)
+    if settings.self_host and user_id.startswith("ip_") and settings.ip_daily_report_limit > 0:
+        from src.api.ip_user_resolver import check_daily_report_limit
+
+        allowed, current_count = await check_daily_report_limit(
+            user_id, agent_id, settings.ip_daily_report_limit
+        )
+        if not allowed:
+            limit_msg = (
+                f"您今日的报告生成次数已达上限 ({current_count}/{settings.ip_daily_report_limit})。"
+                f"每日限额将在北京时间次日 0 点重置, 届时可继续使用。"
+            )
+            if request.stream:
+                # 流式: 发送友好提示后关闭 SSE
+                async def _limit_exceeded_stream() -> Any:
+                    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+                    chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": request.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": limit_msg},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {orjson.dumps(chunk).decode('utf-8')}\n\n"
+                    done_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": request.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    yield f"data: {orjson.dumps(done_chunk).decode('utf-8')}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    _limit_exceeded_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Session-Id": session_id,
+                    },
+                )
+            else:
+                # 非流式: 返回 JSON 错误
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": {
+                            "message": limit_msg,
+                            "type": "rate_limit_exceeded",
+                            "code": "daily_report_limit",
+                        }
+                    },
+                    headers={"X-Session-Id": session_id},
+                )
+
     if request.stream:
         return StreamingResponse(
             _stream_research(initial_state, graph_config, request, session_id, authorization),
@@ -795,6 +864,14 @@ async def _stream_research(
                 )
                 if _saved_report_id:
                     yield _sse_chunk({"report_id": _saved_report_id})
+                    # IP-based 用户报告生成成功后异步递增每日计数 (不阻塞流式响应)
+                    # 仅 self_host=True 且 user_id 以 "ip_" 前缀标识的匿名用户才计数
+                    _uid = initial_state.get("user_id", "")
+                    _aid = initial_state.get("agent_id", "")
+                    if _uid.startswith("ip_") and _aid:
+                        from src.api.ip_user_resolver import increment_daily_report_count
+
+                        asyncio.create_task(increment_daily_report_count(_uid, _aid))
             except Exception:
                 logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
 
@@ -956,6 +1033,18 @@ async def _run_research(
                 await get_agentinsight_client().deduct_agent_usage(token)
         except Exception as e:  # noqa: BLE001
             logger.warning("扣除点数失败 (不阻断响应): %s", e)
+
+    # IP-based 用户报告生成成功后递增每日计数 (self_host=True 且 user_id 以 "ip_" 前缀)
+    # 仅报告内容非空且未失败时计数; 失败/异常不计数 (符合"需生成报告成功才计数"需求)
+    _uid_final = initial_state.get("user_id", "")
+    _aid_final = initial_state.get("agent_id", "")
+    if content and "研究执行失败" not in content and _uid_final.startswith("ip_") and _aid_final:
+        try:
+            from src.api.ip_user_resolver import increment_daily_report_count
+
+            await increment_daily_report_count(_uid_final, _aid_final)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("每日报告计数递增失败 (不阻断响应): %s", e)
 
     return ChatCompletionResponse(
         id=completion_id,

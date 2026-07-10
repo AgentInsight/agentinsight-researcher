@@ -38,6 +38,11 @@ from src.rag.qdrant_manager import QdrantManager
 
 logger = logging.getLogger(__name__)
 
+# 匿名用户 ID (用于共享 namespace 缓存键 / 无 user_id 降级)
+# AGENTS.md 第 8 章: default_user_id 环境变量已移除, 改为 IP-based UserId;
+# RAG 层可能在 CLI/批处理场景无 HTTP 上下文, 用固定常量作共享缓存维度.
+_ANONYMOUS_USER_ID = "anonymous"
+
 
 class HybridRetriever:
     """混合检索器: BM25 + 向量 + RRF 融合 + Rerank (可选).
@@ -381,14 +386,14 @@ class HybridRetriever:
     def _cache_key(self, query: str, user_id: str | None) -> str:
         """构建 Redis 缓存键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:{module}:{type}:{id})."""
         agent_id = self.settings.agent_name
-        uid = user_id or self.settings.default_user_id
+        uid = user_id or _ANONYMOUS_USER_ID
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
         return f"{agent_id}:{uid}:rag:retriever:{query_hash}"
 
     def _lru_key(self, user_id: str | None = None) -> str:
         """构建 LRU 访问时间 Sorted Set 键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:cache_access_times)."""
         agent_id = self.settings.agent_name
-        uid = user_id or self.settings.default_user_id
+        uid = user_id or _ANONYMOUS_USER_ID
         return f"{agent_id}:{uid}:cache_access_times"
 
     async def _ensure_redis(self) -> Any:
@@ -573,15 +578,15 @@ class HybridRetriever:
     def _bm25_cache_uid(self, namespace: str, user_id: str | None) -> str:
         """确定 BM25 语料 Redis 缓存的 user_id 维度.
 
-        共享 namespace ({agent_id}-data) 跨用户共享, 使用 default_user_id 作为缓存键
+        共享 namespace ({agent_id}-data) 跨用户共享, 使用 anonymous 作为缓存键
         (所有用户共享同一份缓存); 用户私有 namespace 使用实际 user_id 隔离.
 
         AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:.
         """
         shared_ns = self._qdrant.build_data_shared_namespace()
         if namespace == shared_ns:
-            return self.settings.default_user_id
-        return user_id or self.settings.default_user_id
+            return _ANONYMOUS_USER_ID
+        return user_id or _ANONYMOUS_USER_ID
 
     def _bm25_version_key(self, namespace: str, cache_uid: str) -> str:
         """构建 BM25 语料版本号 Redis 键.

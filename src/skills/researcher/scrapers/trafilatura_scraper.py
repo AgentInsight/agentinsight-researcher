@@ -112,9 +112,7 @@ class TrafilaturaScraper(BaseScraper):
             # 仅徒增内存 (BS DOM 5-10x / Playwright chromium ~400MB).
             # 将状态码写入 _http_status, 供降级链 _is_fast_fail() 检测后终止.
             status_code = e.response.status_code
-            logger.warning(
-                "Trafilatura HTTP %d (快速失败, 不降级): %s", status_code, self.url
-            )
+            logger.warning("Trafilatura HTTP %d (快速失败, 不降级): %s", status_code, self.url)
             return {
                 "url": self.url,
                 "content": "",

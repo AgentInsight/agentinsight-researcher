@@ -46,8 +46,6 @@ def main() -> None:
     saved_asyncio = save_original_asyncio()
 
     # 修复 langchain_community 0.4+ 兼容性 (在 import ragas 之前)
-    import evals.rag._compat_shim  # noqa: F401
-
     # 构建 RAGAS 评估器 (import ragas 会触发 nest_asyncio.apply())
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from ragas import SingleTurnSample
@@ -58,6 +56,8 @@ def main() -> None:
         Faithfulness,
         LLMContextPrecisionWithReference,
     )
+
+    import evals.rag._compat_shim  # noqa: F401
 
     # 恢复原始 asyncio 方法 (撤销 nest_asyncio 补丁, 修复 Python 3.14 兼容性)
     restore_original_asyncio(saved_asyncio)

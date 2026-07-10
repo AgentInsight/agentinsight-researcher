@@ -31,9 +31,7 @@ def _make_scraper_class_mock(
     """构造 scraper 类 mock, 实例化后 scrape() 返回指定结果或抛异常."""
 
     class _MockInstance:
-        def __init__(
-            self, url: str = "", session: object | None = None, *args, **kwargs
-        ) -> None:
+        def __init__(self, url: str = "", session: object | None = None, *args, **kwargs) -> None:
             self.url = url
             self.session = session
 
@@ -345,9 +343,7 @@ class TestDelRelease:
                 "image_urls": [],
             }
         )
-        pw_mock = _make_scraper_class_mock(
-            scrape_side_effect=RuntimeError("chromium crash")
-        )
+        pw_mock = _make_scraper_class_mock(scrape_side_effect=RuntimeError("chromium crash"))
 
         with (
             patch(

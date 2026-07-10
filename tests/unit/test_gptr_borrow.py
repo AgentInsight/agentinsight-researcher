@@ -150,9 +150,7 @@ class TestGetRelevantImagesFromSoup:
             ]
         )
         soup = BeautifulSoup(html, "lxml")
-        result = get_relevant_images_from_soup(
-            soup, "https://example.com", top_k=4
-        )
+        result = get_relevant_images_from_soup(soup, "https://example.com", top_k=4)
         # 5 张保留 (1 张跳过), 取 Top-4 按评分降序
         assert len(result) == 4
         assert result[0] == "https://example.com/featured.jpg"  # 4 分
@@ -397,9 +395,7 @@ class TestPlaywrightPoolLoadBalancing:
 
         # 填满池 (max_browsers=5)
         for _ in range(_PlaywrightPool._max_browsers):
-            _PlaywrightPool._pooled_browsers.add(
-                _make_mock_pooled_browser(processing_count=10)
-            )
+            _PlaywrightPool._pooled_browsers.add(_make_mock_pooled_browser(processing_count=10))
         _PlaywrightPool._instance = _PlaywrightPool()
 
         create_mock = AsyncMock()

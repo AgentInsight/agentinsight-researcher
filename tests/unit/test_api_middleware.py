@@ -105,13 +105,17 @@ def _make_test_app(settings: Settings) -> FastAPI:
 # ========== JWTAuthMiddleware: 无 Authorization 头 ==========
 
 
-def test_jwt_no_auth_header_uses_default_user_id(
+def test_jwt_no_auth_header_uses_ip_based_user_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """无 Authorization 头 → 降级 default_user_id (不调用 user_info API)."""
+    """无 Authorization 头 → 降级 IP-based UserId (不调用 user_info API).
+
+    AGENTS.md 第 8 章: default_user_id 环境变量已移除, 无 token 时按客户端
+    IP 生成确定性 UserId (TestClient 默认 client host 为 "testclient",
+    generate_user_id_from_ip("testclient") = "ip_846488f1dc5c07b4cebe5c14").
+    """
     settings = Settings(
         _env_file=None,
-        default_user_id="anon-user",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -123,7 +127,7 @@ def test_jwt_no_auth_header_uses_default_user_id(
     response = client.get("/test")
     assert response.status_code == 200
     data = response.json()
-    assert data["user_id"] == "anon-user"
+    assert data["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     assert data["agent_id"] == "test-agent"
     # 无 token 时不应调用 user_info API
     assert len(fake.calls) == 0
@@ -138,7 +142,6 @@ def test_jwt_bearer_token_calls_user_info_api(
     """有 Bearer token → 调用 user_info_api_url 获取 user_id."""
     settings = Settings(
         _env_file=None,
-        default_user_id="anon-user",
         agent_name="test-agent",
         user_info_api_url="https://fake.example.com/api/user",
     )
@@ -161,7 +164,7 @@ def test_jwt_bearer_token_user_id_field_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """token 解析响应优先 id 字段, 其次 user_id 字段."""
-    settings = Settings(_env_file=None, default_user_id="anon-user")
+    settings = Settings(_env_file=None)
     fake = _FakeAsyncClient(response=_FakeResponse(200, {"user_id": "alt-user-456"}))
     _patch_httpx_client(monkeypatch, fake)
 
@@ -176,12 +179,15 @@ def test_jwt_bearer_token_user_id_field_fallback(
 # ========== JWTAuthMiddleware: token 调用失败 ==========
 
 
-def test_jwt_token_call_fails_falls_back_to_default(
+def test_jwt_token_call_fails_falls_back_to_ip(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """token 调用失败 (连接错误) → 降级 default_user_id + 告警."""
-    settings = Settings(_env_file=None, default_user_id="fallback-user")
+    """token 调用失败 (连接错误) → 降级 IP-based UserId + 告警.
+
+    AGENTS.md 第 8 章: 调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
+    """
+    settings = Settings(_env_file=None)
     fake = _FakeAsyncClient(exc=httpx.ConnectError("connection refused"))
     _patch_httpx_client(monkeypatch, fake)
 
@@ -192,16 +198,16 @@ def test_jwt_token_call_fails_falls_back_to_default(
         response = client.get("/test", headers={"Authorization": "Bearer bad-token"})
 
     assert response.status_code == 200
-    assert response.json()["user_id"] == "fallback-user"
-    # 应记录解析失败告警 (中间件 _resolve_user_id 捕获异常并降级到 default_user_id)
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
+    # 应记录解析失败告警 (中间件 _resolve_user_id 捕获异常并降级到 IP-based UserId)
     assert any("解析失败" in rec.message for rec in caplog.records)
 
 
 def test_jwt_token_call_http_error_falls_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """token 调用返回 HTTP 4xx/5xx → 降级 default_user_id."""
-    settings = Settings(_env_file=None, default_user_id="http-fallback")
+    """token 调用返回 HTTP 4xx/5xx → 降级 IP-based UserId."""
+    settings = Settings(_env_file=None)
     fake = _FakeAsyncClient(response=_FakeResponse(401, {"error": "unauthorized"}))
     _patch_httpx_client(monkeypatch, fake)
 
@@ -210,14 +216,14 @@ def test_jwt_token_call_http_error_falls_back(
 
     response = client.get("/test", headers={"Authorization": "Bearer expired"})
     assert response.status_code == 200
-    assert response.json()["user_id"] == "http-fallback"
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
 
 
 def test_jwt_token_returns_empty_user_id_falls_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """token 解析响应中 id/user_id 为空 → 降级 default_user_id."""
-    settings = Settings(_env_file=None, default_user_id="empty-fallback")
+    """token 解析响应中 id/user_id 为空 → 降级 IP-based UserId."""
+    settings = Settings(_env_file=None)
     fake = _FakeAsyncClient(response=_FakeResponse(200, {"other": "value"}))
     _patch_httpx_client(monkeypatch, fake)
 
@@ -226,20 +232,19 @@ def test_jwt_token_returns_empty_user_id_falls_back(
 
     response = client.get("/test", headers={"Authorization": "Bearer tok"})
     assert response.status_code == 200
-    assert response.json()["user_id"] == "empty-fallback"
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
 
 
 # ========== JWTAuthMiddleware: 超时 ==========
 
 
-def test_jwt_timeout_falls_back_to_default(
+def test_jwt_timeout_falls_back_to_ip(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """超时 → 降级 default_user_id + 告警."""
+    """超时 → 降级 IP-based UserId + 告警."""
     settings = Settings(
         _env_file=None,
-        default_user_id="timeout-user",
         user_info_api_timeout=1,
     )
     fake = _FakeAsyncClient(exc=httpx.TimeoutException("timed out"))
@@ -252,7 +257,7 @@ def test_jwt_timeout_falls_back_to_default(
         response = client.get("/test", headers={"Authorization": "Bearer slow-token"})
 
     assert response.status_code == 200
-    assert response.json()["user_id"] == "timeout-user"
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     assert any("超时" in rec.message for rec in caplog.records)
 
 

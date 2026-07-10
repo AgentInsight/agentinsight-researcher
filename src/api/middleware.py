@@ -38,6 +38,11 @@ _request_agent_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "request_agent_id",
     default="",
 )
+# 客户端 IP (用于 IP-based UserId 生成 + SearXNG X-Forwarded-For)
+_request_client_ip: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_client_ip",
+    default="",
+)
 
 
 def get_request_user_id() -> str:
@@ -55,14 +60,19 @@ def get_request_agent_id() -> str:
     return _request_agent_id.get()
 
 
+def get_request_client_ip() -> str:
+    """获取当前请求的客户端 IP (用于 IP-based UserId + X-Forwarded-For)."""
+    return _request_client_ip.get()
+
+
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     """JWT 身份解析中间件.
 
     AGENTS.md 第 8 章硬约束:
-    - Bearer JWT Token 可选, 不存在时走匿名用户路径 (self_host=True 自托管模式)
+    - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管模式)
     - self_host=False (云托管模式): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
     - token 存在时: 同步调用 GET /api/user 获取 user_id, 携带原 Authorization 头
-    - self_host=True 时: 调用失败/超时降级 DEFAULT_USER_ID 并告警
+    - self_host=True 时: token 不存在 → IP-based UserId; 调用失败/超时 → IP-based UserId 并告警
     - 禁止将原始 JWT token 写入日志或持久化存储
     """
 
@@ -87,6 +97,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         # 注入 agent_id (固定为 agent_name)
         _request_agent_id.set(self.settings.agent_name)
 
+        # 提取并注入客户端 IP (用于 IP-based UserId + SearXNG X-Forwarded-For)
+        from src.api.ip_user_resolver import get_client_ip
+
+        client_ip = get_client_ip(request)
+        _request_client_ip.set(client_ip)
+
         # 公开路径白名单: /health, /docs 等 JWT 中间件跳过 (健康检查与文档不应强制 JWT)
         path = request.url.path
         if path in self._PUBLIC_PATHS or path.startswith("/static/"):
@@ -97,7 +113,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         token = self._extract_bearer_token(auth_header)
 
         # 解析 user_id
-        user_id, error = await self._resolve_user_id(token)
+        user_id, error = await self._resolve_user_id(token, client_ip)
         if error:
             # SELF_HOST=False 时返回 401 (token 不存在或校验失败)
             return JSONResponse(
@@ -133,16 +149,22 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return ""
         return auth_header[7:].strip()
 
-    async def _resolve_user_id(self, token: str) -> tuple[str | None, str | None]:
+    async def _resolve_user_id(
+        self, token: str, client_ip: str = ""
+    ) -> tuple[str | None, str | None]:
         """解析 user_id.
 
         返回 (user_id, error_message):
-        - self_host=True: token 不存在或失败时降级到 default_user_id (AGENTS.md 第 8 章现有逻辑)
+        - self_host=True: token 不存在或失败时按 IP 生成确定性 UserId (AGENTS.md 第 8 章)
         - self_host=False: token 不存在或失败时返回错误 (云托管强制校验)
         """
+        from src.api.ip_user_resolver import generate_user_id_from_ip
+
         if not token:
             if self.settings.self_host:
-                return self.settings.default_user_id, None
+                # 无 Token 时, 按 IP 生成确定性 UserId
+                ip_user_id = generate_user_id_from_ip(client_ip)
+                return ip_user_id, None
             return None, "缺少 Authorization Bearer Token"
 
         try:
@@ -157,17 +179,21 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 return user_id, None
             logger.warning("user_id 解析返回空")
             if self.settings.self_host:
-                return self.settings.default_user_id, None
+                # Token 校验成功但 user_id 为空, 降级到 IP-based UserId
+                ip_user_id = generate_user_id_from_ip(client_ip)
+                return ip_user_id, None
             return None, "通过 Token 无法获取 User 信息"
         except httpx.TimeoutException:
             logger.warning("user_id 解析超时 (%ss)", self.settings.user_info_api_timeout)
             if self.settings.self_host:
-                return self.settings.default_user_id, None
+                ip_user_id = generate_user_id_from_ip(client_ip)
+                return ip_user_id, None
             return None, "Token 校验失败: TimeoutException"
         except Exception as e:  # noqa: BLE001
             logger.warning("user_id 解析失败: %s", e)
             if self.settings.self_host:
-                return self.settings.default_user_id, None
+                ip_user_id = generate_user_id_from_ip(client_ip)
+                return ip_user_id, None
             return None, f"Token 校验失败: {type(e).__name__}"
 
     async def aclose(self) -> None:

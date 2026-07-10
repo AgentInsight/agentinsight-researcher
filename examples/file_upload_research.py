@@ -112,7 +112,7 @@ def upload_file(client: httpx.Client, file_path: Path) -> str:
 
 def research_with_file(client: httpx.Client, file_id: str, query: str) -> None:
     """基于上传的文件做研究, 流式打印报告."""
-    print(f"\n[2/2] 基于文件研究 (流式)")
+    print("\n[2/2] 基于文件研究 (流式)")
     print(f"      查询: {query}")
     print("=" * 60 + "\n")
 
@@ -140,7 +140,7 @@ def research_with_file(client: httpx.Client, file_id: str, query: str) -> None:
         for line in response.iter_lines():
             if not line or not line.startswith("data: "):
                 continue
-            data_str = line[len("data: "):]
+            data_str = line[len("data: ") :]
 
             if data_str == "[DONE]":
                 break

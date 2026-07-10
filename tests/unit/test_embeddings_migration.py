@@ -44,8 +44,7 @@ def test_settings_qdrant_vector_size_is_768(monkeypatch: pytest.MonkeyPatch) -> 
 
     settings = Settings(_env_file=None)
     assert settings.qdrant_vector_size == 768, (
-        f"qdrant_vector_size 应为 768 (bge-base-zh-v1.5), "
-        f"实际: {settings.qdrant_vector_size}"
+        f"qdrant_vector_size 应为 768 (bge-base-zh-v1.5), 实际: {settings.qdrant_vector_size}"
     )
 
 
@@ -58,8 +57,7 @@ def test_settings_embeddings_model_is_bge_base(monkeypatch: pytest.MonkeyPatch) 
 
     settings = Settings(_env_file=None)
     assert settings.embeddings_model == "BAAI/bge-base-zh-v1.5", (
-        f"embeddings_model 应为 'BAAI/bge-base-zh-v1.5', "
-        f"实际: {settings.embeddings_model}"
+        f"embeddings_model 应为 'BAAI/bge-base-zh-v1.5', 实际: {settings.embeddings_model}"
     )
 
 
@@ -119,9 +117,7 @@ def test_compose_qa_no_large_residual() -> None:
     if not _COMPOSE_QA.exists():
         pytest.skip("docker-compose-qa.yaml 不存在 (gitignored)")
     content = _COMPOSE_QA.read_text(encoding="utf-8")
-    assert "bge-large-zh-v1.5" not in content, (
-        "docker-compose-qa.yaml 不应残留 bge-large-zh-v1.5"
-    )
+    assert "bge-large-zh-v1.5" not in content, "docker-compose-qa.yaml 不应残留 bge-large-zh-v1.5"
 
 
 def test_compose_online_uses_bge_base() -> None:
@@ -235,9 +231,7 @@ def test_no_bge_large_residual_in_source() -> None:
             continue
         if "bge-large-zh-v1.5" in content:
             residuals.append(str(py_file.relative_to(_PROJECT_ROOT)))
-    assert not residuals, (
-        f"src/ 目录下 {len(residuals)} 个文件残留 bge-large-zh-v1.5: {residuals}"
-    )
+    assert not residuals, f"src/ 目录下 {len(residuals)} 个文件残留 bge-large-zh-v1.5: {residuals}"
 
 
 def test_qdrant_collection_768_dim_runtime(monkeypatch: pytest.MonkeyPatch) -> None:

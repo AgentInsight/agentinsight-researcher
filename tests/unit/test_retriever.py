@@ -167,9 +167,13 @@ async def test_build_data_namespaces_empty_when_no_data():
 # ========== P0 BM25 断点修复: _bm25_cache_uid / _bm25_version_key / _bm25_corpus_key ==========
 
 
-def test_bm25_cache_uid_shared_namespace_uses_default_user():
-    """共享 namespace 使用 default_user_id 作为缓存键 (跨用户共享)."""
-    settings = Settings(agent_name="test-agent", default_user_id="anon", _env_file=None)
+def test_bm25_cache_uid_shared_namespace_uses_anonymous():
+    """共享 namespace 使用 anonymous 常量作为缓存键 (跨用户共享).
+
+    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层共享 namespace
+    缓存键用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
+    """
+    settings = Settings(agent_name="test-agent", _env_file=None)
     retriever = HybridRetriever(settings)
 
     class _FakeQdrant:
@@ -178,14 +182,14 @@ def test_bm25_cache_uid_shared_namespace_uses_default_user():
 
     retriever._qdrant = _FakeQdrant()  # type: ignore[assignment]
 
-    # 共享 namespace: 无论 user_id 是什么, 缓存 uid 都用 default_user_id
-    assert retriever._bm25_cache_uid("test-agent-data", "user123") == "anon"
-    assert retriever._bm25_cache_uid("test-agent-data", None) == "anon"
+    # 共享 namespace: 无论 user_id 是什么, 缓存 uid 都用 anonymous 常量
+    assert retriever._bm25_cache_uid("test-agent-data", "user123") == "anonymous"
+    assert retriever._bm25_cache_uid("test-agent-data", None) == "anonymous"
 
 
 def test_bm25_cache_uid_private_namespace_uses_user_id():
     """用户私有 namespace 使用实际 user_id 作为缓存键 (隔离)."""
-    settings = Settings(agent_name="test-agent", default_user_id="anon", _env_file=None)
+    settings = Settings(agent_name="test-agent", _env_file=None)
     retriever = HybridRetriever(settings)
 
     class _FakeQdrant:
@@ -196,8 +200,8 @@ def test_bm25_cache_uid_private_namespace_uses_user_id():
 
     # 私有 namespace: 使用实际 user_id
     assert retriever._bm25_cache_uid("test-agent-data:user123", "user123") == "user123"
-    # user_id 缺失时降级到 default_user_id
-    assert retriever._bm25_cache_uid("test-agent-data:user123", None) == "anon"
+    # user_id 缺失时降级到 anonymous 常量
+    assert retriever._bm25_cache_uid("test-agent-data:user123", None) == "anonymous"
 
 
 def test_bm25_version_key_format():

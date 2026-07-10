@@ -81,9 +81,14 @@ class SearXNGSearcher(BaseSearcher):
                 # time_range 仅在显式传入时加入 (None 表示不过滤, 不传该参数)
                 if time_range:
                     params["time_range"] = time_range
+                # P0 修复: 添加 X-Forwarded-For 头, 避免 SearXNG botdetection 警告
+                # (SearXNG ProxyFix 中间件检查此头, 缺失时记录 "X-Forwarded-For nor X-Real-IP header is set!")
+                headers = {
+                    "X-Forwarded-For": "127.0.0.1",
+                }
                 # timeout 从 settings 读取 (默认 10.0, P0-1 优化替代硬编码 15.0)
                 async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
-                    response = await client.get(self._api_url, params=params)
+                    response = await client.get(self._api_url, params=params, headers=headers)
                     response.raise_for_status()
                     data = response.json()
 

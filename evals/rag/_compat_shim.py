@@ -31,7 +31,7 @@ def _install_shim() -> None:
     fake_module = types.ModuleType("langchain_community.chat_models.vertexai")
     fake_module.ChatVertexAI = type("ChatVertexAI", (), {})  # 占位类
     sys.modules["langchain_community.chat_models.vertexai"] = fake_module
-    setattr(cm, "vertexai", fake_module)
+    cm.vertexai = fake_module
 
     # 检查 langchain_community.llms.VertexAI
     try:

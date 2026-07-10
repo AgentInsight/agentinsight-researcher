@@ -239,7 +239,9 @@ def test_docx_chinese_text_not_garbled() -> None:
 
     from src.skills.researcher.publisher import Publisher
 
-    chinese_content = "# 测试报告标题\n\n这是一段中文内容, 用于验证 DOCX 不乱码.\n- 列表项一\n- 列表项二"
+    chinese_content = (
+        "# 测试报告标题\n\n这是一段中文内容, 用于验证 DOCX 不乱码.\n- 列表项一\n- 列表项二"
+    )
     publisher = Publisher()
     docx_bytes = publisher._to_docx(chinese_content, title="中文测试标题")
     assert len(docx_bytes) > 0, "DOCX 生成失败, 返回空 bytes"
@@ -287,9 +289,9 @@ def test_docx_font_config_uses_noto_cjk() -> None:
     docx_bytes = publisher._to_docx("测试", title="字体验证")
     assert len(docx_bytes) > 0
 
-    from docx.oxml.ns import qn
-
     import io
+
+    from docx.oxml.ns import qn
 
     doc = Document(io.BytesIO(docx_bytes))
     style = doc.styles["Normal"]

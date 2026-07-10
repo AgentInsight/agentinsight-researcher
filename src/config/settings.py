@@ -173,9 +173,13 @@ class Settings(BaseSettings):
     tracing_embedding_sample_rate: float = 0.5
 
     # ========== 用户身份解析 (AGENTS.md 第 8 章) ==========
-    default_user_id: str = "anonymous"
+    # 无 JWT Token 时, 按 IP 生成确定性 UserId (SHA256 哈希, 不存储原始 IP)
+    # 不再使用 default_user_id 环境变量 (已移除), 改为 IP-based 用户身份
     user_info_api_url: str = "https://agentinsight.goldebridge.com/api/user"
     user_info_api_timeout: int = 5
+    # 每日报告生成限额 (按 IP 限流, 默认 3 次/日, 仅报告成功才计数)
+    # 0 = 不限制; 环境变量 IP_DAILY_REPORT_LIMIT 控制
+    ip_daily_report_limit: int = 3
 
     # ========== 自托管模式 (SELF_HOST) ==========
     # True (默认): 自托管模式, JWT Token 可选, 不存在时走匿名用户路径 (现有逻辑),
@@ -289,7 +293,9 @@ class Settings(BaseSettings):
     custom_retriever_arg: str = "query"  # 自定义检索端点的查询参数名 (默认 query)
 
     # ========== 抓取 (GPT Researcher 模式) ==========
-    max_scraper_workers: int = 5  # 任务2: 15→5 限制并发资源占用 (对齐项目记忆)
+    # Agent 并发抓取数据的数量 (控制同时抓取多少个 URL, 影响内存/CPU/带宽)
+    # 环境变量 MAX_SCRAPER_WORKERS 注入; deep_research.py / research_conductor.py 读取
+    max_scraper_workers: int = 5
     scraper_rate_limit_delay: float = 0.0
     browse_chunk_max_length: int = 8192
     scraper: str = "bs"

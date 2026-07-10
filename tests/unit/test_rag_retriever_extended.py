@@ -71,7 +71,7 @@ def test_deduplicate_by_content_hash_empty() -> None:
 
 def test_cache_key_format() -> None:
     """缓存键格式: {agent_id}:{user_id}:rag:retriever:{sha256(query)}."""
-    settings = Settings(agent_name="test-agent", default_user_id="anon", _env_file=None)
+    settings = Settings(agent_name="test-agent", _env_file=None)
     retriever = _make_retriever(settings)
     key = retriever._cache_key("hello", "user123")
     expected_hash = hashlib.sha256(b"hello").hexdigest()
@@ -79,12 +79,16 @@ def test_cache_key_format() -> None:
 
 
 def test_cache_key_user_id_fallback() -> None:
-    """user_id 缺失时用 default_user_id."""
-    settings = Settings(agent_name="test-agent", default_user_id="anon-user", _env_file=None)
+    """user_id 缺失时用 anonymous 常量.
+
+    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层无 user_id 时
+    用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
+    """
+    settings = Settings(agent_name="test-agent", _env_file=None)
     retriever = _make_retriever(settings)
     key = retriever._cache_key("query", None)
     expected_hash = hashlib.sha256(b"query").hexdigest()
-    assert key == f"test-agent:anon-user:rag:retriever:{expected_hash}"
+    assert key == f"test-agent:anonymous:rag:retriever:{expected_hash}"
 
 
 # ========== _get_cache ==========

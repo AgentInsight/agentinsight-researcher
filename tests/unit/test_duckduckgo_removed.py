@@ -48,9 +48,7 @@ def test_searxng_replaces_duckduckgo_in_cn_region() -> None:
     from src.skills.researcher.searchers import _SEARCHER_REGISTRY, _register_all_searchers
 
     _register_all_searchers()
-    assert "searxng" in _SEARCHER_REGISTRY, (
-        "_SEARCHER_REGISTRY 应含 'searxng' (替代 DuckDuckGo)"
-    )
+    assert "searxng" in _SEARCHER_REGISTRY, "_SEARCHER_REGISTRY 应含 'searxng' (替代 DuckDuckGo)"
     from src.skills.researcher.searchers import SearchRegion
 
     searxng_regions = _SEARCHER_REGISTRY["searxng"]["regions"]
@@ -60,30 +58,26 @@ def test_searxng_replaces_duckduckgo_in_cn_region() -> None:
 def test_duckduckgo_not_in_cn_searchers() -> None:
     """CN 区域搜索引擎列表不含 DuckDuckGo (运行时不调用)."""
     from src.config.settings import Settings
-
     from src.skills.researcher.searchers import (
         SearchRegion,
-        get_searchers,
         _register_all_searchers,
+        get_searchers,
     )
 
     _register_all_searchers()
     settings = Settings(_env_file=None)
     searchers = get_searchers(SearchRegion.CN, settings)
     names = {s.name for s in searchers}
-    assert "duckduckgo" not in names, (
-        "CN 区域搜索结果不应含 DuckDuckGo (已被 SearXNG 替代)"
-    )
+    assert "duckduckgo" not in names, "CN 区域搜索结果不应含 DuckDuckGo (已被 SearXNG 替代)"
 
 
 def test_duckduckgo_not_in_global_searchers() -> None:
     """GLOBAL 区域搜索引擎列表不含 DuckDuckGo."""
     from src.config.settings import Settings
-
     from src.skills.researcher.searchers import (
         SearchRegion,
-        get_searchers,
         _register_all_searchers,
+        get_searchers,
     )
 
     _register_all_searchers()
@@ -96,11 +90,10 @@ def test_duckduckgo_not_in_global_searchers() -> None:
 def test_duckduckgo_not_in_auto_searchers() -> None:
     """AUTO 区域搜索引擎列表不含 DuckDuckGo."""
     from src.config.settings import Settings
-
     from src.skills.researcher.searchers import (
         SearchRegion,
-        get_searchers,
         _register_all_searchers,
+        get_searchers,
     )
 
     _register_all_searchers()
@@ -141,9 +134,7 @@ def test_free_quota_map_retains_duckduckgo() -> None:
     """
     from src.skills.researcher.searchers import FREE_QUOTA_MAP
 
-    assert "duckduckgo" in FREE_QUOTA_MAP, (
-        "FREE_QUOTA_MAP 应仍含 'duckduckgo' 条目 (代码保留策略)"
-    )
+    assert "duckduckgo" in FREE_QUOTA_MAP, "FREE_QUOTA_MAP 应仍含 'duckduckgo' 条目 (代码保留策略)"
     assert FREE_QUOTA_MAP["duckduckgo"] == "unlimited"
 
 
@@ -161,14 +152,10 @@ def test_duckduckgo_import_commented_out() -> None:
         for line in content.splitlines()
         if "DuckDuckGoSearcher" in line and "import" in line
     ]
-    assert len(import_lines) >= 1, (
-        "__init__.py 应含 DuckDuckGoSearcher import 行 (已注释)"
-    )
+    assert len(import_lines) >= 1, "__init__.py 应含 DuckDuckGoSearcher import 行 (已注释)"
     # 所有含 import 的行都应是注释 (# 开头)
     for line in import_lines:
-        assert line.startswith("#"), (
-            f"DuckDuckGoSearcher import 行应已注释, 实际: {line}"
-        )
+        assert line.startswith("#"), f"DuckDuckGoSearcher import 行应已注释, 实际: {line}"
 
 
 def test_duckduckgo_registry_block_commented_out() -> None:
@@ -178,18 +165,14 @@ def test_duckduckgo_registry_block_commented_out() -> None:
     content = _SEARCHERS_INIT.read_text(encoding="utf-8")
     # 查找注册行 (含 _SEARCHER_REGISTRY["duckduckgo"])
     registry_lines = [
-        line.strip()
-        for line in content.splitlines()
-        if '_SEARCHER_REGISTRY["duckduckgo"]' in line
+        line.strip() for line in content.splitlines() if '_SEARCHER_REGISTRY["duckduckgo"]' in line
     ]
     assert len(registry_lines) >= 1, (
         "__init__.py 应含 _SEARCHER_REGISTRY['duckduckgo'] 注册行 (已注释)"
     )
     # 所有注册行都应是注释 (# 开头)
     for line in registry_lines:
-        assert line.startswith("#"), (
-            f"duckduckgo 注册行应已注释, 实际: {line}"
-        )
+        assert line.startswith("#"), f"duckduckgo 注册行应已注释, 实际: {line}"
 
 
 def test_searchers_init_contains_replacement_comment() -> None:
@@ -198,9 +181,7 @@ def test_searchers_init_contains_replacement_comment() -> None:
         pytest.skip("searchers/__init__.py 不存在")
     content = _SEARCHERS_INIT.read_text(encoding="utf-8")
     # 应含替代说明 (中文或英文)
-    assert (
-        "SearXNG" in content and "替代" in content
-    ) or "replaced" in content.lower(), (
+    assert ("SearXNG" in content and "替代" in content) or "replaced" in content.lower(), (
         "__init__.py 应含 'DuckDuckGo 已被 SearXNG 替代' 的说明注释"
     )
 
@@ -233,9 +214,7 @@ def test_no_active_duckduckgo_calls_in_source() -> None:
                 continue
             # 检查活跃的 DuckDuckGoSearcher 实例化
             if "DuckDuckGoSearcher()" in stripped:
-                active_calls.append(
-                    f"{py_file.relative_to(_PROJECT_ROOT)}:{line_num}: {stripped}"
-                )
+                active_calls.append(f"{py_file.relative_to(_PROJECT_ROOT)}:{line_num}: {stripped}")
     assert not active_calls, (
         f"src/ 目录下发现 {len(active_calls)} 处活跃 DuckDuckGoSearcher 调用 "
         f"(应已全部注释): {active_calls}"

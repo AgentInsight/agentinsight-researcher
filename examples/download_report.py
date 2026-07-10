@@ -103,9 +103,7 @@ def main() -> None:
 
     with httpx.Client() as client:
         # 步骤 1: 生成报告
-        report_id = generate_report(
-            client, "调研 2026 年中国 AI 大模型行业竞争格局与代表厂商"
-        )
+        report_id = generate_report(client, "调研 2026 年中国 AI 大模型行业竞争格局与代表厂商")
 
         # 步骤 2: 下载多种格式
         print(f"\n[2/3] 下载报告 (report_id={report_id})")
@@ -118,7 +116,7 @@ def main() -> None:
                 print(f"    [失败] {fmt}: HTTP {e.response.status_code} - {e.response.text[:200]}")
 
         # 步骤 3: 汇总
-        print(f"\n[3/3] 下载完成")
+        print("\n[3/3] 下载完成")
         print("=" * 60)
         print(f"输出目录: {OUTPUT_DIR.resolve()}")
         print(f"成功下载: {len(saved_files)} 个文件")

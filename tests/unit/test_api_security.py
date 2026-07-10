@@ -1,7 +1,7 @@
-"""单元测试: API 安全 (Bearer JWT 处理 + DEFAULT_USER_ID 降级 + 数据隔离键).
+"""单元测试: API 安全 (Bearer JWT 处理 + IP-based UserId 降级 + 数据隔离键).
 
 AGENTS.md 第 8/11 章硬约束:
-- Bearer JWT Token 可选, 不存在时走匿名用户路径 (self_host=True 自托管)
+- Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管)
 - self_host=False (云托管): 强制校验 JWT, 不存在/失败时返回 401
 - JWT 验证在 API 入口中间件完成, 禁止业务节点重复解析
 - user_id 获取 API 调用应设超时 (默认 5s), 超时降级并告警
@@ -122,14 +122,18 @@ def _make_test_app(settings: Settings) -> FastAPI:
 # ========== SELF_HOST 模式切换 (AGENTS.md 第 8 章核心) ==========
 
 
-def test_self_host_true_no_token_uses_default_user_id(
+def test_self_host_true_no_token_uses_ip_based_user_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """self_host=True: 无 token 时降级 default_user_id (自托管模式)."""
+    """self_host=True: 无 token 时降级 IP-based UserId (自托管模式).
+
+    AGENTS.md 第 8 章: default_user_id 环境变量已移除, 无 token 时按客户端
+    IP 生成确定性 UserId (TestClient 默认 client host 为 "testclient",
+    generate_user_id_from_ip("testclient") = "ip_846488f1dc5c07b4cebe5c14").
+    """
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon-self-host",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -139,7 +143,7 @@ def test_self_host_true_no_token_uses_default_user_id(
 
     r = client.get("/test")
     assert r.status_code == 200
-    assert r.json()["user_id"] == "anon-self-host"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     # 无 token 时不应调用 user_info API
     assert len(fake.calls) == 0
 
@@ -151,7 +155,6 @@ def test_self_host_false_no_token_returns_401(
     settings = Settings(
         _env_file=None,
         self_host=False,
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -175,7 +178,6 @@ def test_self_host_false_token_call_fails_returns_401(
     settings = Settings(
         _env_file=None,
         self_host=False,
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient(exc=httpx.ConnectError("auth service down"))
@@ -194,7 +196,6 @@ def test_self_host_false_token_returns_empty_user_id_returns_401(
     settings = Settings(
         _env_file=None,
         self_host=False,
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient(response=_FakeResponse(200, {"other": "value"}))
@@ -213,7 +214,6 @@ def test_self_host_false_timeout_returns_401(
     settings = Settings(
         _env_file=None,
         self_host=False,
-        default_user_id="anon",
         agent_name="test-agent",
         user_info_api_timeout=1,
     )
@@ -230,11 +230,13 @@ def test_self_host_true_token_call_fails_falls_back(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """self_host=True: token 调用失败时降级 default_user_id + 告警."""
+    """self_host=True: token 调用失败时降级 IP-based UserId + 告警.
+
+    AGENTS.md 第 8 章: 调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
+    """
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="fallback-user",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient(exc=httpx.ConnectError("connection refused"))
@@ -246,7 +248,7 @@ def test_self_host_true_token_call_fails_falls_back(
         r = client.get("/test", headers={"Authorization": "Bearer bad-token"})
 
     assert r.status_code == 200
-    assert r.json()["user_id"] == "fallback-user"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     # 应记录解析失败告警
     assert any("解析失败" in rec.message for rec in caplog.records)
 
@@ -263,7 +265,6 @@ def test_jwt_token_not_in_logs(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon",
         agent_name="test-agent",
     )
     # 让 user_info API 调用失败以触发告警 (验证告警日志不含原始 token)
@@ -291,7 +292,6 @@ def test_jwt_token_not_persisted_in_response(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient(response=_FakeResponse(200, {"id": "real-user"}))
@@ -318,7 +318,6 @@ def test_agent_id_injected_to_request_context(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon",
         agent_name="my-custom-agent",
     )
     _patch_httpx_client(monkeypatch, _FakeAsyncClient())
@@ -385,7 +384,6 @@ def test_public_path_health_skips_jwt(
     settings = Settings(
         _env_file=None,
         self_host=False,  # 即使强制模式, /health 也应跳过
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -417,7 +415,6 @@ def test_public_path_agent_discovery_skips_jwt(
     settings = Settings(
         _env_file=None,
         self_host=False,  # 即使强制模式, agent-discovery 也应跳过
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -448,7 +445,6 @@ def test_invalid_authorization_header_format_treated_as_no_token(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon-no-bearer",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -459,7 +455,7 @@ def test_invalid_authorization_header_format_treated_as_no_token(
     # 非 Bearer 前缀
     r = client.get("/test", headers={"Authorization": "Basic abc123"})
     assert r.status_code == 200
-    assert r.json()["user_id"] == "anon-no-bearer"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     # 不应调用 user_info API (无效格式)
     assert len(fake.calls) == 0
 
@@ -471,7 +467,6 @@ def test_empty_bearer_token_treated_as_no_token(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon-empty-bearer",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -481,7 +476,7 @@ def test_empty_bearer_token_treated_as_no_token(
 
     r = client.get("/test", headers={"Authorization": "Bearer "})
     assert r.status_code == 200
-    assert r.json()["user_id"] == "anon-empty-bearer"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     assert len(fake.calls) == 0
 
 
@@ -495,7 +490,6 @@ def test_post_request_jwt_authentication(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="post-anon",
         agent_name="test-agent",
     )
     _patch_httpx_client(monkeypatch, _FakeAsyncClient())
@@ -504,7 +498,7 @@ def test_post_request_jwt_authentication(
 
     r = client.post("/v1/chat/completions")
     assert r.status_code == 200
-    assert r.json()["user_id"] == "post-anon"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
 
 
 # ========== P0: SELF_HOST 双模式成功路径 (AGENTS.md 第 8 章核心) ==========
@@ -521,7 +515,6 @@ def test_self_host_false_with_valid_token_returns_real_user_id(
     settings = Settings(
         _env_file=None,
         self_host=False,
-        default_user_id="anon",
         agent_name="test-agent",
         user_info_api_url="https://fake.example.com/api/user",
     )
@@ -545,12 +538,11 @@ def test_self_host_true_with_valid_token_returns_real_user_id(
     """self_host=True + 有效 token: 返回真实 user_id (成功路径).
 
     AGENTS.md 第 8 章: self_host=True (自托管) token 可选,
-    但 token 存在时仍应解析真实 user_id, 不降级到 default_user_id.
+    但 token 存在时仍应解析真实 user_id, 不降级到 IP-based UserId.
     """
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="anon-self-host",
         agent_name="test-agent",
         user_info_api_url="https://fake.example.com/api/user",
     )
@@ -561,17 +553,17 @@ def test_self_host_true_with_valid_token_returns_real_user_id(
 
     r = client.get("/test", headers={"Authorization": "Bearer valid-self-host-token"})
     assert r.status_code == 200, f"有效 token 应返回 200, 实际: {r.status_code}"
-    # 应返回真实 user_id, 不是 default_user_id
+    # 应返回真实 user_id, 不是 IP-based UserId
     assert r.json()["user_id"] == "real-self-host-user-002"
-    assert r.json()["user_id"] != "anon-self-host"
+    assert r.json()["user_id"] != "ip_846488f1dc5c07b4cebe5c14"
     assert len(fake.calls) == 1
 
 
-def test_user_info_api_returns_500_degrades_to_default(
+def test_user_info_api_returns_500_degrades_to_ip(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """user_info API 返回 500/502/503 时降级 DEFAULT_USER_ID (self_host=True).
+    """user_info API 返回 500/502/503 时降级 IP-based UserId (self_host=True).
 
     AGENTS.md 第 8 章: 调用失败按无 token 处理并告警 (self_host=True 降级).
     验证 5xx 服务端错误触发降级路径, 不向调用方抛异常.
@@ -579,7 +571,6 @@ def test_user_info_api_returns_500_degrades_to_default(
     settings = Settings(
         _env_file=None,
         self_host=True,
-        default_user_id="degraded-user",
         agent_name="test-agent",
     )
     # 模拟 500/502/503 服务端错误 (raise_for_status 会抛 HTTPStatusError)
@@ -592,7 +583,7 @@ def test_user_info_api_returns_500_degrades_to_default(
         r = client.get("/test", headers={"Authorization": "Bearer tok-when-503"})
 
     assert r.status_code == 200, f"5xx 应降级返回 200, 实际: {r.status_code}"
-    assert r.json()["user_id"] == "degraded-user"
+    assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     # 应记录解析失败告警
     assert any("解析失败" in rec.message for rec in caplog.records)
 
@@ -611,7 +602,6 @@ def test_public_paths_docs_redoc_openapi(
     settings = Settings(
         _env_file=None,
         self_host=False,  # 即使强制模式, 公开路径也应跳过
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()
@@ -657,7 +647,6 @@ def test_public_path_static_prefix(
     settings = Settings(
         _env_file=None,
         self_host=False,  # 即使强制模式, /static/* 也应跳过
-        default_user_id="anon",
         agent_name="test-agent",
     )
     fake = _FakeAsyncClient()

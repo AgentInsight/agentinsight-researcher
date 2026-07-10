@@ -2,7 +2,7 @@
 
 验证 SearXNG 元搜索引擎配置的正确性:
 1. use_default_settings.engines.keep_only 模式已启用
-2. 指定 23 个引擎全部在 keep_only 列表中 (国内 14 + 国外 9)
+2. 指定 22 个引擎全部在 keep_only 列表中 (国内 14 + 国外 8)
 3. google / duckduckgo 不在 keep_only 列表 (从根源排除)
 4. bing 系列强制使用 cn.bing.com (中国可访问镜像)
 5. secret_key 已配置 (容器间通信鉴权)
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SEARXNG_SETTINGS = _PROJECT_ROOT / "config" / "searxng" / "settings.yml"
 
-# 用户指定的 23 个保留引擎 (国内 14 + 国外 9)
+# 用户指定的 22 个保留引擎 (国内 14 + 国外 8; mojeek 已移除因 HTTP 403)
 _EXPECTED_ENGINES = {
     # 国内引擎 (14 个)
     "baidu",
@@ -40,14 +40,13 @@ _EXPECTED_ENGINES = {
     "360search videos",
     "quark",
     "quark images",
-    # 国外可用引擎 (9 个, 与国内 14 个合计 23 个)
+    # 国外可用引擎 (8 个, 与国内 14 个合计 22 个; mojeek 已移除因 HTTP 403)
     "arxiv",
     "pubmed",
     "crossref",
     "mwmbl",
     "github",
     "yandex",
-    "mojeek",
     "stackoverflow",
     "npm",
     "crates.io",
@@ -96,7 +95,7 @@ def test_keep_only_mode_enabled() -> None:
 
 
 def test_all_expected_engines_in_keep_only() -> None:
-    """用户指定的 23 个引擎全部在 keep_only 列表中."""
+    """用户指定的 22 个引擎全部在 keep_only 列表中."""
     settings = _load_searxng_settings()
     keep_only = settings["use_default_settings"]["engines"]["keep_only"]
     # keep_only 可能是嵌套列表 (YAML 多行列表), 展平后比较
@@ -109,9 +108,7 @@ def test_all_expected_engines_in_keep_only() -> None:
                 if isinstance(sub_item, str):
                     flat_keep_only.add(sub_item.strip())
     missing = _EXPECTED_ENGINES - flat_keep_only
-    assert not missing, (
-        f"keep_only 缺少 {len(missing)} 个引擎: {sorted(missing)}"
-    )
+    assert not missing, f"keep_only 缺少 {len(missing)} 个引擎: {sorted(missing)}"
 
 
 def test_google_not_in_keep_only() -> None:
@@ -132,9 +129,7 @@ def test_google_not_in_keep_only() -> None:
                     flat_keep_only.add(sub_item.strip().lower())
     google_engines = {e for e in _FORBIDDEN_ENGINES if "google" in e}
     found_google = google_engines & flat_keep_only
-    assert not found_google, (
-        f"keep_only 不应含 google 系列引擎 (用户硬约束), 发现: {found_google}"
-    )
+    assert not found_google, f"keep_only 不应含 google 系列引擎 (用户硬约束), 发现: {found_google}"
 
 
 def test_duckduckgo_not_in_keep_only() -> None:
@@ -167,9 +162,7 @@ def test_forbidden_engines_not_in_keep_only() -> None:
                 if isinstance(sub_item, str):
                     flat_keep_only.add(sub_item.strip().lower())
     found_forbidden = _FORBIDDEN_ENGINES & flat_keep_only
-    assert not found_forbidden, (
-        f"keep_only 不应含不可用引擎, 发现: {sorted(found_forbidden)}"
-    )
+    assert not found_forbidden, f"keep_only 不应含不可用引擎, 发现: {sorted(found_forbidden)}"
 
 
 # ========== bing cn.bing.com 镜像验证 ==========
@@ -183,18 +176,14 @@ def test_bing_uses_cn_bing_com() -> None:
     """
     settings = _load_searxng_settings()
     engines = settings.get("engines", [])
-    bing_engines = [
-        e for e in engines if e.get("name", "").lower().startswith("bing")
-    ]
+    bing_engines = [e for e in engines if e.get("name", "").lower().startswith("bing")]
     assert len(bing_engines) >= 3, (
-        f"应至少含 3 个 bing 系列引擎 (bing/bing images/bing videos), "
-        f"实际: {len(bing_engines)}"
+        f"应至少含 3 个 bing 系列引擎 (bing/bing images/bing videos), 实际: {len(bing_engines)}"
     )
     for bing in bing_engines:
         base_url = bing.get("base_url", "")
         assert "cn.bing.com" in base_url, (
-            f"bing 引擎 '{bing.get('name')}' 应使用 cn.bing.com, "
-            f"实际 base_url: {base_url}"
+            f"bing 引擎 '{bing.get('name')}' 应使用 cn.bing.com, 实际 base_url: {base_url}"
         )
 
 
@@ -205,9 +194,7 @@ def test_bing_engines_enabled() -> None:
     for name in ("bing", "bing images", "bing videos"):
         bing_engine = next((e for e in engines if e.get("name") == name), None)
         assert bing_engine is not None, f"应含 '{name}' 引擎配置"
-        assert bing_engine.get("disabled") is False, (
-            f"'{name}' 应 disabled: false (国内可用引擎)"
-        )
+        assert bing_engine.get("disabled") is False, f"'{name}' 应 disabled: false (国内可用引擎)"
 
 
 # ========== server 配置验证 ==========
@@ -253,7 +240,7 @@ def test_limiter_disabled() -> None:
 
 
 def test_all_expected_engines_explicitly_enabled() -> None:
-    """keep_only 中的 23 个引擎在 engines 段均显式 disabled: false."""
+    """keep_only 中的 22 个引擎在 engines 段均显式 disabled: false."""
     settings = _load_searxng_settings()
     engines = settings.get("engines", [])
     engines_by_name = {e.get("name"): e for e in engines if isinstance(e, dict)}
@@ -265,8 +252,7 @@ def test_all_expected_engines_explicitly_enabled() -> None:
         elif engines_by_name[name].get("disabled") is not False:
             disabled_engines.append(name)
     assert not missing_explicit, (
-        f"engines 段缺少 {len(missing_explicit)} 个引擎的显式配置: "
-        f"{sorted(missing_explicit)}"
+        f"engines 段缺少 {len(missing_explicit)} 个引擎的显式配置: {sorted(missing_explicit)}"
     )
     assert not disabled_engines, (
         f"engines 段 {len(disabled_engines)} 个引擎未显式 disabled: false: "
@@ -292,13 +278,10 @@ def test_no_duckduckgo_in_engines_section() -> None:
     settings = _load_searxng_settings()
     engines = settings.get("engines", [])
     ddg_engines = [
-        e
-        for e in engines
-        if isinstance(e, dict) and "duckduckgo" in e.get("name", "").lower()
+        e for e in engines if isinstance(e, dict) and "duckduckgo" in e.get("name", "").lower()
     ]
     assert not ddg_engines, (
-        f"engines 段不应含 duckduckgo 引擎, 发现: "
-        f"{[e.get('name') for e in ddg_engines]}"
+        f"engines 段不应含 duckduckgo 引擎, 发现: {[e.get('name') for e in ddg_engines]}"
     )
 
 
@@ -319,16 +302,14 @@ def test_search_formats_includes_json() -> None:
     settings = _load_searxng_settings()
     search = settings.get("search", {})
     formats = search.get("formats", [])
-    assert "json" in formats, (
-        f"search.formats 应含 'json' (API 调用), 实际: {formats}"
-    )
+    assert "json" in formats, f"search.formats 应含 'json' (API 调用), 实际: {formats}"
 
 
 # ========== 引擎总数验证 ==========
 
 
 def test_keep_only_engine_count_matches() -> None:
-    """keep_only 列表引擎总数与用户指定一致 (23 个)."""
+    """keep_only 列表引擎总数与用户指定一致 (22 个)."""
     settings = _load_searxng_settings()
     keep_only = settings["use_default_settings"]["engines"]["keep_only"]
     flat_keep_only: set[str] = set()
@@ -339,6 +320,6 @@ def test_keep_only_engine_count_matches() -> None:
             for sub_item in item:
                 if isinstance(sub_item, str):
                     flat_keep_only.add(sub_item.strip())
-    assert len(flat_keep_only) >= 23, (
-        f"keep_only 引擎总数应 >= 23 (用户指定), 实际: {len(flat_keep_only)}"
+    assert len(flat_keep_only) >= 22, (
+        f"keep_only 引擎总数应 >= 22 (用户指定), 实际: {len(flat_keep_only)}"
     )

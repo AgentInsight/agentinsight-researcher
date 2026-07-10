@@ -64,7 +64,7 @@ def main() -> None:
         for line in response.iter_lines():
             if not line or not line.startswith("data: "):
                 continue
-            data_str = line[len("data: "):]
+            data_str = line[len("data: ") :]
 
             # 结束标记
             if data_str == "[DONE]":

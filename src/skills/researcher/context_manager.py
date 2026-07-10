@@ -307,18 +307,14 @@ class ContextManager:
         # P0-4: 批量化去重 (1 次 compute_embedding 替代 N 次串行调用)
         if not compressed:
             context = ""
-            span.update(
-                output={"context_len": len(context), "fast_path": False, "layer": layer}
-            )
+            span.update(output={"context_len": len(context), "fast_path": False, "layer": layer})
             return context
         # 1. 批量计算所有 chunk 的 embedding (1 次 FastEmbed 调用)
-        all_chunks_list, all_embs = (
-            await self._written_compressor.compute_embedding_batch(compressed)
+        all_chunks_list, all_embs = await self._written_compressor.compute_embedding_batch(
+            compressed
         )
         # 2. 批量 check_and_update (内存操作, 无 IO)
-        keep_flags = self._written_compressor.check_and_update_batch(
-            all_chunks_list, all_embs
-        )
+        keep_flags = self._written_compressor.check_and_update_batch(all_chunks_list, all_embs)
         deduped = [c for c, keep in zip(compressed, keep_flags, strict=False) if keep]
 
         # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
@@ -894,6 +890,7 @@ class WrittenContentCompressor:
                 all_embs_list.append([])
                 continue
             from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
+
             chunks = recursive_split(
                 content,
                 separators=DEFAULT_SEPARATORS,

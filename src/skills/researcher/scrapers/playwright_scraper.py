@@ -161,7 +161,9 @@ class _PlaywrightPool:
             return await cls._instance._get_or_create_browser(settings)
 
     @classmethod
-    async def acquire(cls, url: str, settings: Settings | None = None) -> tuple[Any, asyncio.Semaphore | None, _PooledBrowser]:
+    async def acquire(
+        cls, url: str, settings: Settings | None = None
+    ) -> tuple[Any, asyncio.Semaphore | None, _PooledBrowser]:
         """获取 browser + 域名 Semaphore + 池包装 (v3 新增, 借鉴 GPTR).
 
         调用方需在 finally 中调用 release(pooled).
@@ -214,9 +216,7 @@ class _PlaywrightPool:
 
         # v2: 30s 超时防止 chromium 启动挂起导致 _lock 无限持有
         playwright = await asyncio.wait_for(async_playwright().start(), timeout=30.0)
-        browser = await asyncio.wait_for(
-            playwright.chromium.launch(**launch_kwargs), timeout=30.0
-        )
+        browser = await asyncio.wait_for(playwright.chromium.launch(**launch_kwargs), timeout=30.0)
         pooled = _PooledBrowser(browser, playwright)
         self._pooled_browsers.add(pooled)
         logger.info(
@@ -316,9 +316,7 @@ class PlaywrightScraper(BaseScraper):
             try:
                 # v3: 池化 acquire (负载均衡 + 域名 Semaphore)
                 try:
-                    browser, domain_sem, pooled = await _PlaywrightPool.acquire(
-                        self.url, settings
-                    )
+                    browser, domain_sem, pooled = await _PlaywrightPool.acquire(self.url, settings)
                 except Exception as e:  # noqa: BLE001
                     # 浏览器池启动失败时降级到原同步模式 (每次启动新 browser)
                     logger.warning(

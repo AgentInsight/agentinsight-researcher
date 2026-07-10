@@ -557,9 +557,7 @@ class TestV4P3DegradeStrategy:
             side_effect=lambda chunks: (chunks, [0.0] * len(chunks))
         )
         # check_and_update_batch 返回 [True, False, True] (保留第 1/3, 丢弃第 2)
-        cm._written_compressor.check_and_update_batch = MagicMock(
-            return_value=[True, False, True]
-        )
+        cm._written_compressor.check_and_update_batch = MagicMock(return_value=[True, False, True])
 
         bm25_chunks = ["keep-chunk-1", "drop-chunk-2", "keep-chunk-3"]
         with patch.object(cm, "_bm25_filter", new=AsyncMock(return_value=bm25_chunks)):

@@ -407,6 +407,7 @@ def _register_all_searchers() -> None:
     # P0-1: DuckDuckGo 已被 SearXNG 替代, 代码保留但不再注册
     # P0-1: SearXNG 在 GLOBAL 区域导入并注册到 CN+GLOBAL+AUTO (见下方)
     from src.skills.researcher.searchers.bocha import BochaSearcher
+
     # P0-1: DuckDuckGo 已被 SearXNG 替代, 代码保留但不再注册 (import 注释)
     # from src.skills.researcher.searchers.duckduckgo import DuckDuckGoSearcher
     from src.skills.researcher.searchers.exa import ExaSearcher
