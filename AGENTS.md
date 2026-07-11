@@ -387,7 +387,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 统一调用 OpenAI 兼容端点 `POST /v1/chat/completions`，请求体带 `stream: true`。
 - 请求头 `Authorization: Bearer <jwt_token>`：若页面 Token 输入框非空则携带该值，为空则不发该头（后端按第 8 章降级 IP-based UserId）。
 - 不推荐调用后端私有端点（如 `/internal/*`）；测试页面应只走对外 OpenAI 兼容接口。
-- 人在回路端点（P0-Future-03，仅 `human_review_enabled=True` 时使用）：
+- 人在回路端点（仅 `human_review_enabled=True` 时使用）：
   - `POST /v1/feedback`：提交研究计划/大纲审核反馈，请求体 `{"session_id": str, "feedback": str}`；`feedback` 为空字符串或 `approve`/`accept`/`通过` 等关键词表示接受，其他内容视为修订意见。
   - `WS /v1/ws/{session_id}`：WebSocket 双向通道，接收 `{"type":"ping"}`（回 pong）、`{"type":"human_feedback","feedback":"..."}`（提交反馈）；服务端推送 8 类结构化消息（logs/content/node_progress/sources/tool_call/report/human_feedback_request/error）。
   - SSE（`/v1/chat/completions stream=true`）仍是主通道，WebSocket 是增强通道（仅人在回路审核请求推送与反馈接收）。
@@ -405,4 +405,4 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 引入前端构建工具链（webpack/vite/rollup，违背自包含原则）。
 - 引入前端框架（React/Vue/Svelte，违背原生 JS 约定）。
 - 在测试页面写业务逻辑（路由/鉴权/权限）；页面仅做联调展示。
-- 测试页面调用除 `/v1/chat/completions`、`/health`、`/v1/feedback`、`/v1/ws/{session_id}` 外的任何端点。`/v1/feedback` 与 `/v1/ws/{session_id}` 仅用于人在回路审核反馈（P0-Future-03），未启用 `human_review_enabled` 时前端不应调用。
+- 测试页面调用除 `/v1/chat/completions`、`/health`、`/v1/feedback`、`/v1/ws/{session_id}` 外的任何端点。`/v1/feedback` 与 `/v1/ws/{session_id}` 仅用于人在回路审核反馈，未启用 `human_review_enabled` 时前端不应调用。

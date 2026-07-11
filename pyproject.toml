@@ -166,7 +166,7 @@ markers = [
     "performance: 性能测试 (延迟/吞吐/负载, 部署后容器栈)",
     "exploratory: 探索性测试 (边界/降级场景, 部署后容器栈, 非合并门禁)",
 ]
-# P1-04: 抑制第三方库不可控的警告 (业务代码已修复的除外)
+# 抑制第三方库不可控的警告 (业务代码已修复的除外)
 # 格式: action:message:category:module:lineno (category 为空则匹配任意类别)
 # 注意: message 是正则前缀匹配, category 必须在第 3 字段 (两个冒号之间不能为空)
 filterwarnings = [

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Agent 容器内: /app/scripts/init.sql (Dockerfile COPY . . 已包含)
 INIT_SQL_PATH = Path(__file__).parent.parent.parent / "scripts" / "init.sql"
 
-# P0-02: 模块级 asyncpg 连接池单例 (业务表 CRUD 共用, 与 Checkpointer 的 psycopg 池独立)
+# 模块级 asyncpg 连接池单例 (业务表 CRUD 共用, 与 Checkpointer 的 psycopg 池独立)
 # AGENTS.md 第 6 章: 业务表读写复用同一 asyncpg 池, 避免每次请求创建新连接.
 _pool_instance: asyncpg.Pool | None = None
 _pool_lock = asyncio.Lock()
@@ -86,7 +86,7 @@ async def init_database(settings: Settings | None = None) -> bool:
     try:
         conn = await asyncpg.connect(dsn)
         try:
-            # P2-3: 按分号拆分逐条执行, 独立事务隔离错误
+            # 按分号拆分逐条执行, 独立事务隔离错误
             # 原 conn.execute(sql) 在非 autocommit 模式下隐式开启事务,
             # 中间失败会回滚全部已执行的 DDL. 拆分后每条独立执行.
             statements = [
@@ -174,7 +174,7 @@ async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
             min_size=min(2, pool_size),
             max_size=pool_size,
             command_timeout=30,
-            max_inactive_connection_lifetime=300,  # P1-9: 回收闲置连接 (5分钟)
+            max_inactive_connection_lifetime=300,  # 回收闲置连接 (5分钟)
         )
         logger.info(
             "asyncpg 连接池已初始化 (业务表 CRUD, min=%d max=%d)",
@@ -185,7 +185,7 @@ async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
 
 
 async def close_pool() -> None:
-    """关闭 asyncpg 连接池 (应用 shutdown 时调用, P1-10).
+    """关闭 asyncpg 连接池 (应用 shutdown 时调用).
 
     幂等: 无实例时直接返回.
     """

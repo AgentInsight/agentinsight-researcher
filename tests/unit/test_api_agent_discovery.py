@@ -1,4 +1,4 @@
-"""单元测试: Agent Discovery Protocol 端点 (P1-Future-03).
+"""单元测试: Agent Discovery Protocol 端点.
 
 验证 src/api/agent_discovery.py:
 - GET /.well-known/agent-discovery.json 返回 200

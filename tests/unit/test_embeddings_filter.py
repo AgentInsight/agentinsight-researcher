@@ -1,4 +1,4 @@
-"""单元测试: 递归文本分块工具 (对标 langchain RecursiveCharacterTextSplitter).
+"""单元测试: 递归文本分块工具 (langchain RecursiveCharacterTextSplitter).
 
 验证 src/rag/embeddings_filter.py:
 - recursive_split: 递归切分主入口
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_default_separators_order_is_paragraph_line_space_char() -> None:
-    """DEFAULT_SEPARATORS 应按 段落->行->空格->字符 顺序降级 (对标 langchain)."""
+    """DEFAULT_SEPARATORS 应按 段落->行->空格->字符 顺序降级 (langchain)."""
     assert DEFAULT_SEPARATORS == ["\n\n", "\n", " ", ""]
 
 

@@ -1,6 +1,5 @@
 """AG2 编排器.
 
-设计参考: multi_agents_ag2/agents/orchestrator.py.
 用 autogen GroupChat + GroupChatManager 编排 4 个角色:
 Researcher → Writer → Reviewer → Publisher.
 
@@ -70,8 +69,6 @@ except ImportError:
 class AG2Orchestrator:
     """AG2 编排器: 用 GroupChat + GroupChatManager 编排 4 个角色.
 
-    设计参考: multi_agents_ag2/orchestrator.py.
-
     角色与 Skill 组件映射:
     - Researcher → ResearchConductor (多源检索 + 上下文聚合)
     - Writer → ReportGenerator (报告合成)
@@ -138,7 +135,7 @@ class AG2Orchestrator:
 
         Args:
             query: 研究查询
-            agent_role: 角色 persona (设计参考: AGENT_ROLE, 可选)
+            agent_role: 角色 persona (AGENT_ROLE, 可选)
             user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
             session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
             report_type: 报告类型 (basic_report / detailed_report)

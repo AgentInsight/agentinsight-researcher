@@ -1,8 +1,8 @@
-"""单元测试: Publisher.export_multiple_formats 多格式并行导出 (P2-01/P1-4).
+"""单元测试: Publisher.export_multiple_formats 多格式并行导出.
 
 验证 src/skills/researcher/publisher.py 的 export_multiple_formats:
 - 一次报告生成多种格式 (markdown/html/pdf_path/docx/json/latex/epub)
-- asyncio.gather 并行执行 (P1-4), return_exceptions=True 隔离单格式失败
+- asyncio.gather 并行执行, return_exceptions=True 隔离单格式失败
 - user_id/session_id 透传给 publish() 用于 trace_chain
 - 未知格式跳过 (warning, 不影响其他格式)
 - 单格式异常隔离 (不阻断其他格式导出)

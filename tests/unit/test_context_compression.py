@@ -1,4 +1,4 @@
-"""单元测试: 上下文压缩策略 (AGENTS.md 第 6 章 P1-01/V4-P1-04).
+"""单元测试: 上下文压缩策略 (AGENTS.md 第 6 章).
 
 验证 src/skills/researcher/context_manager.py:
 - compress_messages: 低于 compression_threshold 不触发 _hybrid_compress

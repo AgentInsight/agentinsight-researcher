@@ -1,15 +1,14 @@
 """SourceCurator 来源策展师.
 
-设计参考 skills/curator.py.
 AGENTS.md 用户需求 3: Reviewer (质量审查).
 
 用 LLM 评估来源可信度与相关性, 过滤低质量来源.
 cfg.CURATE_SOURCES=True 时启用 (默认 False).
 
 行业适配采用 4 层机制, 不再使用行业分类器:
-- agent_role 参数 (设计参考: AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+- agent_role 参数 (AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
 
-P1-Future-04: curator prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
+curator prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
 
 from __future__ import annotations
@@ -29,10 +28,9 @@ logger = logging.getLogger(__name__)
 class SourceCurator:
     """来源策展师 (Reviewer 职责).
 
-    设计参考 SourceCurator.
     用 smart_llm 评估来源可信度与相关性.
 
-    P2-02: 新增域名可信度字典 + _score_credibility 方法,
+    新增域名可信度字典 + _score_credibility 方法,
     与 LLM 相关性分数综合排序 (相关性 * 0.6 + 可信度 * 0.4).
     """
 
@@ -40,7 +38,7 @@ class SourceCurator:
     _llm: LLMClient
     _prompt_family: PromptFamily
 
-    # P2-02: 权威域名可信度字典 (设计参考: curate_sources)
+    # 权威域名可信度字典
     _DOMAIN_CREDIBILITY: dict[str, float] = {
         # 学术
         "arxiv.org": 0.95,
@@ -73,14 +71,14 @@ class SourceCurator:
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     def _score_credibility(self, source: dict[str, Any]) -> float:
-        """计算来源可信度 (0-1, P2-02 + V2-P1).
+        """计算来源可信度 (0-1).
 
-        V2-P1 优化 (设计参考: SourceCurator Quantitative Value):
+        优化:
         - 旧版: 含统计数据仅 +0.03 微弱加分
         - V2: 将 Quantitative Value 提升为独立维度, 含统计指标 (百分比/金额/CAGR) 显著加分 (+0.10)
 
         综合域名权威性 + 内容长度 + 数据丰富度 (Quantitative Value).
-        设计参考: curate_sources 域名可信度评估.
+        域名可信度评估.
 
         Args:
             source: 来源 dict, 含 url/content/body/snippet 等字段
@@ -101,7 +99,7 @@ class SourceCurator:
         elif len(content) < 200:
             score -= 0.10
 
-        # V2-P1: Quantitative Value 评估 (设计参考: SourceCurator 第 5 维)
+        # Quantitative Value 评估
         # 业界实践强调 "Quantitative Value" 5 次, 含统计数据的来源优先级显著高于纯文字描述.
         quant_score = self._score_quantitative_value(content)
         score += quant_score
@@ -110,7 +108,7 @@ class SourceCurator:
 
     @staticmethod
     def _score_quantitative_value(content: str) -> float:
-        """评估内容的数据丰富度 (V2-P1, 设计参考: Quantitative Value).
+        """评估内容的数据丰富度 (Quantitative Value).
 
         SourceCurator 的第 5 维评估标准, 含具体数字/百分比/金额/统计指标
         的来源优先级显著高于纯文字描述. prompt 中 "Quantitative Value" 出现 5 次.
@@ -162,9 +160,8 @@ class SourceCurator:
     ) -> list[dict[str, Any]]:
         """策展来源 (Reviewer 职责).
 
-        设计参考 curate_sources.
         用 smart_llm (temperature=0.2) 评估来源.
-        agent_role (设计参考: AGENT_ROLE): 角色 persona 字符串,
+        agent_role (AGENT_ROLE): 角色 persona 字符串,
         由 AgentCreator LLM 动态生成或调用方注入.
         """
         if not sources:
@@ -179,16 +176,16 @@ class SourceCurator:
             # agent_role 作为角色 persona
             role_persona = agent_role or "你是一位资深研究分析专家, 擅长多领域综合研究."
 
-            # P1-6: LLM 前用 credibility 预过滤, 减少输入 token (30 条 → 最多 20 条)
+            # LLM 前用 credibility 预过滤, 减少输入 token (30 条 → 最多 20 条)
             filtered_sources = [s for s in sources if self._score_credibility(s) >= 0.5]
             if not filtered_sources:
                 filtered_sources = sources  # 全部低于阈值时保留原列表
             sources_text = "\n".join(
                 f"[{i + 1}] {s.get('title', '')[:80]} | {s.get('url', '')[:100]} | {s.get('snippet', '')[:150]}"
-                for i, s in enumerate(filtered_sources[:20])  # P1-6: 30→20
+                for i, s in enumerate(filtered_sources[:20])  # 30→20
             )
 
-            # P1-Future-04: prompt 经 PromptFamily 策略注入
+            # prompt 经 PromptFamily 策略注入
             prompt = self._prompt_family.curator_prompt(
                 query=query,
                 sources_text=sources_text,
@@ -201,7 +198,7 @@ class SourceCurator:
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.2,
-                max_tokens=2000,  # P0: 4000→2000 (trace 4ad14970 优化, 策展 JSON 仅需 index+score, 不需要长输出)
+                max_tokens=2000,  # 4000→2000 (策展 JSON 仅需 index+score, 不需要长输出)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="curator-llm",
@@ -212,16 +209,16 @@ class SourceCurator:
             try:
                 scored = safe_json_parse(response.content, fallback=[])
                 if isinstance(scored, list) and scored:
-                    # 映射回 filtered_sources 并计算可信度 (P1-6: 索引基于预过滤后列表)
+                    # 映射回 filtered_sources 并计算可信度 (索引基于预过滤后列表)
                     curated: list[dict[str, Any]] = []
                     for item in scored:
                         idx = item.get("index", 0) - 1
-                        if 0 <= idx < len(filtered_sources):  # P1-6: 用 filtered_sources
+                        if 0 <= idx < len(filtered_sources):  # 用 filtered_sources
                             source = filtered_sources[idx].copy()
                             curator_score = item.get("score", 0)
                             source["curator_score"] = curator_score
                             source["curator_reason"] = item.get("reason", "")
-                            # P2-02: 可信度评分 + 综合排序
+                            # 可信度评分 + 综合排序
                             credibility = self._score_credibility(source)
                             source["credibility_score"] = round(credibility, 4)
                             # 相关性归一化 (LLM score 0-10 → 0-1)
@@ -230,7 +227,7 @@ class SourceCurator:
                             source["combined_score"] = round(combined, 4)
                             curated.append(source)
 
-                    # P2-02: 按 (相关性 * 0.6 + 可信度 * 0.4) 综合排序
+                    # 按 (相关性 * 0.6 + 可信度 * 0.4) 综合排序
                     curated.sort(key=lambda x: x.get("combined_score", 0.0), reverse=True)
                     curated = curated[:max_results]
 

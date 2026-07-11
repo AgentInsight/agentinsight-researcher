@@ -1,4 +1,4 @@
-"""单元测试: human_node 接入 multi_agent_builder (P0-Future-03 人在回路修复).
+"""单元测试: human_node 接入 multi_agent_builder (人在回路修复).
 
 验证 src/agents/researcher/human.py + src/graph/multi_agent_builder.py 的接入:
 - human_node 节点接入主图 (human_review_enabled=True 时启用)

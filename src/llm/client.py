@@ -11,10 +11,10 @@ AGENTS.md 第 9 章硬约束:
 - SMART_LLM: 复杂推理 (报告写作, 支持 2k+ 字长响应)
 - STRATEGIC_LLM: 规划 (agent 选择, 慢但精)
 
-P1-Future-01 step_costs 分步成本追踪:
+step_costs 分步成本追踪:
 - _accumulate(step, ...) 按步骤累加成本, get_session_cost 返回 step_costs 分布.
 
-P1-Future-05 LLM 降级链 (strategic → smart → fast):
+LLM 降级链 (strategic → smart → fast):
 - achat/achat_stream 在 tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出.
 - 降级仅在 "调用失败" 时触发; 流式已开始 yield 后不降级 (无法回滚已输出内容).
 """
@@ -122,22 +122,22 @@ class LLMClient:
     AGENTS.md 第 9 章: 全部 LLM 调用经此客户端, 禁厂商 SDK 直连.
     所有调用必须包裹在 trace_generation span 内 (AGENTS.md 第 10 章).
 
-    P1-Future-01: _step_costs 按业务步骤累计成本, get_session_cost 返回分布.
-    P1-Future-05: achat/achat_stream 支持 tier 降级链 (strategic → smart → fast).
+    _step_costs 按业务步骤累计成本, get_session_cost 返回分布.
+    achat/achat_stream 支持 tier 降级链 (strategic → smart → fast).
     """
 
     settings: Settings = field(default_factory=get_settings)
-    # P0-1: 成本追踪改为 per-session 隔离 (全局单例不再累积跨会话成本)
+    # 成本追踪改为 per-session 隔离 (全局单例不再累积跨会话成本)
     # key = session_id, value = {call_count, input_tokens, output_tokens, cost_usd, step_costs}
     _session_costs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
 
-    # P1-Future-05: tier 降级链映射. FAST 失败后无降级 (None), 抛出原异常.
+    # tier 降级链映射. FAST 失败后无降级 (None), 抛出原异常.
     _FALLBACK_TIER: ClassVar[dict[LLMTier, LLMTier | None]] = {
         LLMTier.STRATEGIC: LLMTier.SMART,
         LLMTier.SMART: LLMTier.FAST,
         LLMTier.FAST: None,
     }
-    # P2/P1-3: tier → Settings 字段名字典查表, 取代 3 个 if-elif 链
+    # tier → Settings 字段名字典查表, 取代 3 个 if-elif 链
     _TIER_MODEL_FIELD: ClassVar[dict[LLMTier, str]] = {
         LLMTier.FAST: "fast_llm",
         LLMTier.SMART: "smart_llm",
@@ -150,14 +150,14 @@ class LLMClient:
     }
 
     def _get_model(self, tier: LLMTier) -> str:
-        """按层级获取模型名 (P2: 字典查表取代 if-elif)."""
+        """按层级获取模型名 (字典查表取代 if-elif)."""
         field = self._TIER_MODEL_FIELD.get(tier)
         if field is None:
             raise ValueError(f"未知 LLM 层级: {tier}")
         return cast(str, getattr(self.settings, field))
 
     def _get_token_limit(self, tier: LLMTier) -> int:
-        """按层级获取 token 上限 (P2: 字典查表取代 if-elif)."""
+        """按层级获取 token 上限 (字典查表取代 if-elif)."""
         field = self._TIER_TOKEN_LIMIT_FIELD.get(tier)
         if field is None:
             return 4000
@@ -166,15 +166,12 @@ class LLMClient:
     def _adapt_zhipu(self, model: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """智谱 AI litellm 原生 zai/ 路由适配.
 
-        根因分析 (任务6 治本修复):
+        根因分析:
         - litellm 1.83.7 原生支持 zai/ 路由前缀 (智谱 GLM), 基于 OpenAIGPTConfig
         - 默认 API base: https://api.z.ai/api/paas/v4 (智谱国际端点)
         - 项目配置用 zhipuai/ 前缀 (非 litellm 标准), 需适配到 zai/
 
-        原方案 (已废弃): 适配为 openai/ + api_base hack → 导致 _compute_cost 查
-        openai/glm-4-flash 定价表查不到 (定价表 key 是 zhipuai/glm-4-flash).
-
-        治本方案: 适配到 zai/ (litellm 原生路由), 保留原始 model 用于成本计算.
+        当前方案: 适配到 zai/ (litellm 原生路由), 保留原始 model 用于成本计算.
         - litellm 用 zai/glm-4-flash 调用 (原生支持, 无需 api_base hack)
         - _compute_cost 用原始 zhipuai/glm-4-flash 查定价 (定价表已有)
         - LLMResponse.model 显示原始 zhipuai/glm-4-flash (用户透明)
@@ -207,7 +204,7 @@ class LLMClient:
         - 前缀匹配: 如 "deepseek/deepseek-chat-2026-01-01" 命中 "deepseek/deepseek-chat".
         - 多个前缀命中时取最长前缀 (最精确), 避免短前缀误命中.
 
-        任务6 治本: 不再需要智谱 GLM 回退逻辑, 因为 _compute_cost 收到的是原始 model
+        不再需要智谱 GLM 回退逻辑, 因为 _compute_cost 收到的是原始 model
         (如 zhipuai/glm-4-flash), 而非适配后的 zai/glm-4-flash.
         """
         # 1. 精确命中
@@ -253,8 +250,8 @@ class LLMClient:
     ) -> None:
         """累加 per-session 成本统计 (每次 achat/achat_stream 成功后调用).
 
-        P0-1: 成本按 session_id 隔离, 全局单例不再累积跨会话成本.
-        P1-Future-01: 同时按 step 累计分步成本, 供 get_session_cost 返回分布.
+        成本按 session_id 隔离, 全局单例不再累积跨会话成本.
+        同时按 step 累计分步成本, 供 get_session_cost 返回分布.
         """
         sid = session_id or "_default"
         if sid not in self._session_costs:
@@ -273,7 +270,7 @@ class LLMClient:
         sc["step_costs"][step] = round(sc["step_costs"].get(step, 0.0) + cost_usd, 6)
 
     def get_session_cost(self, session_id: str = "") -> dict[str, Any]:
-        """返回指定会话的累计成本统计 (P0-1: per-session 隔离).
+        """返回指定会话的累计成本统计 (per-session 隔离).
 
         Args:
             session_id: 会话 ID. 空字符串返回空统计 (不返回全局累计).
@@ -314,7 +311,7 @@ class LLMClient:
     ) -> LLMResponse:
         """按指定 tier 执行单次非流式 LLM 调用 (不含 trace span, 由 achat 包裹).
 
-        P1-Future-05: 抽取为独立方法, 供 achat 降级链逐 tier 调用.
+        抽取为独立方法, 供 achat 降级链逐 tier 调用.
         """
         model = self._get_model(tier)
         token_limit = max_tokens or self._get_token_limit(tier)
@@ -334,8 +331,8 @@ class LLMClient:
         if api_key:
             kwargs["api_key"] = api_key
 
-        # V2-P0: 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
-        # 任务6 治本: 保留原始 model 用于成本计算, adapted_model 仅用于 litellm 调用
+        # 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
+        # 保留原始 model 用于成本计算, adapted_model 仅用于 litellm 调用
         original_model = model  # 保留原始 model (如 zhipuai/glm-4-flash) 用于 _compute_cost
         _, kwargs = self._adapt_zhipu(model, kwargs)
 
@@ -358,15 +355,15 @@ class LLMClient:
             raw=response,
         )
 
-    # ========== P2-2: LLM 响应缓存 (Redis) ==========
+    # ========== LLM 响应缓存 (Redis) ==========
     # 用户硬约束: "出错了不要存缓存" — 仅缓存成功响应, 异常/错误响应绝不缓存.
-    # P1-4: 放宽缓存条件 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
+    # 放宽缓存条件 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
     # (planner/curator/context-summarize 等场景 temperature=0.2/0.3, 结构化 JSON 解析
     # 不受轻微随机性影响; 可通过本常量回退到 0.0 严格模式).
     # 流式响应 (achat_stream) 不缓存 (流式无法等价复用).
     # Redis 不可用时降级为不缓存, 不阻断主流程; 缓存写入失败仅 warn 不抛出.
 
-    # P1-4: 缓存允许的最大温度 (≤ 此值才缓存). 设为 0.0 即回退严格模式.
+    # 缓存允许的最大温度 (≤ 此值才缓存). 设为 0.0 即回退严格模式.
     _CACHE_MAX_TEMPERATURE: ClassVar[float] = 0.3
 
     def _llm_cache_key(
@@ -377,7 +374,7 @@ class LLMClient:
         max_tokens: int,
         stop: list[str] | None,
     ) -> str:
-        """构建 LLM 响应缓存键 (P2-2).
+        """构建 LLM 响应缓存键.
 
         AGENTS.md 第 7 章 Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
         LLM 响应缓存为全局级 (不区分用户/会话, 因 temp=0 时 LLM 输出确定性),
@@ -386,7 +383,7 @@ class LLMClient:
         Args:
             messages: 消息列表.
             model: 模型名.
-            temperature: 温度 (P1-4: ≤ _CACHE_MAX_TEMPERATURE 时调用方才会缓存).
+            temperature: 温度 (≤ _CACHE_MAX_TEMPERATURE 时调用方才会缓存).
             max_tokens: 最大输出 token 数.
             stop: 停止序列 (影响输出, 必须纳入 key 保证正确性).
 
@@ -412,7 +409,7 @@ class LLMClient:
         return f"{agent_id}:_global:llm:response:{key_hash}"
 
     async def _get_llm_cache(self, key: str) -> LLMResponse | None:
-        """读取 LLM 响应缓存 (P2-2).
+        """读取 LLM 响应缓存.
 
         Redis 不可用或读取异常时降级返回 None, 不阻断主流程.
         """
@@ -443,7 +440,7 @@ class LLMClient:
             return None
 
     async def _set_llm_cache(self, key: str, response: LLMResponse) -> None:
-        """写入 LLM 响应缓存 (P2-2).
+        """写入 LLM 响应缓存.
 
         仅在 LLM 调用成功后由调用方触发 (用户硬约束: 出错了不要存缓存).
         缓存写入失败仅 warn, 不抛出 (不影响主流程).
@@ -492,13 +489,13 @@ class LLMClient:
         """异步 LLM 调用 (非流式), 含降级链 (strategic → smart → fast).
 
         AGENTS.md 第 10 章: 必须包裹在 trace_generation span 内.
-        P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
-        P1-Future-05: tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
+        step 标识业务步骤, 计入 step_costs 分布.
+        tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
         外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
-        P2-2: temperature ≤ _CACHE_MAX_TEMPERATURE 时接入 Redis 响应缓存,
+        temperature ≤ _CACHE_MAX_TEMPERATURE 时接入 Redis 响应缓存,
               命中直接返回 (跳过 LLM 调用);
               仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
-        P1-4: 放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
+        放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
         """
         # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
         initial_model = self._get_model(tier)
@@ -510,7 +507,7 @@ class LLMClient:
             "timeout": self.settings.llm_timeout,
         }
 
-        # P1-4: LLM 响应缓存 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
+        # LLM 响应缓存 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
         # (planner=0.2 / curator=0.2 / context-summarize=0.3 均可命中; >0.3 仍不缓存)
         # 缓存命中直接返回, 跳过 trace span (无 LLM 调用, 无需追踪 generation)
         cache_key: str | None = None
@@ -572,7 +569,7 @@ class LLMClient:
                         },
                     )
                     # 累计会话级 + 分步成本 (成功后)
-                    # P0-1: 成本按 session_id 隔离, 不再累积到全局单例
+                    # 成本按 session_id 隔离, 不再累积到全局单例
                     self._accumulate(
                         session_id or "",
                         step,
@@ -580,8 +577,8 @@ class LLMClient:
                         response.output_tokens,
                         response.cost_usd,
                     )
-                    # P1-04: 同步回写 TokenBudgetAllocator (统一两套成本系统)
-                    # P0-2: allocator 按 session_id 隔离, 避免跨会话预算串扰
+                    # 同步回写 TokenBudgetAllocator (统一两套成本系统)
+                    # allocator 按 session_id 隔离, 避免跨会话预算串扰
                     try:
                         from src.llm.token_budget import get_token_budget_allocator
 
@@ -599,7 +596,7 @@ class LLMClient:
                             "TokenBudgetAllocator 回写失败 (非阻断): %s",
                             budget_err,
                         )
-                    # P2-2: 写入 LLM 响应缓存 (仅成功响应)
+                    # 写入 LLM 响应缓存 (仅成功响应)
                     # 用户硬约束: "出错了不要存缓存" — 此处仅在成功路径, 异常路径不会到达
                     if cache_key is not None:
                         await self._set_llm_cache(cache_key, response)
@@ -652,8 +649,8 @@ class LLMClient:
 
         AGENTS.md 第 9 章: 流式统一 achat_stream.
         yield 逐块文本 (delta content).
-        P1-Future-01: step 标识业务步骤, 计入 step_costs 分布.
-        P1-Future-05: 流式连接建立失败时按 _FALLBACK_TIER 逐级降级;
+        step 标识业务步骤, 计入 step_costs 分布.
+        流式连接建立失败时按 _FALLBACK_TIER 逐级降级;
         一旦开始 yield 内容后不降级 (已输出内容无法回滚).
         """
         # span 用初始 tier 的 model/params
@@ -709,8 +706,8 @@ class LLMClient:
                 if api_key:
                     kwargs["api_key"] = api_key
                 try:
-                    # V2-P0: 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
-                    # 任务6 治本: 保留原始 used_model 用于成本计算, adapted_model 仅用于 litellm 调用
+                    # 智谱 AI 用 litellm 原生 zai/ 路由 (zhipuai/ → zai/)
+                    # 保留原始 used_model 用于成本计算, adapted_model 仅用于 litellm 调用
                     original_used_model = used_model  # 保留原始 model 用于 _compute_cost
                     _, kwargs = self._adapt_zhipu(used_model, kwargs)
                     stream = await litellm.acompletion(**kwargs)
@@ -791,7 +788,7 @@ class LLMClient:
                 )
 
                 # 累计会话级 + 分步成本 (成功后)
-                # P0-1: 成本按 session_id 隔离, 不再累积到全局单例
+                # 成本按 session_id 隔离, 不再累积到全局单例
                 self._accumulate(
                     session_id or "",
                     step,
@@ -799,8 +796,8 @@ class LLMClient:
                     total_output_tokens,
                     cost_usd,
                 )
-                # P1-04: 同步回写 TokenBudgetAllocator (流式分支)
-                # P0-2: allocator 按 session_id 隔离
+                # 同步回写 TokenBudgetAllocator (流式分支)
+                # allocator 按 session_id 隔离
                 try:
                     from src.llm.token_budget import get_token_budget_allocator
 

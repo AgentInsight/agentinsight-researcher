@@ -1,15 +1,15 @@
-"""ChatAgent 对话式追问 Agent (P2-Future-03).
+"""ChatAgent 对话式追问 Agent.
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-设计参考: chat_with_report / 对话式追问模式.
+chat_with_report / 对话式追问模式.
 
 ChatAgent 职责:
 - 基于历史消息 + 已有报告上下文回答用户追问
-- 系统提示含 report_md (截断 chat_report_truncate_chars 字符, P2 配置化)
-- 历史 messages 取最近 chat_history_limit 条 (P2 配置化)
-- CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由 (简单追问 FAST / 复杂追问 SMART)
+- 系统提示含 report_md (截断 chat_report_truncate_chars 字符, 配置化)
+- 历史 messages 取最近 chat_history_limit 条 (配置化)
+- cascade 路由 (简单追问 FAST / 复杂追问 SMART)
 - 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
-- 用 PromptFamily.chat_prompt 注入 prompt (P1-Future-04 策略模式)
+- 用 PromptFamily.chat_prompt 注入 prompt (策略模式)
 
 集成 (chat_builder.py):
     单节点 chat 图, 复用同一 PostgresSaver (同 thread_id 隔离).
@@ -33,12 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 class ChatAgent:
-    """对话式追问 Agent (P2-Future-03).
+    """对话式追问 Agent.
 
     基于历史消息 + 已有报告上下文回答用户追问.
-    设计参考: chat_with_report 对话模式.
+    chat_with_report 对话模式.
 
-    CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由
+    cascade 路由
     - 简单追问 (短查询/总结/复述) → FAST_LLM (glm-4-flash, 免费)
     - 复杂追问 (跨章节分析/对比/推理) → SMART_LLM (deepseek-v4-flash)
     - SMART 失败 → 降级 FAST (FrugalGPT cascade)
@@ -110,10 +110,10 @@ class ChatAgent:
         ) as span:
             query = state.get("query", "")
             report_md = state.get("report_md", "")
-            # 截断 report_md 避免 token 过大 (P2: 配置化, 替换 _REPORT_TRUNCATE_CHARS)
+            # 截断 report_md 避免 token 过大 (配置化, 替换 _REPORT_TRUNCATE_CHARS)
             report_md_truncated = report_md[: self.settings.chat_report_truncate_chars]
 
-            # P1-Future-06: 首轮 chat (report_md 为空) 使用通用系统提示, 不依赖报告上下文
+            # 首轮 chat (report_md 为空) 使用通用系统提示, 不依赖报告上下文
             if not report_md_truncated:
                 system_prompt = (
                     "你是一个智能研究助手。用户可能想进行简短对话或询问简单问题。"
@@ -123,14 +123,14 @@ class ChatAgent:
                 role_persona = (
                     state.get("agent_role") or "你是一位资深研究分析专家, 擅长多领域综合研究."
                 )
-                # P1-Future-04: 系统提示经 PromptFamily 策略注入 (含 report_md)
+                # 系统提示经 PromptFamily 策略注入 (含 report_md)
                 system_prompt = self._prompt_family.chat_prompt(
                     query=query,
                     report_md=report_md_truncated,
                     agent_role=role_persona,
                 )
 
-            # 历史 messages 取最近 chat_history_limit 条 (P2: 配置化, 替换 _HISTORY_LIMIT)
+            # 历史 messages 取最近 chat_history_limit 条 (配置化, 替换 _HISTORY_LIMIT)
             history: list[BaseMessage] = state.get("messages", []) or []
             recent_history = history[-self.settings.chat_history_limit :]
             history_dicts = self._convert_messages(recent_history)
@@ -141,7 +141,7 @@ class ChatAgent:
             # 当前追问作为最新 user 消息
             messages.append({"role": "user", "content": query})
 
-            # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由
+            # cascade 路由
             # 简单追问走 FAST (glm-4-flash, 免费), 复杂追问走 SMART (deepseek-v4-flash)
             tier = self._assess_chat_complexity(query)
             span_tier = tier.value
@@ -261,7 +261,7 @@ async def chat_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """ChatAgent 对话节点 (P2-Future-03).
+    """ChatAgent 对话节点.
 
     调用 ChatAgent.chat(), 返回 delta {"messages": [...]}.
     AGENTS.md 第 5 章: 节点为纯函数, 单一职责无副作用.

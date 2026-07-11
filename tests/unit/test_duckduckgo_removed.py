@@ -1,4 +1,4 @@
-"""单元测试: DuckDuckGo 移除调用验证 (P0-1).
+"""单元测试: DuckDuckGo 移除调用验证.
 
 验证 DuckDuckGo 已从搜索引擎注册表中移除, 但代码保留以备将来恢复:
 1. _SEARCHER_REGISTRY 不含 "duckduckgo" 键 (注册块已注释)
@@ -30,7 +30,7 @@ _DUCKDUCKGO_FILE = _PROJECT_ROOT / "src" / "skills" / "researcher" / "searchers"
 def test_duckduckgo_not_in_registry() -> None:
     """_SEARCHER_REGISTRY 不含 "duckduckgo" 键 (注册块已注释).
 
-    P0-1: DuckDuckGo 已被 SearXNG 替代, 注册块注释, 不应在注册表中.
+    DuckDuckGo 已被 SearXNG 替代, 注册块注释, 不应在注册表中.
     """
     from src.skills.researcher.searchers import _SEARCHER_REGISTRY, _register_all_searchers
 
@@ -109,7 +109,7 @@ def test_duckduckgo_not_in_auto_searchers() -> None:
 def test_duckduckgo_file_still_exists() -> None:
     """duckduckgo.py 文件仍存在 (代码保留, 不删除).
 
-    P0-1 策略: 注释注册而非删除文件, 保留代码以备将来恢复.
+    策略: 注释注册而非删除文件, 保留代码以备将来恢复.
     """
     assert _DUCKDUCKGO_FILE.exists(), (
         f"duckduckgo.py 应仍存在 (代码保留策略), 路径: {_DUCKDUCKGO_FILE}"

@@ -1,4 +1,4 @@
-"""BSMarkdownifyScraper 单元测试 (V4-P3 L1 降级链 L2).
+"""BSMarkdownifyScraper 单元测试 (L1 降级链 L2).
 
 测试覆盖:
 1. 开关门控: bs_markdownify_enabled=False 时跳过
@@ -7,8 +7,6 @@
 4. HTML→Markdown 转换: 验证标题/列表/链接结构保留
 5. 清理脚本/样式: script/style/nav/footer 应被移除
 6. 图片提取: img src 应被提取
-
-对标 test_scrapers.py 测试模式.
 """
 
 from __future__ import annotations

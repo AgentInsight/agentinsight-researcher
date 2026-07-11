@@ -463,7 +463,7 @@ class TestMCPResearchFlow:
     ) -> None:
         """fast 策略: 同一 query 二次调用命中实例缓存 (不重复调用工具).
 
-        验证 V4-P1-01 fast 策略的缓存复用语义.
+        验证 fast 策略的缓存复用语义.
         """
         tool = _make_mock_tool("cached_tool", "cached tool", invoke_result="cached-result")
         mock_client = _make_mock_mcp_client([tool])

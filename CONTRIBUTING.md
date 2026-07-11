@@ -135,7 +135,7 @@ ruff format .
 ```
 feat(rag): 新增 EmbeddingsFilter 递归分块支持
 
-- 设计参考: RecursiveCharacterTextSplitter chunk_size=1000
+- RecursiveCharacterTextSplitter chunk_size=1000
 - 修复 _merge_parts chunk_size 超限 bug
 - 新增 chunk_overlap 兜底逻辑
 

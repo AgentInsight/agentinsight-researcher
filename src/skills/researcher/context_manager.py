@@ -1,6 +1,5 @@
 """ContextManager 上下文管理者.
 
-设计参考 skills/context_manager.py + context/compression.py.
 AGENTS.md 用户需求 10: Token 优化核心.
 
 核心优化:
@@ -34,8 +33,6 @@ logger = logging.getLogger(__name__)
 
 class ContextManager:
     """上下文管理者 (Token 优化核心).
-
-    设计参考 ContextManager + ContextCompressor.
     """
 
     settings: Settings
@@ -54,14 +51,14 @@ class ContextManager:
         self._compressor = SlidingWindowCompressor(self.settings)
         self._written_compressor = WrittenContentCompressor(self.settings)
         self._fastembed = get_fastembed_client()
-        # P2-9: BM25Filter 实例复用, jieba 分词缓存跨调用累积
+        # BM25Filter 实例复用, jieba 分词缓存跨调用累积
         self._bm25_filter_instance: Any = None  # BM25Filter | None (惰性初始化避免循环导入)
 
     async def compress_messages(
         self,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """滑动窗口 + LLM 摘要压缩消息列表 (P1-01).
+        """滑动窗口 + LLM 摘要压缩消息列表.
 
         AGENTS.md 第 6 章: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
         供后续节点 (writer/proofreader 等) 在写入会话前调用.
@@ -77,11 +74,11 @@ class ContextManager:
             if total_chars > settings.compression_threshold:
                 messages = await cm.compress_messages(messages)
 
-        V4-P1-04: 当上下文总字符数超过 compression_threshold 时, 切换为
+        当上下文总字符数超过 compression_threshold 时, 切换为
         滑动窗口+摘要混合压缩 (保留最近 N 条原文, 远期 LLM 摘要), 避免
         纯 LLM 摘要丢失近期细节, 同时降低成本.
         """
-        # V4-P1-04: 超阈值触发混合压缩策略
+        # 超阈值触发混合压缩策略
         total_chars = sum(len(str(m.get("content", ""))) for m in messages)
         if total_chars > self.settings.compression_threshold:
             return await self._hybrid_compress(
@@ -95,7 +92,7 @@ class ContextManager:
         messages: list[dict[str, Any]],
         target_tokens: int,
     ) -> list[dict[str, Any]]:
-        """滑动窗口+摘要混合压缩 (V4-P1-04).
+        """滑动窗口+摘要混合压缩.
 
         策略:
         - 近期内容 (最后 N 条): 保留原文 (滑动窗口), N = settings.context_sliding_window
@@ -139,7 +136,7 @@ class ContextManager:
         text: str,
         target_tokens: int,
     ) -> str:
-        """LLM 摘要远期消息文本 (V4-P1-04).
+        """LLM 摘要远期消息文本.
 
         Args:
             text: 远期消息拼接文本
@@ -183,7 +180,6 @@ class ContextManager:
     ) -> str:
         """获取与查询相似的内容 (压缩 + 过滤).
 
-        设计参考 ContextCompressor.async_get_context.
         关键优化: 小文档快速路径, 跳过 embedding 计算.
 
         两层路由架构:
@@ -193,10 +189,10 @@ class ContextManager:
           * 总 chunk 数 <= 30 → 直接返回 BM25 结果 (跳过 Embeddings)
           * 总 chunk 数 > 30 → FastEmbed 从 Top-50 中再选 Top-20 (精排, 本地 bge-small-zh)
 
-        P0-3: TEI 熔断器开启时 (Qdrant 索引/检索也会受影响) 降级关键词匹配.
-        V4-P3 L2: 性能 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
+        TEI 熔断器开启时 (Qdrant 索引/检索也会受影响) 降级关键词匹配.
+        性能 258 chunks × TEI 推理 43min → BM25 本地 2s (1000× 加速).
         """
-        # P0-3: 不在此处 reset _written_compressor, 跨子查询去重保留已写入状态;
+        # 不在此处 reset _written_compressor, 跨子查询去重保留已写入状态;
         # reset 由会话级调用方显式控制 (research_conductor.conduct_research 开始时调用一次).
 
         async with trace_chain(
@@ -215,7 +211,7 @@ class ContextManager:
 
             total_chars = sum(len(str(d.get("content", ""))) for d in documents)
 
-            # P0-3: TEI 熔断器开启时走关键词匹配降级 (避免 90s timeout 雪崩)
+            # TEI 熔断器开启时走关键词匹配降级 (避免 90s timeout 雪崩)
             if self._embeddings.is_circuit_open():
                 logger.warning(
                     "TEI 熔断器开启, context-compress 降级关键词匹配 (doc_count=%d)",
@@ -304,7 +300,7 @@ class ContextManager:
         layer: str,
     ) -> str:
         """后处理: 去重 + Word Limit 截断."""
-        # P0-4: 批量化去重 (1 次 compute_embedding 替代 N 次串行调用)
+        # 批量化去重 (1 次 compute_embedding 替代 N 次串行调用)
         if not compressed:
             context = ""
             span.update(output={"context_len": len(context), "fast_path": False, "layer": layer})
@@ -317,7 +313,7 @@ class ContextManager:
         keep_flags = self._written_compressor.check_and_update_batch(all_chunks_list, all_embs)
         deduped = [c for c, keep in zip(compressed, keep_flags, strict=False) if keep]
 
-        # Word Limit 截断 (设计参考 MAX_CONTEXT_WORDS)
+        # Word Limit 截断 (按 MAX_CONTEXT_WORDS 限制)
         context = self._truncate_by_words(deduped, self.settings.max_context_words)
         span.update(output={"context_len": len(context), "fast_path": False, "layer": layer})
         return context
@@ -361,13 +357,13 @@ class ContextManager:
                 user_id=user_id,
                 session_id=session_id,
             ) as span:
-                # P1-5: 合并为 1 次批量调用 (消除串行 await)
+                # 合并为 1 次批量调用 (消除串行 await)
                 all_texts = [query] + documents
                 all_embs = await self._fastembed.embed_texts(all_texts)
                 query_emb = all_embs[0]
                 doc_embs = all_embs[1:]
 
-                # P1-8 + P1(trace 4ad14970): 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
+                # 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
                 # 旧版仅缓存 sha256(doc_text), 与 compute_embedding_batch 查询 key sha256(chunk) 不匹配
                 # 新版拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
                 from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
@@ -437,7 +433,7 @@ class ContextManager:
         if not documents:
             return []
 
-        # P2-9: 复用 BM25Filter 实例, jieba _token_cache 跨调用累积
+        # 复用 BM25Filter 实例, jieba _token_cache 跨调用累积
         from src.rag.bm25_filter import BM25Filter
 
         try:
@@ -471,7 +467,7 @@ class ContextManager:
         documents: list[dict[str, Any]],
         max_results: int,
     ) -> str:
-        """P0-3: TEI 故障降级路径 — 关键词匹配 + 字符长度排序.
+        """TEI 故障降级路径 — 关键词匹配 + 字符长度排序.
 
         无 embedding 依赖, 用 jieba 分词计算 query 与各 document 的关键词重叠度,
         按重叠度 + 字符长度排序取 Top-K. 精度低于 embedding 相似度, 但远优于
@@ -518,7 +514,7 @@ class ContextManager:
         documents: list[dict[str, Any]],
         max_results: int,
     ) -> list[str]:
-        """P0-3: BM25Filter 失败降级 — 关键词匹配返回 list[str] (兼容原签名).
+        """BM25Filter 失败降级 — 关键词匹配返回 list[str] (兼容原签名).
 
         与 _keyword_fallback 类似但返回 list[str] (每个元素为单个文档内容),
         供 BM25Filter 超时/异常降级时按 list 处理.
@@ -552,7 +548,7 @@ class ContextManager:
         chunk_size: int = 1000,
         chunk_overlap: int = 100,
     ) -> list[dict[str, str]]:
-        """文档分块 (对标 RecursiveCharacterTextSplitter)."""
+        """文档分块 (递归字符分块器)."""
         chunks: list[dict[str, str]] = []
         for doc in documents:
             content = str(doc.get("content", ""))
@@ -608,7 +604,7 @@ class ContextManager:
 
     @staticmethod
     def _truncate_by_words(texts: list[str], max_words: int) -> str:
-        """按词数截断 (设计参考 MAX_CONTEXT_WORDS)."""
+        """按词数截断 (MAX_CONTEXT_WORDS 限制)."""
         result: list[str] = []
         word_count = 0
         for text in texts:
@@ -625,10 +621,10 @@ class ContextManager:
 
 
 class SlidingWindowCompressor:
-    """滑动窗口 + LLM 摘要压缩器 (AGENTS.md 第 6 章 P1-01).
+    """滑动窗口 + LLM 摘要压缩器 (AGENTS.md 第 6 章).
 
     策略: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
-    设计参考 上下文压缩, 但增强 LLM 摘要能力.
+    增强 LLM 摘要能力.
     """
 
     settings: Settings
@@ -700,13 +696,12 @@ class SlidingWindowCompressor:
 
 
 class WrittenContentCompressor:
-    """已写入内容去重器 (P1-02, 设计参考 WrittenContentCompressor).
+    """已写入内容去重器.
 
-    V2-P1 优化 (设计参考):
+    优化:
     - 阈值走 settings.written_content_similarity_threshold (旧版硬编码 0.5)
-    - chunk 级去重 (旧版整篇 content 比对, V2 切成 chunks 后逐 chunk 比对,
-      与业界实践 WrittenContentCompressor 对齐)
-    - 多查询并集去重 (设计参考 current_subtopic + draft_section_titles 并集)
+    - chunk 级去重 (旧版整篇 content 比对, V2 切成 chunks 后逐 chunk 比对)
+    - 多查询并集去重 (current_subtopic + draft_section_titles 并集)
 
     用 FastEmbed (本地 bge-small-zh-v1.5, 512维) 对已写入内容做相似度去重,
     避免重复内容进入上下文. 不依赖远程 TEI 服务 (TEI 仅用于私有数据 Qdrant 索引).
@@ -715,10 +710,10 @@ class WrittenContentCompressor:
     settings: Settings
     _fastembed: FastEmbedClient
     threshold: float
-    # V2-P1: chunk 级去重, 替代旧版整篇 content 比对
+    # chunk 级去重, 替代旧版整篇 content 比对
     _written_embeddings: list[list[float]]
     _written_chunks: list[str]
-    # P4 修复: 单条 chunk embedding 缓存 (key=chunk sha256), 避免同一 chunk
+    # 单条 chunk embedding 缓存 (key=chunk sha256), 避免同一 chunk
     # 在不同 content 中重复嵌入; reset() 时一并清空.
     _chunk_cache: dict[str, list[float]]
 
@@ -729,7 +724,7 @@ class WrittenContentCompressor:
     ) -> None:
         self.settings = settings or get_settings()
         self._fastembed = get_fastembed_client()
-        # V2-P1: 阈值走 settings (优先级: 参数 > settings > 默认 0.5)
+        # 阈值走 settings (优先级: 参数 > settings > 默认 0.5)
         self.threshold = (
             similarity_threshold
             if similarity_threshold is not None
@@ -768,7 +763,7 @@ class WrittenContentCompressor:
         if not content.strip():
             return [], []
 
-        # V2-P1: chunk 级切分 (复用 embeddings_filter.recursive_split, chunk_size=1000)
+        # chunk 级切分 (复用 embeddings_filter.recursive_split, chunk_size=1000)
         from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
 
         chunks = recursive_split(
@@ -780,7 +775,7 @@ class WrittenContentCompressor:
         if not chunks:
             chunks = [content]
 
-        # P4 修复: 单条 chunk embedding 缓存, 避免同一 chunk 在不同 content 中重复嵌入
+        # 单条 chunk embedding 缓存, 避免同一 chunk 在不同 content 中重复嵌入
         content_embs: list[list[float]] = [[] for _ in chunks]
         miss_indices: list[int] = []
         miss_chunks: list[str] = []
@@ -829,7 +824,7 @@ class WrittenContentCompressor:
         chunks: list[str],
         content_embs: list[list[float]],
     ) -> bool:
-        """锁内同步: numpy 矩阵比对相似度 + 更新内部状态 (P4 修复).
+        """锁内同步: numpy 矩阵比对相似度 + 更新内部状态.
 
         在锁内执行 (保护 _written_embeddings 和 _written_chunks 的并发修改),
         用 numpy 矩阵乘法一次性计算所有相似度, 替代旧版 O(N*M) 双重 for 循环.
@@ -854,7 +849,7 @@ class WrittenContentCompressor:
             self._written_chunks.extend(chunks)
             return True
 
-        # P4 修复: numpy 矩阵运算替代双重 for 循环
+        # numpy 矩阵运算替代双重 for 循环
         # sim_matrix shape = (len(content_embs), len(self._written_embeddings))
         sim_matrix = ContextManager._cosine_similarity_batch(
             content_embs,
@@ -882,9 +877,9 @@ class WrittenContentCompressor:
         chunks: list[str],
         content_embs: list[list[float]],
     ) -> tuple[bool, str]:
-        """V4-P1-04 优化 3: 跨章节语义去重 (只丢弃相似 chunk, 保留差异部分).
+        """跨章节语义去重 (只丢弃相似 chunk, 保留差异部分).
 
-        设计参考 串行去重: 串行处理子主题, 每个参考已写章节避免重复;
+        串行去重: 串行处理子主题, 每个参考已写章节避免重复;
         本项目并行处理, 旧版"任意 chunk 相似即整篇丢弃"过于激进,
         导致子主题间有部分相似内容时整篇被丢弃 (TOC 有标题但正文无内容).
 
@@ -915,7 +910,7 @@ class WrittenContentCompressor:
             self._written_chunks.extend(chunks)
             return True, original_content
 
-        # P4 修复: numpy 矩阵运算替代双重 for 循环
+        # numpy 矩阵运算替代双重 for 循环
         try:
             sim_matrix = ContextManager._cosine_similarity_batch(
                 content_embs,
@@ -961,7 +956,7 @@ class WrittenContentCompressor:
         self,
         contents: list[str],
     ) -> tuple[list[list[str]], list[list[list[float]]]]:
-        """批量计算多个 content 的 chunk embeddings (P0-4 批量化优化).
+        """批量计算多个 content 的 chunk embeddings (批量化优化).
 
         1 次调用替代 N 次串行 compute_embedding, 减少 FastEmbed 调用次数.
 
@@ -1041,7 +1036,7 @@ class WrittenContentCompressor:
         all_chunks: list[list[str]],
         all_embs: list[list[list[float]]],
     ) -> list[bool]:
-        """批量判断多个 content 是否应保留 (P0-4 批量化优化).
+        """批量判断多个 content 是否应保留 (批量化优化).
 
         在锁内执行 numpy 矩阵比对, 替代 N 次串行 check_and_update.
 
@@ -1060,11 +1055,11 @@ class WrittenContentCompressor:
     async def should_keep(self, content: str) -> bool:
         """判断内容是否应保留 (兼容入口, 内部调用 compute_embedding + check_and_update).
 
-        V2-P1: chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
+        chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
         相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
         与业界实践 WrittenContentCompressor 对齐.
 
-        P4 修复: 内部拆分为 compute_embedding (锁外 I/O) + check_and_update
+        内部拆分为 compute_embedding (锁外 I/O) + check_and_update
         (锁内 numpy 比对). 单调用方可直接用此方法; 并行场景应分别调用两步
         以缩小锁粒度 (见 report_generator._research_and_write_subtopic).
 

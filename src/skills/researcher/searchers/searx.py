@@ -1,10 +1,9 @@
 """SearXNG 搜索 - 自托管元搜索引擎.
 
-P2-Future-04: 设计参考 retrievers/searx/searx.py.
 通过自托管 SearXNG 实例进行搜索, 适用于全球场景.
 无需 API Key, 需配置 SEARX_URL 环境变量 (默认 http://searxng:8099, 容器内访问).
 
-P0-1 优化: 国内主搜索引擎, 替代 DuckDuckGo (平均 22.5s/次) 作为 CN 区域首选.
+国内主搜索引擎, 替代 DuckDuckGo (平均 22.5s/次) 作为 CN 区域首选.
 - name 改为 "searxng" (与注册表 FREE_QUOTA_MAP 一致)
 - timeout 从 settings.search_timeout 读取 (默认 10.0)
 - 新增 safesearch=0 (关闭安全搜索过滤) + language="zh-CN" 参数
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 class SearXNGSearcher(BaseSearcher):
     """SearXNG 自托管元搜索引擎 (CN/GLOBAL 场景, 无需 Key).
 
-    P0-1 优化: 注册到 CN+GLOBAL+AUTO 三区域, 国内查询优先使用.
+    注册到 CN+GLOBAL+AUTO 三区域, 国内查询优先使用.
     """
 
     name = "searxng"  # 与注册表 FREE_QUOTA_MAP 的 "searxng" 一致
@@ -42,10 +41,10 @@ class SearXNGSearcher(BaseSearcher):
         super().__init__(settings)
         # 拼接完整搜索端点: {searx_url}/search (去除尾部斜杠避免双斜杠)
         self._api_url = f"{self.settings.searx_url.rstrip('/')}/search"
-        # P0: 实例级连接池复用 (避免每次请求新建 client)
+        # 实例级连接池复用 (避免每次请求新建 client)
         self._client = httpx.AsyncClient(timeout=self.settings.search_timeout)
         self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
-        self._max_retries = 2  # P0: 限制 2 次避免请求堆积
+        self._max_retries = 2  # 限制 2 次避免请求堆积
 
     async def search(
         self,
@@ -93,12 +92,12 @@ class SearXNGSearcher(BaseSearcher):
                     # time_range 仅在显式传入时加入 (None 表示不过滤, 不传该参数)
                     if time_range:
                         params["time_range"] = time_range
-                    # P0 修复: 添加 X-Forwarded-For 头, 避免 SearXNG botdetection 警告
+                    # 添加 X-Forwarded-For 头, 避免 SearXNG botdetection 警告
                     # (SearXNG ProxyFix 中间件检查此头, 缺失时记录 "X-Forwarded-For nor X-Real-IP header is set!")
                     headers = {
                         "X-Forwarded-For": "127.0.0.1",
                     }
-                    # P0: 实例级连接池复用 (不再每次新建 client)
+                    # 实例级连接池复用 (不再每次新建 client)
                     response = await self._client.get(self._api_url, params=params, headers=headers)
                     response.raise_for_status()
                     data = response.json()

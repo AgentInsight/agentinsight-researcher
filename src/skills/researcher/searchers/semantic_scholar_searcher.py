@@ -4,7 +4,7 @@ AGENTS.md 第 9 章: 统一 httpx 异步.
 Semantic Scholar Graph API 学术论文搜索, 适用于学术场景.
 可选配置 SEMANTIC_SCHOLAR_API_KEY 提升配额.
 
-P1-6 修复: 添加 CrossRef 作为备用源.
+添加 CrossRef 作为备用源.
 - Semantic Scholar 故障/限流/超时/空结果 → 自动切换 CrossRef
 - CrossRef 免费、无需 API Key (mailto 进入 polite pool)
 - 备用源切换通过 logger.warning 记录
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class SemanticScholarSearcher(BaseSearcher):
     """Semantic Scholar 学术论文搜索 (Graph API).
 
-    P1-6: 添加 CrossRef 备用源, 主源故障/限流/空结果时自动切换.
+    添加 CrossRef 备用源, 主源故障/限流/空结果时自动切换.
     """
 
     name = "semantic_scholar"
@@ -39,8 +39,8 @@ class SemanticScholarSearcher(BaseSearcher):
     quality_score = 80.0  # v1.1 新增
 
     _api_url: str = "https://api.semanticscholar.org/graph/v1/paper/search"
-    _crossref_url: str = "https://api.crossref.org/works"  # P1-6 备用源
-    _crossref_timeout: float = 30.0  # P1-6 CrossRef 总超时 (asyncio.wait_for)
+    _crossref_url: str = "https://api.crossref.org/works"
+    _crossref_timeout: float = 30.0  # CrossRef 总超时 (asyncio.wait_for)
 
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
@@ -141,7 +141,7 @@ class SemanticScholarSearcher(BaseSearcher):
         query: str,
         max_results: int,
     ) -> list[dict[str, Any]]:
-        """Semantic Scholar Graph API 主搜索 (P1-6: 抽取为独立方法, 逻辑不变)."""
+        """Semantic Scholar Graph API 主搜索."""
         headers: dict[str, str] = {}
         if self._api_key:
             headers["x-api-key"] = self._api_key
@@ -179,7 +179,7 @@ class SemanticScholarSearcher(BaseSearcher):
         query: str,
         max_results: int,
     ) -> list[dict[str, Any]]:
-        """CrossRef 备用搜索 (P1-6 修复).
+        """CrossRef 备用搜索.
 
         CrossRef API: https://api.crossref.org/works?query=...&rows=...
         响应 message.items 数组, 每项含:

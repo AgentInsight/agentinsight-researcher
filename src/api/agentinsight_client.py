@@ -3,9 +3,7 @@
 SELF_HOST=False 时复用 AgentInsightService 的点数校验/扣除 API.
 AGENTS.md 第 8 章: JWT 验证与 user_id 获取在 API 入口中间件完成.
 
-对标: D:\\Projects\\Entrepreneurship\\AIProjects\\AgentInsightService\\Agents\\common\\api_client.py
-
-AgentType 枚举 (对标 AgentInsightService Models/Common/Enums/PaymentEnums.cs):
+AgentType 枚举:
 - Research = 2: 研究型 Agent, 校验/扣除 MonthlyResearchRate, 服务端从 JWT Token
   解析 UserId → 默认 OrgId, 请求不传 orgId/projectId
 
@@ -24,7 +22,7 @@ from src.observability.tracing import trace_tool
 
 logger = logging.getLogger(__name__)
 
-# AgentType 枚举常量 (对标 AgentInsightService AgentType enum)
+# AgentType 枚举常量
 # Research = 2: 研究型 (本项目唯一使用类型)
 _AGENT_TYPE_RESEARCH: int = 2
 

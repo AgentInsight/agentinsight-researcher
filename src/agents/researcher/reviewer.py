@@ -1,25 +1,24 @@
-"""Reviewer 报告评审 Agent (P0-Future-01, V4-P1-02 多维度评分).
+"""Reviewer 报告评审 Agent (多维度评分).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-设计参考: multi_agents/agents/reviewer.py + 章节级修订循环.
 
 Reviewer 职责:
 - 评审报告质量, 按 4 维度打分 (事实性/结构性/语言性/完整性)
 - 返回 review_decision ("accept"|"revise") + review_feedback + review_scores
-- 用 LLMClient tier=SMART 调用 (V4-P1-02: 评分用 SMART 层)
+- 用 LLMClient tier=SMART 调用 (评分用 SMART 层)
 - 用 safe_json_parse 解析 LLM 返回的 JSON
 - 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
 
 行业适配采用 4 层机制, agent_role 注入角色 persona.
 
-V4-P1-02: 单维度 pass/revise 升级为多维度评分:
+单维度 pass/revise 升级为多维度评分:
   - factual (事实性): 报告内容是否基于检索上下文, 有无幻觉
   - structural (结构性): 报告结构是否清晰, 章节划分是否合理
   - language (语言性): 语言是否流畅, 是否有语法错误
   - completeness (完整性): 是否充分回答用户查询
   评分规则: 任何维度 score < 6 → revise; 全部 >= 6 → accept
 
-P1-01: 评分缓存.
+评分缓存.
 - 模块级 _REVIEW_CACHE 跨 Reviewer 实例共享, TTL 30 分钟.
 - 缓存键 md5(report_content + review_criteria), 报告变化则不命中.
 - 缓存命中跳过 LLM 调用; miss 时正常评审后写入缓存.
@@ -41,7 +40,7 @@ from src.observability.tracing import trace_chain
 
 logger = logging.getLogger(__name__)
 
-# V4-P1-02: 评分维度配置
+# 评分维度配置
 _REVIEW_DIMENSIONS = ("factual", "structural", "language", "completeness")
 _ACCEPT_THRESHOLD = 6  # score >= 6 视为该维度合格, < 6 触发 revise
 
@@ -53,7 +52,7 @@ _DIM_LABELS = {
     "completeness": "完整性",
 }
 
-# P1-01: Reviewer 评分缓存 (模块级, 跨 Reviewer 实例共享).
+# Reviewer 评分缓存 (模块级, 跨 Reviewer 实例共享).
 # 缓存键: md5(report_content + review_criteria); 缓存值: 评审结果 + 时间戳.
 # TTL: 30 分钟, 避免同一报告重复评审时浪费 LLM 调用.
 _REVIEW_CACHE: dict[str, dict[str, Any]] = {}
@@ -61,10 +60,10 @@ _REVIEW_CACHE_TTL = 1800  # 秒 (30 分钟)
 
 
 class Reviewer:
-    """报告评审 Agent (P0-Future-01, V4-P1-02 多维度评分).
+    """报告评审 Agent (多维度评分).
 
     用 smart_llm 按 4 维度评审报告质量, 返回 accept/revise 决策与反馈.
-    设计参考: reviewer 角色 + 章节级修订循环入口.
+    reviewer 角色 + 章节级修订循环入口.
     """
 
     settings: Settings
@@ -85,7 +84,7 @@ class Reviewer:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """评审报告质量 (V4-P1-02 多维度评分).
+        """评审报告质量 (多维度评分).
 
         Args:
             state: 研究状态, 含 report_md / contexts / query
@@ -130,7 +129,7 @@ class Reviewer:
                     "review_scores": review_scores,
                 }
 
-            # P1-01: 评分缓存检查 — 同一报告重复评审时跳过 LLM 调用.
+            # 评分缓存检查 — 同一报告重复评审时跳过 LLM 调用.
             # 缓存键含报告内容 hash, 报告变化 (如 revise 后) 不会命中.
             cache_key = self._get_review_cache_key(state)
             cached = self._get_cached_review(cache_key)
@@ -220,7 +219,7 @@ class Reviewer:
             review_scores = self._parse_review_scores(result)
             revision_instructions = str(result.get("revision_instructions", "")).strip()
 
-            # V4-P1-02 决策规则: 任一维度 score < 6 → revise, 全部 >= 6 → accept
+            # 决策规则: 任一维度 score < 6 → revise, 全部 >= 6 → accept
             decision = "accept"
             for dim in _REVIEW_DIMENSIONS:
                 if review_scores[dim]["score"] < _ACCEPT_THRESHOLD:
@@ -248,7 +247,7 @@ class Reviewer:
                 "review_feedback": feedback,
                 "review_scores": review_scores,
             }
-            # P1-01: 写入缓存, 供后续相同报告重复评审复用.
+            # 写入缓存, 供后续相同报告重复评审复用.
             self._set_review_cache(cache_key, result_payload)
             return result_payload
 
@@ -351,10 +350,10 @@ class Reviewer:
 
         return "\n\n".join(parts)
 
-    # ===== P1-01: 评分缓存 =====
+    # ===== 评分缓存 =====
 
     def _get_review_cache_key(self, state: ResearcherState) -> str:
-        """生成评审缓存键 (P1-01).
+        """生成评审缓存键.
 
         缓存键 = md5(report_content + review_criteria).
         review_criteria 由影响评审结果的输入组成: agent_role (persona) +
@@ -376,7 +375,7 @@ class Reviewer:
 
     @staticmethod
     def _get_cached_review(key: str) -> dict[str, Any] | None:
-        """查询评审缓存 (P1-01).
+        """查询评审缓存.
 
         命中且未过期时返回缓存结果; 未命中/过期/异常时返回 None (降级为正常评审).
         过期条目惰性删除.
@@ -407,7 +406,7 @@ class Reviewer:
 
     @staticmethod
     def _set_review_cache(key: str, scores: dict[str, Any]) -> None:
-        """写入评审缓存 (P1-01).
+        """写入评审缓存.
 
         记录写入时间戳用于 TTL 检查. 写入异常时静默降级 (不影响评审结果).
 

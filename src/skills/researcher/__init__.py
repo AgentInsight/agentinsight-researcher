@@ -1,15 +1,15 @@
 """Researcher 技能组件.
 
-设计参考 skills/ 的 6+1 个 Skill:
-- agent_creator.py      (设计参考: actions/agent_creator.py + prompts.py auto_agent_instructions)
-- research_conductor.py (设计参考: skills/researcher.py)
-- context_manager.py    (设计参考: skills/context_manager.py)
-- browser_manager.py    (设计参考: skills/browser.py)
-- source_curator.py     (设计参考: skills/curator.py)
-- report_generator.py   (设计参考: skills/writer.py)
-- publisher.py          (设计参考: multi_agents/agents/publisher.py)
-- deep_research.py      (设计参考: skills/deep_research.py, v2)
-- mcp_coordinator.py    (设计参考: mcp/)
+Skill 组件清单:
+- agent_creator.py      (LLM 动态角色生成器)
+- research_conductor.py (研究总指挥)
+- context_manager.py    (上下文管理器)
+- browser_manager.py    (浏览器管理器)
+- source_curator.py     (来源策展器)
+- report_generator.py   (报告生成器)
+- publisher.py          (发布器)
+- deep_research.py      (递归深度研究器)
+- mcp_coordinator.py    (MCP 工具协调器)
 
 行业适配采用 4 层机制:
 - Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色

@@ -1,10 +1,6 @@
 """agentinsight-researcher FastAPI 入口.
 
-对标 AgentInsightService server.py 模式.
 AGENTS.md 第 3/8/14 章: API 入口, JWT 中间件, OpenAI 兼容端点, 前端测试页面.
-
-阶段 2: 集成中间件 + OpenAI 兼容端点骨架 + 图构建器初始化.
-阶段 3: 接入完整研究流水线.
 """
 
 from __future__ import annotations
@@ -35,12 +31,12 @@ from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# P0-4: 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
+# 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
 _background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _create_background_task(coro: object) -> asyncio.Task[None]:
-    """创建后台任务并保留引用 (P0-4: 防止 GC 静默取消).
+    """创建后台任务并保留引用 (防止 GC 静默取消).
 
     标准模式: set + done_callback(discard), 任务完成后自动从集合移除.
     """
@@ -58,14 +54,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("agentinsight-researcher 启动中 (env=%s)", settings.env)
 
     # 启动时初始化业务数据 (AGENTS.md 第 6 章):
-    # PostgreSQL 业务表 (原 Docker 构建时执行, 现改为 Agent 启动时触发, 幂等)
+    # PostgreSQL 业务表由 Agent 启动时触发 (幂等)
     # 失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
     # 注: 行业适配采用 4 层机制 (Prompt/Config/Retriever/MCP), 不再 bootstrap GICS 行业知识库
     from src.memory.db_initializer import init_database
 
     await init_database(settings)
 
-    # P0-修复1: 显式同步 ensure Qdrant 集合 (AGENTS.md 第 6/7 章, 用户首要需求)
+    # 显式同步 ensure Qdrant 集合 (AGENTS.md 第 6/7 章)
     # 必须同步等待完成, 避免新环境首请求竞态 (后台任务可能在集合未就绪时被查询)
     # 失败不阻断启动 (仅告警), 后续业务方法自保 _ensure_collection_once 兜底
     async def _ensure_qdrant_collection() -> None:
@@ -80,10 +76,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await _ensure_qdrant_collection()  # 同步等待, 确保集合就绪后再启动
 
-    # P1-OPT-009: LangGraph 图预热 (后台任务触发首次构建, 首次请求直接复用单例)
+    # LangGraph 图预热 (后台任务触发首次构建, 首次请求直接复用单例)
     # 见下方 _warmup_graph() 后台任务, 消除首次请求 20-50ms 编译开销
 
-    # P2 清理: 启动时一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据
+    # 启动时一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据
     # QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 实施后, 第二层 Embeddings+Qdrant 语义匹配
     # 已移除, 原种子数据不再使用; 启动时清理一次避免残留 (幂等, Qdrant 不可用仅告警)
     async def _cleanup_legacy_chat_seeds() -> None:
@@ -96,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     _create_background_task(_cleanup_legacy_chat_seeds())
 
-    # P0-03: Embeddings 批量预热 (后台执行, 不阻塞启动)
+    # Embeddings 批量预热 (后台执行, 不阻塞启动)
     # 触发 TEI 模型加载, 避免首次真实调用冷启动; 失败不阻断启动
     async def _warmup_embeddings() -> None:
         try:
@@ -108,7 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     _create_background_task(_warmup_embeddings())
 
-    # P1: FastEmbed 模型预热 (trace 4ad14970 优化, 消除首次调用 10s+ 冷启动延迟)
+    # FastEmbed 模型预热 (消除首次调用 10s+ 冷启动延迟)
     # 触发 ONNX 模型加载 + ONNX Runtime 线程初始化, 避免首次请求冷启动; 失败不阻断启动
     async def _warmup_fastembed() -> None:
         try:
@@ -122,7 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     _create_background_task(_warmup_fastembed())
 
-    # P1-OPT-009: 全局单图编译 (启动时预热, 首次请求直接复用, 消除 20-50ms 编译开销)
+    # 全局单图编译 (启动时预热, 首次请求直接复用, 消除 20-50ms 编译开销)
     # 复用 routes._get_graph() 全局单例 (懒加载), 后台触发首次构建; 失败不阻断启动
     # 单例机制已在 src/api/routes.py 实现 (_compiled_graph + _get_graph), 这里仅预热
     async def _warmup_graph() -> None:
@@ -138,36 +134,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    # P0-5: 关闭全局 Redis 单例 (由 common.redis_client 统一工厂创建, lifespan 统一关闭)
+    # 关闭全局 Redis 单例 (由 common.redis_client 统一工厂创建, lifespan 统一关闭)
     from src.common.redis_client import close_redis_client
 
     await close_redis_client()
 
-    # P0-9: 关闭 WebSocket token 验证模块级 httpx client 单例
+    # 关闭 WebSocket token 验证模块级 httpx client 单例
     from src.api.websocket import close_verify_client
 
     await close_verify_client()
 
-    # P0-6: 关闭全局 Playwright 浏览器池单例 (复用 browser, 避免每 URL 启动 chromium)
+    # 关闭全局 Playwright 浏览器池单例 (复用 browser, 避免每 URL 启动 chromium)
     from src.skills.researcher.scrapers.playwright_scraper import _PlaywrightPool
 
     await _PlaywrightPool.shutdown()
 
-    # P0-7: 关闭共享 httpx.AsyncClient 单例 (scraper 复用 TCP 连接池, P1-3)
+    # 关闭共享 httpx.AsyncClient 单例 (scraper 复用 TCP 连接池)
     # 释放底层 TCP 连接池, 避免依赖进程退出回收; 幂等 (无实例时直接返回)
     from src.skills.researcher.scrapers import close_shared_http_client
 
     await close_shared_http_client()
 
-    # P1-1: 关闭 JWTAuthMiddleware 的 httpx.AsyncClient (P1-3: 纯 ASGI middleware 无法从 app 获取实例)
+    # 关闭 JWTAuthMiddleware 的 httpx.AsyncClient (纯 ASGI middleware 无法从 app 获取实例)
     await close_jwt_middleware()
 
-    # P1-10: 关闭 asyncpg 业务表连接池 (优雅 shutdown, 避免连接泄漏)
+    # 关闭 asyncpg 业务表连接池 (优雅 shutdown, 避免连接泄漏)
     from src.memory.db_initializer import close_pool
 
     await close_pool()
 
-    # P1-10: 关闭 Checkpointer 的 psycopg 连接池 (优雅 shutdown)
+    # 关闭 Checkpointer 的 psycopg 连接池 (优雅 shutdown)
     from src.memory.checkpointer import close_checkpointer_pool
 
     await close_checkpointer_pool()
@@ -205,7 +201,7 @@ def create_app() -> FastAPI:
     # 安全响应头中间件 (AGENTS.md 第 11 章, 不可绕过)
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # P0-10: 统一请求追踪 ID 中间件 (纯 ASGI, 注入 X-Request-ID)
+    # 统一请求追踪 ID 中间件 (纯 ASGI, 注入 X-Request-ID)
     app.add_middleware(RequestIDMiddleware)
 
     # 健康检查 (AGENTS.md 第 12 章, 容器健康检查端点)
@@ -219,20 +215,20 @@ def create_app() -> FastAPI:
     # OpenAI 兼容端点 (AGENTS.md 第 14 章)
     app.include_router(api_router)
 
-    # MCP 配置管理端点 (任务7: 前端 MCP 配置 + Postgres 持久化)
+    # MCP 配置管理端点 (前端 MCP 配置 + Postgres 持久化)
     app.include_router(mcp_router)
 
-    # Agent Discovery Protocol 公开发现端点 (P1-Future-03, 无需鉴权)
+    # Agent Discovery Protocol 公开发现端点 (无需鉴权)
     app.include_router(discovery_router)
 
-    # WebSocket 双向实时通信端点 (P2-Future-02, AGENTS.md 第 14 章允许端点)
+    # WebSocket 双向实时通信端点 (AGENTS.md 第 14 章允许端点)
     # SSE 仍是主通道, WebSocket 是增强通道 (人在回路审核请求 + 实时进度)
     if settings.websocket_enabled:
         from src.api.websocket import router as ws_router
 
         app.include_router(ws_router)
 
-    # P0-9: 全局异常处理器 (结构化 JSON 错误响应, 符合 OpenAI 兼容 API 规范)
+    # 全局异常处理器 (结构化 JSON 错误响应, 符合 OpenAI 兼容 API 规范)
     @app.exception_handler(AgentError)
     async def agent_error_handler(request: Request, exc: AgentError) -> JSONResponse:
         """捕获 Agent 系统自定义异常, 返回结构化错误响应."""

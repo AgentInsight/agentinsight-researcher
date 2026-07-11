@@ -65,7 +65,7 @@ def test_query_intent_off_topic_value() -> None:
 
 
 def test_query_intent_has_four_members() -> None:
-    """测试 QueryIntent 含 RESEARCH / CHAT / SHORT_QUERY / OFF_TOPIC 四个成员 (P1-Future-07)."""
+    """测试 QueryIntent 含 RESEARCH / CHAT / SHORT_QUERY / OFF_TOPIC 四个成员."""
     members = list(QueryIntent)
     assert len(members) == 4
     assert QueryIntent.RESEARCH in members
@@ -209,7 +209,7 @@ def test_rule_classify_whitespace_only_short(classifier: QueryIntentClassifier) 
     assert result.intent == QueryIntent.SHORT_QUERY
 
 
-# ========== _CHITCHAT_PATTERNS (P1-Future-07) ==========
+# ========== _CHITCHAT_PATTERNS ==========
 
 
 def test_chitchat_patterns_non_empty() -> None:

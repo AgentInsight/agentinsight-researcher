@@ -45,7 +45,7 @@ def test_llm_tier_token_limit():
 
 
 def test_api_key_mapping_by_prefix():
-    """测试按 LiteLLM 路由前缀获取 API Key (P1-3: 抽取到 common/llm_key_resolver)."""
+    """测试按 LiteLLM 路由前缀获取 API Key (抽取到 common/llm_key_resolver)."""
     settings = Settings(
         deepseek_api_key="ds-key",
         openai_api_key="oa-key",
@@ -83,7 +83,7 @@ def test_cost_computation():
 
 
 def test_get_session_cost_accumulation():
-    """测试会话级累计成本统计 + P1-Future-01 step_costs 分步分布."""
+    """测试会话级累计成本统计 + step_costs 分步分布."""
     settings = Settings(_env_file=None)
     client = LLMClient(settings)
     # 初始状态 (含 step_costs 空字典)
@@ -109,7 +109,7 @@ def test_get_session_cost_accumulation():
 
 
 def test_step_costs_rounding():
-    """P1-Future-01: step_costs 保留 6 位小数, 多次累加不溢出精度."""
+    """step_costs 保留 6 位小数, 多次累加不溢出精度."""
     settings = Settings(_env_file=None)
     client = LLMClient(settings)
     # 累加会产生浮点误差的值
@@ -120,7 +120,7 @@ def test_step_costs_rounding():
     assert stats["step_costs"]["step"] == pytest.approx(0.0006)
 
 
-# ========== P1-Future-05 LLM 降级链测试 (伪造 litellm) ==========
+# ========== LLM 降级链测试 (伪造 litellm) ==========
 
 
 class _FakeUsage:
@@ -212,7 +212,7 @@ def _tiered_settings() -> Settings:
 
 @pytest.mark.asyncio
 async def test_achat_fallback_strategic_to_smart(monkeypatch: pytest.MonkeyPatch):
-    """P1-Future-05: achat strategic 失败 → 降级到 smart 成功."""
+    """achat strategic 失败 → 降级到 smart 成功."""
     client = LLMClient(_tiered_settings())
 
     def side_effect(model: str, n: int) -> Any:
@@ -238,7 +238,7 @@ async def test_achat_fallback_strategic_to_smart(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_achat_fallback_exhausted(monkeypatch: pytest.MonkeyPatch):
-    """P1-Future-05: 降级链耗尽 (FAST 也失败) 时抛出异常, 不计入成本."""
+    """降级链耗尽 (FAST 也失败) 时抛出异常, 不计入成本."""
     client = LLMClient(_tiered_settings())
 
     def side_effect(model: str, n: int) -> Any:
@@ -261,7 +261,7 @@ async def test_achat_fallback_exhausted(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_achat_no_fallback_on_success(monkeypatch: pytest.MonkeyPatch):
-    """P1-Future-05: SMART 直接成功时不降级."""
+    """SMART 直接成功时不降级."""
     client = LLMClient(_tiered_settings())
 
     def side_effect(model: str, n: int) -> Any:
@@ -281,7 +281,7 @@ async def test_achat_no_fallback_on_success(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_achat_stream_fallback_strategic_to_smart(monkeypatch: pytest.MonkeyPatch):
-    """P1-Future-05: achat_stream 流式连接 strategic 失败 → 降级到 smart."""
+    """achat_stream 流式连接 strategic 失败 → 降级到 smart."""
     client = LLMClient(_tiered_settings())
 
     def side_effect(model: str, n: int) -> Any:
@@ -314,7 +314,7 @@ async def test_achat_stream_fallback_strategic_to_smart(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_achat_stream_no_fallback_on_success(monkeypatch: pytest.MonkeyPatch):
-    """P1-Future-05: achat_stream SMART 直接成功时不降级."""
+    """achat_stream SMART 直接成功时不降级."""
     client = LLMClient(_tiered_settings())
 
     def side_effect(model: str, n: int) -> Any:

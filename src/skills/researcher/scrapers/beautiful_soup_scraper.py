@@ -1,6 +1,5 @@
 """BeautifulSoup 抓取器 - 默认主力.
 
-设计参考: scraper/beautiful_soup/beautiful_soup.py.
 轻量, 速度快, 适用于大多数静态网页.
 """
 
@@ -25,7 +24,7 @@ class BeautifulSoupScraper(BaseScraper):
             from bs4 import BeautifulSoup
 
             # DEPRECATED: _sync_scrape 未被调用 (下方仅调用 _async_scrape), 保留仅供历史参考.
-            # P1-10: 标记 deprecated, 后续版本可移除.
+            # 标记 deprecated, 后续版本可移除.
             def _sync_scrape() -> dict[str, Any]:
                 if self.session is None:
                     return {"url": self.url, "content": "", "title": "", "image_urls": []}
@@ -43,7 +42,7 @@ class BeautifulSoupScraper(BaseScraper):
                 response.raise_for_status()
                 html = response.text
 
-                # P1-10: HTML 大小上限检查 (5MB), 超过则截断并告警
+                # HTML 大小上限检查 (5MB), 超过则截断并告警
                 max_html_size = 5 * 1024 * 1024  # 5MB
                 if len(html) > max_html_size:
                     logger.warning(
@@ -68,7 +67,7 @@ class BeautifulSoupScraper(BaseScraper):
                 # 提取正文
                 content = soup.get_text(separator="\n", strip=True)
 
-                # 提取图片 (设计参考: get_relevant_images)
+                # 提取图片
                 image_urls: list[str] = []
                 for img in soup.find_all("img", limit=20):
                     src = img.get("src") or img.get("data-src")

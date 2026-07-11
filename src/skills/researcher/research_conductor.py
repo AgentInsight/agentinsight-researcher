@@ -1,10 +1,9 @@
 """ResearchConductor 研究总指挥.
 
-设计参考 skills/researcher.py.
 AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬取).
 
 核心流程:
-1. plan_research: 按动态角色 persona 拆解子查询 (Planner, 设计参考 AGENT_ROLE)
+1. plan_research: 按动态角色 persona 拆解子查询 (Planner, AGENT_ROLE)
 2. asyncio.gather 并行 _process_sub_query (Researcher):
    - 搜索 (中文优先路由)
    - 抓取 (BrowserManager)
@@ -13,9 +12,9 @@ AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬
 3. 聚合上下文
 
 行业适配采用 4 层机制, 不再使用行业分类器:
-- agent_role 参数 (设计参考 AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+- agent_role 参数 (AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
 
-P1-Future-04: planner prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
+planner prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
 
 from __future__ import annotations
@@ -46,14 +45,14 @@ from src.skills.researcher.searchers import (
 
 logger = logging.getLogger(__name__)
 
-# 兜底角色 persona (设计参考 默认 researcher role)
+# 兜底角色 persona (默认 researcher role)
 _DEFAULT_AGENT_ROLE = (
     "你是一位资深研究分析专家, 擅长多领域综合研究, 研究重点是全面、客观地分析问题."
 )
 
 
 class ResearchConductor:
-    """研究总指挥 (设计参考 ResearchConductor).
+    """研究总指挥.
 
     含 Planner (拆解子查询) + Researcher (并行搜索爬取) 职责.
     """
@@ -64,7 +63,7 @@ class ResearchConductor:
     _prompt_family: PromptFamily
     _mcp_cache: list[str] | None
     _mcp_query_count: int
-    # P0-7: MCPCoordinator 惰性初始化
+    # MCPCoordinator 惰性初始化
     _mcp: MCPCoordinator | None
     # 用户需求: 私有数据 RAG 检索器 (惰性初始化, 避免启动期构造开销)
     # HybridRetriever 内部 namespace_has_data 已含 10min TTL 内存缓存,
@@ -84,13 +83,13 @@ class ResearchConductor:
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
         self._mcp_cache = None
         self._mcp_query_count = 0
-        # P0-7: MCPCoordinator 惰性初始化 (避免启动期构造开销)
+        # MCPCoordinator 惰性初始化 (避免启动期构造开销)
         self._mcp = None
         # 用户需求: HybridRetriever 惰性初始化
         self._retriever = None
 
     def _get_mcp(self) -> MCPCoordinator:
-        """惰性初始化 MCPCoordinator (P0-7).
+        """惰性初始化 MCPCoordinator.
 
         复用 self._llm 单例, 避免重复构造 LLMClient 导致 step_costs 累计丢失.
         """
@@ -194,9 +193,8 @@ class ResearchConductor:
     ) -> list[str]:
         """Planner: 按动态角色 persona 拆解子查询.
 
-        设计参考 generate_sub_queries.
         用 strategic_llm (规划专用, 慢但精).
-        agent_role (设计参考 AGENT_ROLE) 注入角色 persona.
+        agent_role (AGENT_ROLE) 注入角色 persona.
         """
         async with trace_chain(
             name="planner",
@@ -209,10 +207,10 @@ class ResearchConductor:
         ) as span:
             max_iterations = self.settings.max_iterations
 
-            # 设计参考: agent_role (来自 LLM 动态生成或调用方注入) 作为角色 persona
+            # agent_role (来自 LLM 动态生成或调用方注入) 作为角色 persona
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
-            # P1-Future-04: prompt 经 PromptFamily 策略注入
+            # prompt 经 PromptFamily 策略注入
             prompt = self._prompt_family.planner_prompt(
                 query=query,
                 agent_role=role_persona,
@@ -220,7 +218,7 @@ class ResearchConductor:
             )
 
             messages = [{"role": "user", "content": prompt}]
-            # P1-7: planner 生成短 JSON 数组, SMART (v4-flash) 足够, 省 2/3 成本
+            # planner 生成短 JSON 数组, SMART (v4-flash) 足够, 省 2/3 成本
             response = await self._llm.achat(
                 messages,
                 tier=LLMTier.SMART,
@@ -260,15 +258,14 @@ class ResearchConductor:
     ) -> dict[str, Any]:
         """完整研究流程: 规划 + 并行检索 + 抓取 + 压缩.
 
-        设计参考 conduct_research + _get_context_by_web_search.
         返回 {"contexts","sources","sub_queries","visited_urls"}.
 
-        mode 路由 (P2-01):
+        mode 路由:
         - "summary": 摘要模式 (快速检索 + 简要摘要)
         - "subtopics": 子主题模式 (按子主题分章节)
         - 其他/默认: 现有 basic/detailed 逻辑
         """
-        # P0-3: 会话级 reset (替代原 get_similar_content 内的每次 reset)
+        # 会话级 reset (替代原 get_similar_content 内的每次 reset)
         # 跨子查询共享 WrittenContentCompressor 去重状态, 减少重复 embed 调用
         self._context_manager._written_compressor.reset()
 
@@ -278,7 +275,7 @@ class ResearchConductor:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # P0-2: 流水线并行化 — _retrieve_private_data 与主流程 (plan_research /
+            # 流水线并行化 — _retrieve_private_data 与主流程 (plan_research /
             # _conduct_summary / _conduct_subtopics) 无数据依赖, 并行执行可节省
             # 私有数据 RAG 延迟 (BM25+Vector+RRF+Rerank ~2-5s).
             # 用户需求: namespace 可用性 10min TTL 缓存, 无数据时零 embeddings+qdrant 调用.
@@ -291,7 +288,7 @@ class ResearchConductor:
                 )
             )
 
-            # P2-01: 摘要模式路由 (P0-2: 与私有数据检索并行)
+            # 摘要模式路由 (与私有数据检索并行)
             if mode == "summary":
                 result, (private_contexts, private_sources) = await asyncio.gather(
                     self._conduct_summary(
@@ -320,7 +317,7 @@ class ResearchConductor:
                 )
                 return result
 
-            # P2-01: 子主题模式路由 (P0-2: 与私有数据检索并行)
+            # 子主题模式路由 (与私有数据检索并行)
             if mode == "subtopics":
                 result, (private_contexts, private_sources) = await asyncio.gather(
                     self._conduct_subtopics(
@@ -349,7 +346,7 @@ class ResearchConductor:
                 )
                 return result
 
-            # 1. Planner: 拆解子查询 (P0-2: 与私有数据检索并行, 无数据依赖)
+            # 1. Planner: 拆解子查询 (与私有数据检索并行, 无数据依赖)
             sub_queries, (private_contexts, private_sources) = await asyncio.gather(
                 self.plan_research(
                     query,
@@ -360,7 +357,7 @@ class ResearchConductor:
                 private_data_task,
             )
 
-            # 追加原始 query (设计参考)
+            # 追加原始 query
             if query not in sub_queries:
                 sub_queries.append(query)
 
@@ -427,7 +424,7 @@ class ResearchConductor:
         uploaded_files_context: list[str] | None = None,
         query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
-        """摘要模式: 快速检索 + 简要摘要 (P2-01).
+        """摘要模式: 快速检索 + 简要摘要.
 
         - 少量子查询 (2-3 个)
         - max_results=5
@@ -507,7 +504,7 @@ class ResearchConductor:
         uploaded_files_context: list[str] | None = None,
         query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
-        """子主题模式: 按子主题分章节 (P2-01).
+        """子主题模式: 按子主题分章节.
 
         - LLM 生成 3-5 个子主题
         - 每个子主题独立研究
@@ -537,7 +534,7 @@ class ResearchConductor:
         )
 
         # 3. 拼接为分章节报告
-        # V4-P1-04 优化 6: 失败/空 context 跳过时同步移除 subtopics 条目
+        # 失败/空 context 跳过时同步移除 subtopics 条目
         # 避免 sub_queries 含失败子主题但 contexts 不含, 导致 TOC 与正文不一致
         all_contexts: list[str] = []
         all_sources: list[dict[str, Any]] = []
@@ -574,7 +571,7 @@ class ResearchConductor:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """LLM 生成 3-5 个子主题 (P2-01)."""
+        """LLM 生成 3-5 个子主题."""
         role_persona = agent_role or _DEFAULT_AGENT_ROLE
         prompt = f"""{role_persona}
 
@@ -584,7 +581,7 @@ class ResearchConductor:
 
 返回 JSON 数组, 每项为字符串:"""
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        # P1-7: 子主题列表是短 JSON 数组任务, SMART 足够, 省 2/3 成本 (与 report_generator 一致)
+        # 子主题列表是短 JSON 数组任务, SMART 足够, 省 2/3 成本 (与 report_generator 一致)
         response = await self._llm.achat(
             messages,
             tier=LLMTier.SMART,
@@ -609,7 +606,7 @@ class ResearchConductor:
         session_id: str | None = None,
         query_domains: list[str] | None = None,
     ) -> dict[str, Any]:
-        """单个子主题研究 (复用 _process_sub_query, P2-01)."""
+        """单个子主题研究 (复用 _process_sub_query)."""
         sq = f"{parent_query} - {subtopic}"
         return await self._process_sub_query(
             sq,
@@ -693,9 +690,7 @@ class ResearchConductor:
     ) -> dict[str, Any]:
         """处理单个子查询: 搜索 → 抓取 → 压缩.
 
-        设计参考 _process_sub_query.
-
-        任务2 内存优化: try/finally 确保 searcher httpx 客户端在搜索完成后立即释放,
+        内存优化: try/finally 确保 searcher httpx 客户端在搜索完成后立即释放,
         避免 httpx.AsyncClient 泄漏 (原主因: 每次调用新建 9 个 searcher 实例, 每个含
         持久化 httpx.AsyncClient, 永不 close → ~90MB/请求泄漏).
         """
@@ -717,7 +712,7 @@ class ResearchConductor:
         logger.info(f"sub_query 搜索引擎列表 (region={region}): {active_engines}")
 
         try:
-            # 2. 并行搜索 (多个搜索引擎) + P1 Redis 缓存 (相同 query+engine 5min TTL)
+            # 2. 并行搜索 (多个搜索引擎) + Redis 缓存 (相同 query+engine 5min TTL)
             search_tasks = [
                 self._cached_search(
                     s,
@@ -744,11 +739,11 @@ class ResearchConductor:
                     continue
                 all_results.extend(r)
 
-            # P1-01: 跨搜索引擎 URL 去重
+            # 跨搜索引擎 URL 去重
             all_results = deduplicate_results(all_results, key="url")
             urls = {r.get("url", "") for r in all_results if r.get("url")}
 
-            # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
+            # 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
             if query_domains:
                 all_results = BaseSearcher._filter_by_domains(all_results, query_domains)
                 urls = {r.get("url", "") for r in all_results if r.get("url")}
@@ -766,8 +761,8 @@ class ResearchConductor:
                 rate_limit_delay=rate_limit,
             )
 
-            # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
-            # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
+            # 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+            # 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 deep_research 的重复 28 行块
             # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
             context_parts: list[str] = []
             mcp_contexts = await conduct_mcp_if_enabled(
@@ -793,7 +788,7 @@ class ResearchConductor:
                 "urls": urls,
             }
         finally:
-            # 任务2 内存优化: 释放 searcher 持有的 httpx.AsyncClient (防泄漏)
+            # 释放 searcher 持有的 httpx.AsyncClient (防泄漏)
             # 每个 httpx.AsyncClient 含 TCP 连接池 + SSL 上下文 + 内部缓冲区 ~5-15MB
             for s in searchers:
                 try:

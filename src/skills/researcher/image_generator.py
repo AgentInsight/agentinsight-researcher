@@ -1,7 +1,6 @@
-"""图像生成器 (P2-06 报告配图).
+"""图像生成器 (报告配图).
 
-设计参考 skills/image_generator.py (用 gemini 生成报告配图).
-本项目改用 deepseek-v4-flash (用户明确要求, 非 gemini).
+本项目使用 deepseek-v4-flash (用户明确要求, 非 gemini).
 
 AGENTS.md 第 9 章: 全部 LLM/图像调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连.
 AGENTS.md 第 10 章: 必须包裹在 trace span 内 (用 trace_chain).
@@ -24,7 +23,7 @@ from src.observability.tracing import trace_chain
 
 logger = logging.getLogger(__name__)
 
-# P2-04: 图像生成 prompt 增强 (设计参考 plan_and_generate_images)
+# 图像生成 prompt 增强
 # 风格预设: 报告配图按主题选择风格
 _IMAGE_STYLE_PRESETS: dict[str, dict[str, str]] = {
     "technology": {
@@ -49,7 +48,7 @@ _IMAGE_STYLE_PRESETS: dict[str, dict[str, str]] = {
     },
 }
 
-# P2-04: 主题关键词到风格的路由
+# 主题关键词到风格的路由
 _TOPIC_STYLE_KEYWORDS: dict[str, str] = {
     "tech": "technology",
     "ai": "technology",
@@ -71,7 +70,7 @@ _TOPIC_STYLE_KEYWORDS: dict[str, str] = {
 
 
 def _select_style(topic: str) -> dict[str, str]:
-    """根据主题选择风格预设 (P2-04).
+    """根据主题选择风格预设.
 
     Args:
         topic: 报告主题.
@@ -92,7 +91,7 @@ def _enhance_prompt(
     *,
     aspect_ratio: str = "16:9",
 ) -> dict[str, str]:
-    """增强图像生成 prompt (P2-04, 设计参考 plan_and_generate_images).
+    """增强图像生成 prompt.
 
     业界实践多步生成: 计划 → 生成 → 评估 → 重试.
     AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词).
@@ -123,7 +122,6 @@ def _enhance_prompt(
 class ImageGenerator:
     """图像生成器 (报告配图).
 
-    设计参考 skills/image_generator.py.
     用户明确要求: 使用 deepseek-v4-flash 模型 (非 gemini).
 
     AGENTS.md 第 9 章: 通过 LiteLLM aimage_generation 调用, 禁厂商 SDK 直连.
@@ -146,13 +144,13 @@ class ImageGenerator:
         """生成图像 (报告配图).
 
         通过 LiteLLM aimage_generation 调用 deepseek-v4-flash 生成图像.
-        P2-04: 调用前用 _enhance_prompt 增强 prompt (主题风格 + negative prompt + 质量词),
-        设计参考 plan_and_generate_images (AIR 简化为单步增强).
+        调用前用 _enhance_prompt 增强 prompt (主题风格 + negative prompt + 质量词),
+        AIR 简化为单步增强.
 
         返回 dict 含:
         - url: 图像 URL (若 API 返回 URL, 否则 None)
         - b64: 图像 base64 数据 (若 API 返回 b64, 否则 None)
-        - prompt: 实际发送的提示词 (P2-04 增强后)
+        - prompt: 实际发送的提示词 (增强后)
         - model: 模型名
         - size: 图像尺寸
         - created_at: 生成时间 (ISO 8601 UTC)
@@ -166,7 +164,7 @@ class ImageGenerator:
         注意: deepseek-v4-flash 图像生成能力假设支持, 实际能力以官方文档为准.
         """
         model = self.settings.image_model
-        # P1-3: 复用 common/llm_key_resolver.resolve_api_key (DRY, 不再定义 _get_api_key)
+        # 复用 common/llm_key_resolver.resolve_api_key (DRY, 不再定义 _get_api_key)
         # 优先用 image_api_key (若单独配置), 否则回退到对应厂商 API Key
         api_key = self.settings.image_api_key or resolve_api_key(model, self.settings)
         quality = self.settings.image_quality
@@ -178,7 +176,7 @@ class ImageGenerator:
             session_id=session_id,
         ) as span:
             try:
-                # P2-04: prompt 增强 (设计参考 plan_and_generate_images)
+                # prompt 增强
                 # 业界实践多步生成: 计划 → 生成 → 评估 → 重试
                 # AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词)
                 enhanced = _enhance_prompt(prompt, topic)

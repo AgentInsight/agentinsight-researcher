@@ -1,4 +1,4 @@
-# 离题/闲聊种子模式 (P1-Future-07)
+# 离题/闲聊种子模式
 # 懒初始化时预填充到 Qdrant off_topic_patterns namespace, 用 Embeddings 语义匹配.
 # 涵盖身份/情感/娱乐/常识/能力/话题转移/问候/评价等闲聊意图.
 # 共 118 条不重复种子, 与 short_query_seeds 互补:

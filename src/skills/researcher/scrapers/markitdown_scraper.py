@@ -1,6 +1,5 @@
-"""MarkItDown 文档抓取器 (P2-03).
+"""MarkItDown 文档抓取器.
 
-设计参考: MarkItDown 集成.
 支持 DOCX/PPTX/XLSX 等 Office 文档转 Markdown.
 """
 

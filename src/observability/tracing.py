@@ -13,7 +13,7 @@ AGENTS.md 第 10 章硬约束:
 V5: 恢复单一 AgentInsight 后端 (AGENTS.md 第 4 章禁用清单第 5 条: Langfuse 已由 AgentInsight SDK 替代).
 get_tracer() 工厂仅二路分发: AgentInsight SDK 可用 → AgentInsightTracer / 不可用 → _NoopTracer.
 
-对标 AgentInsightService common/tracing.py, 提供 6 类 trace span.
+提供 6 类 trace span.
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ class _NoopTracer:
     """追踪后端空实现 (Null Object).
 
     AgentInsight SDK 不可用时使用, 所有方法 yield _NoopSpan.
-    对标 _NoopSpan 降级机制, 业务代码无感.
+    _NoopSpan 降级机制, 业务代码无感.
     """
 
     @asynccontextmanager

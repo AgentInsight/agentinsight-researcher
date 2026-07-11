@@ -1,6 +1,5 @@
-"""文档加载模块 (P1-Future-07).
+"""文档加载模块.
 
-设计参考 document/ 模块 (5 文件 249 行).
 统一封装多种数据源 (URL/本地文件/Azure Blob) 的文档加载, 返回 list[Document].
 
 设计要点:
@@ -10,7 +9,7 @@
 - AzureBlobLoader: 可选, 需 azure-storage-blob (用 try/except import).
 - 工厂函数 get_document_loader(source): 按 source 形态自动路由.
 
-接入主流程 (P0-02 用户文件上传 RAG 链路):
+接入主流程 (用户文件上传 RAG 链路):
     routes.py upload_file 端点应调用本模块提取文档内容, 再调用
     EmbeddingsClient.embed_and_index 索引到 Qdrant 用户私有 namespace:
         loader = get_document_loader(file_path, settings)
@@ -22,7 +21,7 @@
             user_id=user_id,
             session_id=session_id,
         )
-    注: routes.py 的 upload_file 端点接入由任务1/5负责, 本模块仅保证工厂可用.
+    注: routes.py 的 upload_file 端点接入由调用方负责, 本模块仅保证工厂可用.
 
 依赖说明 (不在 requirements.txt 中的可选依赖):
 - PyMuPDF (fitz): 已在 requirements.txt (PDF 解析).
@@ -48,14 +47,14 @@ from src.config.settings import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 
-# ========== Document 数据类 (对标 langchain-core Document, 薄封装) ==========
+# ========== Document 数据类 (薄封装, 避免引入额外耦合) ==========
 
 
 @dataclass
 class Document:
     """加载后的文档对象.
 
-    对标 langchain_core.documents.Document, 但自研薄封装避免引入额外耦合.
+    自研薄封装, 避免引入额外耦合.
     """
 
     page_content: str
@@ -68,7 +67,6 @@ class Document:
 class DocumentLoader(ABC):
     """文档加载器基类.
 
-    设计参考 document/loader.py 基类.
     所有 loader 共享 load(source) -> list[Document] 规约.
     """
 
@@ -91,7 +89,6 @@ class DocumentLoader(ABC):
 class OnlineDocumentLoader(DocumentLoader):
     """从 URL 加载文档 (复用现有 scrapers).
 
-    设计参考 document/online.py + langchain WebBaseLoader.
     走 src.skills.researcher.scrapers.scrape_with_fallback 降级链.
     """
 
@@ -135,7 +132,6 @@ class OnlineDocumentLoader(DocumentLoader):
 class LocalDocumentLoader(DocumentLoader):
     """从本地文件路径加载文档.
 
-    设计参考 document/file.py + langchain TextLoader 系列.
     按扩展名路由:
     - .pdf       → PyMuPDF (fitz)
     - .docx      → python-docx
@@ -297,7 +293,6 @@ class LocalDocumentLoader(DocumentLoader):
 class AzureBlobLoader(DocumentLoader):
     """从 Azure Blob Storage 加载文档 (可选, 需 azure-storage-blob).
 
-    设计参考 document/azure.py.
     支持 source 形态:
     - azure://container/blob
     - https://<account>.blob.core.windows.net/<container>/<blob>
@@ -379,7 +374,7 @@ def get_document_loader(
 ) -> DocumentLoader:
     """根据 source 形态自动选择 DocumentLoader.
 
-    设计参考 document/loader.py 的工厂路由逻辑.
+    工厂路由逻辑:
     - source 以 http://|https:// 开头 → OnlineDocumentLoader
     - source 以 azure:// 或 Azure Blob URL 形式 → AzureBlobLoader
     - source 以本地路径存在 (或非 URL) → LocalDocumentLoader

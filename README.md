@@ -30,9 +30,9 @@
 
 | 入口 | 地址 | 说明 |
 |------|------|------|
-| **测试页面(推荐)** ⭐ | http://119.91.32.102/agent/agentinsight-researcher/ | 内置前端联调页面,支持会话管理、流式渲染、工具调用展示、文件上传、报告下载 |
-| **健康检查** | http://119.91.32.102/agent/agentinsight-researcher/health | 容器与服务健康状态 |
-| **Agent 发现** | http://119.91.32.102/agent/agentinsight-researcher/.well-known/agent-discovery.json | Agent Discovery Protocol 公开元信息 |
+| **测试页面(推荐)** ⭐ | http://43.139.209.145/agent/agentinsight-researcher/ | 内置前端联调页面,支持会话管理、流式渲染、工具调用展示、文件上传、报告下载 |
+| **健康检查** | http://43.139.209.145/agent/agentinsight-researcher/health | 容器与服务健康状态 |
+| **Agent 发现** | http://43.139.209.145/agent/agentinsight-researcher/.well-known/agent-discovery.json | Agent Discovery Protocol 公开元信息 |
 
 > 💡 **使用提示**:
 > - **推荐通过测试页面试用**:打开页面即可零配置体验研究报告生成、流式渲染、多 Agent 协作等全部能力,无需手动构造 API 请求。
@@ -42,7 +42,7 @@
 
 ### 30 秒上手 Demo
 
-1. **打开测试页面**:浏览器访问 http://119.91.32.102/agent/agentinsight-researcher/
+1. **打开测试页面**:浏览器访问 http://43.139.209.145/agent/agentinsight-researcher/
 2. **(可选)填写 Bearer JWT Token**:页面顶部 Token 输入框(从 [AgentInsight 平台](https://agentinsight.goldebridge.com/platform) 登录后获取);留空则以匿名用户身份试用。
 3. **输入研究问题**:在消息输入框输入如 `分析2026年中国新能源汽车市场格局`,Enter 发送。
 4. **观察流式渲染**:报告逐段流式输出,工具调用与检索来源以折叠面板展示。
@@ -165,7 +165,7 @@ docker compose -p agentinsight ps
 
 > Base URL:
 > - 本地部署:`http://localhost:8066`
-> - 官方 Demo:`http://119.91.32.102/agent/agentinsight-researcher`
+> - 官方 Demo:`http://43.139.209.145/agent/agentinsight-researcher`
 >
 > 下文示例以 `${BASE_URL}` 表示,使用前请替换为对应地址:
 > ```bash
@@ -1081,9 +1081,9 @@ Try all capabilities without deployment via the official online demo **test page
 
 | Entry | URL | Description |
 |-------|-----|-------------|
-| **Test Page (Recommended)** ⭐ | http://119.91.32.102/agent/agentinsight-researcher/ | Built-in frontend debug page with session management, streaming rendering, tool call display, file upload, report download |
-| **Health Check** | http://119.91.32.102/agent/agentinsight-researcher/health | Container and service health status |
-| **Agent Discovery** | http://119.91.32.102/agent/agentinsight-researcher/.well-known/agent-discovery.json | Agent Discovery Protocol public metadata |
+| **Test Page (Recommended)** ⭐ | http://43.139.209.145/agent/agentinsight-researcher/ | Built-in frontend debug page with session management, streaming rendering, tool call display, file upload, report download |
+| **Health Check** | http://43.139.209.145/agent/agentinsight-researcher/health | Container and service health status |
+| **Agent Discovery** | http://43.139.209.145/agent/agentinsight-researcher/.well-known/agent-discovery.json | Agent Discovery Protocol public metadata |
 
 > 💡 **Usage Notes**:
 > - **Recommended to try via the test page**: open the page to experience research report generation, streaming rendering, multi-agent collaboration, and all capabilities with zero configuration, no need to manually construct API requests.
@@ -1093,7 +1093,7 @@ Try all capabilities without deployment via the official online demo **test page
 
 ### 30-Second Quick Start with Demo
 
-1. **Open the test page**: visit http://119.91.32.102/agent/agentinsight-researcher/ in your browser
+1. **Open the test page**: visit http://43.139.209.145/agent/agentinsight-researcher/ in your browser
 2. **(Optional) Fill in Bearer JWT Token**: in the Token input at the top of the page (obtained after logging into the [AgentInsight platform](https://agentinsight.goldebridge.com/platform)); leave empty to try as an anonymous user.
 3. **Enter a research question**: type a query like `Analyze the 2026 China new energy vehicle market landscape` in the message input box and press Enter.
 4. **Watch streaming rendering**: the report streams out paragraph by paragraph; tool calls and retrieval sources are shown in collapsible panels.
@@ -1216,7 +1216,7 @@ docker compose -p agentinsight ps
 
 > Base URL:
 > - Local deployment: `http://localhost:8066`
-> - Official demo: `http://119.91.32.102/agent/agentinsight-researcher`
+> - Official demo: `http://43.139.209.145/agent/agentinsight-researcher`
 >
 > Examples below use `${BASE_URL}`; replace it before use:
 > ```bash

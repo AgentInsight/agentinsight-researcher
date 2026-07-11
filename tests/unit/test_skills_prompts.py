@@ -408,7 +408,7 @@ def test_curator_prompt_zh_en_both_contain_quantitative_value(
     default_family: DefaultPromptFamily,
     english_family: EnglishPromptFamily,
 ) -> None:
-    """测试中英版 curator_prompt 均含 Quantitative Value 评估维度 (设计参考)."""
+    """测试中英版 curator_prompt 均含 Quantitative Value 评估维度."""
     zh_prompt = default_family.curator_prompt("查询", "来源", "角色", 5)
     en_prompt = english_family.curator_prompt("query", "sources", "role", 5)
     assert "Quantitative Value" in zh_prompt

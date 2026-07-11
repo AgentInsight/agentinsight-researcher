@@ -41,13 +41,13 @@ class QdrantManager:
 
     settings: Settings
     _client: Any  # AsyncQdrantClient
-    _collection_ready: bool  # P0-修复2: 集合就绪缓存标志, 避免每次操作都网络检查
+    _collection_ready: bool  # 集合就绪缓存标志, 避免每次操作都网络检查
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._collection_ready = False  # 首次操作前必须 ensure_collection
         # 延迟导入, 避免模块加载时强依赖
-        # P1-04: 抑制 qdrant_client 在 http+api_key 场景的 UserWarning
+        # 抑制 qdrant_client 在 http+api_key 场景的 UserWarning
         # (测试环境用 http+api_key, qdrant_client 会警告 "Api key is used with an insecure connection")
         # 同时跳过服务器版本检查 (测试环境可能无法连接服务器, 避免警告)
         import warnings
@@ -73,7 +73,7 @@ class QdrantManager:
             )
 
     async def _ensure_collection_once(self) -> None:
-        """P0-修复2: 幂等确保集合存在 (首次调用 ensure_collection, 后续短路返回).
+        """幂等确保集合存在 (首次调用 ensure_collection, 后续短路返回).
 
         性能考虑: 首次调用有 RTT 开销 (~10ms get_collection),
         后续直接返回, 避免每次操作都检查.
@@ -83,13 +83,13 @@ class QdrantManager:
             self._collection_ready = True
 
     async def ensure_collection(self) -> None:
-        """确保集合存在 (不存在则创建, 含 HNSW 参数调优 P0-03).
+        """确保集合存在 (不存在则创建, 含 HNSW 参数调优).
 
         AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=768.
-        P0-03: 中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
+        中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
         scalar 量化降低内存 50%.
 
-        P0-修复1: 显式刷新 _collection_ready 标志 (允许外部强制重检).
+        显式刷新 _collection_ready 标志 (允许外部强制重检).
         """
         from qdrant_client.http.exceptions import UnexpectedResponse
 
@@ -116,14 +116,14 @@ class QdrantManager:
                 VectorParams,
             )
 
-            # HNSW 参数 (P0-03: 中文密集检索调优)
+            # HNSW 参数 (中文密集检索调优)
             hnsw_config = HnswConfigDiff(
                 m=self.settings.qdrant_hnsw_m,
                 ef_construct=self.settings.qdrant_hnsw_ef_construct,
                 full_scan_threshold=self.settings.qdrant_hnsw_full_scan_threshold,
             )
 
-            # 标量量化 (P0-03: int8 量化降低内存 50%)
+            # 标量量化 (int8 量化降低内存 50%)
             # qdrant-client ≥1.18 枚举为大写 ScalarType.INT8
             quantization_config = ScalarQuantization(
                 scalar=ScalarQuantizationConfig(
@@ -146,7 +146,7 @@ class QdrantManager:
                     flush_interval_sec=5,
                 ),
             )
-            # P0-14: 为 namespace 字段创建 payload 索引 (大集合过滤性能关键)
+            # 为 namespace 字段创建 payload 索引 (大集合过滤性能关键)
             # 所有检索都按 namespace payload 字段过滤, 无索引时全扫描
             await self._client.create_payload_index(
                 collection_name=self.settings.qdrant_collection,
@@ -194,7 +194,7 @@ class QdrantManager:
         AGENTS.md 第 7 章: 按 payload namespace 字段过滤统计.
         用于"私有数据搜索前先判断有没有数据"的需求.
 
-        P1-2 修复: exact=True → exact=False
+        exact=True → exact=False
         - exact=True 触发全量扫描, 大集合上延迟可达数百毫秒甚至秒级
         - exact=False 使用 HNSW 索引/元数据统计, 毫秒级响应
         - 仅用于"是否存在数据"的存在性判断, 近似计数足够
@@ -216,7 +216,7 @@ class QdrantManager:
             result = await self._client.count(
                 collection_name=self.settings.qdrant_collection,
                 count_filter=count_filter,
-                exact=False,  # P1-2 修复: 近似计数, 毫秒级响应 (存在性判断足够)
+                exact=False,  # 近似计数, 毫秒级响应 (存在性判断足够)
             )
             return int(result.count)
         except Exception as e:  # noqa: BLE001
@@ -293,13 +293,13 @@ class QdrantManager:
         - payload 必须含 content + metadata + namespace
         - 用户私有数据额外含 user_id
 
-        P0-修复2: 入口自保 ensure_collection, 避免新环境首次写入 404.
+        入口自保 ensure_collection, 避免新环境首次写入 404.
         """
         from qdrant_client.http.models import PointStruct
 
         from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
 
-        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        # 自保 ensure_collection (首次调用 ensure, 后续短路)
         await self._ensure_collection_once()
 
         embeddings_client = get_embeddings_client()
@@ -344,7 +344,7 @@ class QdrantManager:
 
         用于种子模式版本更新时清理旧数据 (AGENTS.md 第 7 章: payload namespace 隔离).
 
-        P0-修复2: 入口自保 ensure_collection, 避免新环境首次删除 404.
+        入口自保 ensure_collection, 避免新环境首次删除 404.
         """
         from qdrant_client.http.models import (
             FieldCondition,
@@ -353,7 +353,7 @@ class QdrantManager:
             MatchValue,
         )
 
-        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        # 自保 ensure_collection (首次调用 ensure, 后续短路)
         await self._ensure_collection_once()
 
         query_filter = Filter(
@@ -385,11 +385,11 @@ class QdrantManager:
             score_threshold 时, 此处不再 fallback 到 settings.score_threshold,
             让 RRF + Rerank 阶段做最终筛选.
 
-        P0-修复2: 入口自保 ensure_collection, 避免新环境首次检索 404.
+        入口自保 ensure_collection, 避免新环境首次检索 404.
         """
         from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
-        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        # 自保 ensure_collection (首次调用 ensure, 后续短路)
         await self._ensure_collection_once()
 
         # 构建 namespace 过滤 (OR 关系)
@@ -453,7 +453,7 @@ class QdrantManager:
         """
         from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
-        # P0-修复2: 自保 ensure_collection (首次调用 ensure, 后续短路)
+        # 自保 ensure_collection (首次调用 ensure, 后续短路)
         await self._ensure_collection_once()
 
         count_filter = Filter(

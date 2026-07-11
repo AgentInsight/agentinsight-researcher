@@ -3,7 +3,6 @@
 CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0 核心组件:
 - SHORT_QUERY/OFF_TOPIC 响应从"固定话术"升级为"FAST_LLM + Persona + 三段式"
 - 保留 multi-template 作为兜底 (FAST 失败时降级, 不阻断主流程)
-- 对标 Anthropic Claude system prompt 四段式 + Character.AI persona 一致性
 
 AGENTS.md 合规:
 - 第 5 章: 节点为纯函数, 单一职责无副作用
@@ -44,7 +43,7 @@ class ChitchatResponder:
     2. OFF_TOPIC 响应: 按子类 (greeting/identity/emotion/...) 路由 prompt
     3. 兜底: multi-template 随机返回固定话术 (FAST 失败时降级)
 
-    设计原则 (对标 FrugalGPT Cascade):
+    设计原则 (级联降级策略):
     - FAST_LLM 优先 (glm-4-flash, 免费层)
     - 失败降级到 multi-template (零成本, 不阻断)
     - 不升级到 SMART (闲聊不值得用 SMART 成本)
@@ -110,7 +109,7 @@ class ChitchatResponder:
             - stream=False 时返回 _run_short_query 的 coroutine
               (由调用方 _run_chitchat await)
             - 避免 async def 包装导致 stream=True 路径返回 coroutine
-              而非 AsyncIterator 的陷阱 (Bug: 闲聊流式响应 '*未收到内容*')
+              而非 AsyncIterator 的陷阱 (闲聊流式响应 '*未收到内容*')
         """
         if stream:
             return self._stream_short_query(

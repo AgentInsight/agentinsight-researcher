@@ -1,13 +1,12 @@
 """LangGraph 节点定义 (完整实现).
 
-设计参考 skills/ 流水线.
 AGENTS.md 第 5 章硬约束:
 - 节点为纯函数 async def node(state: State) -> dict, 单一职责无副作用
 - 节点禁止原地修改入参 State, 必须返回 delta dict 由 reducer 合并
 - 节点内禁止直连厂商 LLM SDK, 统一走 llm/ 网关 (LiteLLM)
 - 每个节点必须包裹在 AgentInsight trace span 内 (AGENTS.md 第 10 章)
 
-流水线 (设计参考 Skills, 行业适配采用 4 层机制):
+流水线 (行业适配采用 4 层机制):
     agent_creator → research_conductor → source_curator → report_generator → publisher
 """
 
@@ -36,10 +35,10 @@ async def agent_creator_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """AgentCreator 动态角色生成节点 (设计参考: choose_agent).
+    """AgentCreator 动态角色生成节点.
 
     4 层隐形机制 (Prompt 层):
-    1. settings.agent_role 配置注入 (优先级最高, 设计参考: AGENT_ROLE)
+    1. settings.agent_role 配置注入 (优先级最高, AGENT_ROLE)
     2. 否则 LLM 根据 query 语义动态生成行业 persona
     """
     async with trace_chain(
@@ -72,7 +71,6 @@ async def research_conductor_node(
 ) -> dict[str, Any]:
     """ResearchConductor 研究总指挥节点.
 
-    设计参考 skills/researcher.py:
     1. plan_research: 按动态角色 persona 拆解子查询
     2. asyncio.gather 并行 _process_sub_query:
        - 搜索 (中文优先路由)
@@ -111,9 +109,8 @@ async def deep_research_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """DeepResearch 递归深度研究节点 (P0-01).
+    """DeepResearch 递归深度研究节点.
 
-    设计参考 deep_research.
     通过 breadth×depth 递归树探索, 每层聚合上下文.
     agent_creator 条件边: research_mode == "deep" 时路由到此节点.
     """
@@ -149,7 +146,6 @@ async def source_curator_node(
 ) -> dict[str, Any]:
     """SourceCurator 来源策展节点 (可选).
 
-    设计参考 skills/curator.py:
     LLM 评估来源可信度与相关性 (Reviewer 职责).
     cfg.CURATE_SOURCES=True 时启用.
     """
@@ -185,9 +181,8 @@ async def report_generator_node(
 ) -> dict[str, Any]:
     """ReportGenerator 报告生成节点.
 
-    设计参考 skills/writer.py:
     按动态角色 persona 合成长报告 (Writer 职责).
-    P2-06: image_generation_enabled=True 时报告含配图 (deepseek-v4-flash).
+    image_generation_enabled=True 时报告含配图 (deepseek-v4-flash).
     """
     async with trace_chain(
         name="report-generator",
@@ -213,7 +208,7 @@ async def report_generator_node(
             session_id=state.get("session_id"),
         )
         report_md = result["report_md"]
-        # P2-1: 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        # 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
         existing_formats = state.get("report_formats") or {}
         new_formats: dict[str, str] = dict(existing_formats)
         new_formats["md"] = report_md
@@ -222,15 +217,15 @@ async def report_generator_node(
             "report_formats": new_formats,
             "status": "completed",
         }
-        # P2-06: 补充报告配图字段 (若生成了图像)
+        # 补充报告配图字段 (若生成了图像)
         if result.get("image_url"):
             delta["report_image_url"] = result["image_url"]
         if result.get("image_b64"):
             delta["report_image_b64"] = result["image_b64"]
 
-        # P1-04: 回写 LLM 成本到 State (打通 LLMClient → State 最后一公里)
-        # P0-3: 读取 per-session allocator, 避免全局污染数据
-        # 设计参考: add_costs() 让 final_state 含 costs 字段, 供 routes.py usage 读取.
+        # 回写 LLM 成本到 State (打通 LLMClient → State 最后一公里)
+        # 读取 per-session allocator, 避免全局污染数据
+        # 让 final_state 含 costs 字段, 供 routes.py usage 读取.
         try:
             from src.llm.token_budget import get_token_budget_allocator
 
@@ -266,14 +261,13 @@ async def publisher_node(
 ) -> dict[str, Any]:
     """Publisher 发布节点.
 
-    设计参考 multi_agents/agents/publisher.py:
     Markdown/HTML/PDF 输出, 引用规范化.
 
-    P2-7: 节点保持纯函数无副作用, 仅生成 report_md/report_formats/file_path 等到 state,
-    不再直接调用 report_store.save_report. 报告持久化由 API 层 (routes.py) 在
+    节点保持纯函数无副作用, 仅生成 report_md/report_formats/file_path 等到 state,
+    不直接调用 report_store.save_report. 报告持久化由 API 层 (routes.py) 在
     graph 完成后异步调用 report_store.save_report 完成 (AGENTS.md 第 5 章节点纯函数约束).
 
-    P2-1: 报告格式字段统一写入 report_formats dict (key 为 md/html/pdf/docx/json),
+    报告格式字段统一写入 report_formats dict (key 为 md/html/pdf/docx/json),
     report_md 同步写入兼容旧代码 (deprecated, 兼容期保留).
     """
     async with trace_chain(
@@ -283,7 +277,7 @@ async def publisher_node(
         user_id=state.get("user_id"),
     ):
         publisher = Publisher(settings)
-        # P2-1: 优先读 report_formats["md"], 兼容期回退 report_md
+        # 优先读 report_formats["md"], 兼容期回退 report_md
         report_formats = state.get("report_formats") or {}
         report_md = report_formats.get("md") or state.get("report_md", "")
         result = await publisher.publish(
@@ -296,7 +290,7 @@ async def publisher_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
-        # P2-1: 合并到 report_formats dict (key 为格式名), 同时同步 report_md 兼容旧代码
+        # 合并到 report_formats dict (key 为格式名), 同时同步 report_md 兼容旧代码
         new_formats: dict[str, str] = dict(report_formats)
         new_formats["md"] = report_md
         result_format = result.get("format", "markdown")
@@ -315,8 +309,8 @@ async def publisher_node(
             "report_formats": new_formats,
             "report_md": report_md,  # deprecated: 同步写入兼容旧代码
         }
-        # P2-7: 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
-        # 节点不再直接写 DB (AGENTS.md 第 5 章节点纯函数无副作用约束).
+        # 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
+        # 节点不直接写 DB (AGENTS.md 第 5 章节点纯函数无副作用约束).
         return delta
 
 
@@ -325,7 +319,7 @@ async def fact_checker_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """FactChecker 事实核查节点 (P0-Future-02).
+    """FactChecker 事实核查节点.
 
     核查报告中的事实声明是否与上下文一致.
     fact_check_enabled=False 时节点内部跳过 (返回 accepted=True).
@@ -360,7 +354,7 @@ async def reviewer_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """Reviewer 报告评审节点 (P0-Future-01).
+    """Reviewer 报告评审节点.
 
     评审报告质量 (上下文覆盖/幻觉/结构完整性), 返回 accept|revise 决策.
     条件边: accept → publisher | revise → reviser (含 max_revisions 守卫).
@@ -392,7 +386,7 @@ async def reviser_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """Reviser 报告修订节点 (P0-Future-01).
+    """Reviser 报告修订节点.
 
     根据 Reviewer 反馈修订报告, 返回新的 report_md.
     revision_count 用 Annotated[int, operator.add] reducer, 返回 1 累加.
@@ -414,7 +408,7 @@ async def reviser_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
-        # P2-1: 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        # 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
         revised_md = result["report_md"]
         existing_formats = state.get("report_formats") or {}
         new_formats: dict[str, str] = dict(existing_formats)

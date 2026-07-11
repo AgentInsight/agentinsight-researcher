@@ -1,4 +1,4 @@
-"""单元测试: 搜索引擎注册表 (P1-1 重构 @register_searcher 装饰器注册表).
+"""单元测试: 搜索引擎注册表 (重构 @register_searcher 装饰器注册表).
 
 验证 src/skills/researcher/searchers/__init__.py 注册表机制:
 - _register_all_searchers 延迟注册 (首次 get_searchers 触发)
@@ -10,7 +10,7 @@
 - deduplicate_results 跨引擎 URL 去重
 
 AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Settings Key 字段).
-设计参考: VALID_RETRIEVERS + 装饰器模式.
+VALID_RETRIEVERS + 装饰器模式.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def test_register_all_searchers_clears_then_repopulates() -> None:
     # 显式注册的引擎应存在
     assert "pubmed" in _SEARCHER_REGISTRY
     assert "arxiv" in _SEARCHER_REGISTRY
-    # P0-1: DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中
+    # DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中
     assert "duckduckgo" not in _SEARCHER_REGISTRY
     assert "searxng" in _SEARCHER_REGISTRY  # SearXNG 替代 DuckDuckGo
 
@@ -121,7 +121,7 @@ def test_register_all_searchers_includes_academic_engines() -> None:
 def test_register_all_searchers_includes_cn_engines() -> None:
     """_register_all_searchers 注册 CN 区域引擎 (Bocha/Metaso 需 Key, SearXNG 免费).
 
-    P0-1: DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中.
+    DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中.
     SearXNG 在 CN/GLOBAL/AUTO 三区域注册 (替代 DuckDuckGo 的 CN 区域角色).
     """
     _register_all_searchers()
@@ -163,7 +163,7 @@ def test_get_searchers_academic_returns_only_academic_engines(
 def test_get_searchers_cn_returns_cn_engines(settings_no_keys: Settings) -> None:
     """CN 区域返回中文优先引擎 (SearXNG/GDELT/HackerNews 免费, Bocha/Metaso 需 Key).
 
-    P0-1: DuckDuckGo 已被 SearXNG 替代, CN 区域免费引擎改为 SearXNG.
+    DuckDuckGo 已被 SearXNG 替代, CN 区域免费引擎改为 SearXNG.
     """
     searchers = get_searchers(SearchRegion.CN, settings_no_keys)
     names = {s.name for s in searchers}

@@ -4,8 +4,6 @@
 1. ImportError 降级: trafilatura 未安装时返回空结果
 2. 空 session 返回空结果
 3. 异常处理: 抓取失败返回空结果
-
-对标 test_scrapers.py 测试模式.
 """
 
 from __future__ import annotations

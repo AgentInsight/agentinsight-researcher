@@ -1,4 +1,4 @@
-"""单元测试: ReportGenerator FAST tier 降级 (P1-1).
+"""单元测试: ReportGenerator FAST tier 降级.
 
 验证 src/skills/researcher/report_generator.py 的 FAST tier 优化:
 - 短报告 (word_limit <= _FAST_TIER_WORD_THRESHOLD=2000) 优先用 FAST tier
@@ -51,7 +51,7 @@ def generator(settings: Settings, mock_llm: MagicMock) -> ReportGenerator:
 
 
 def test_fast_tier_word_threshold_is_2000() -> None:
-    """_FAST_TIER_WORD_THRESHOLD 应为 2000 (P1-1 默认值)."""
+    """_FAST_TIER_WORD_THRESHOLD 应为 2000 (默认值)."""
     assert _FAST_TIER_WORD_THRESHOLD == 2000
 
 
@@ -136,7 +136,7 @@ async def test_fast_tier_failure_falls_back_to_smart(
     generator: ReportGenerator,
     mock_llm: MagicMock,
 ) -> None:
-    """FAST tier 失败 (返回占位文本) → 回退 SMART tier (P1-1)."""
+    """FAST tier 失败 (返回占位文本) → 回退 SMART tier."""
     word_limit = 1000  # 短报告, 优先 FAST
     smart_response = "smart tier report"
 

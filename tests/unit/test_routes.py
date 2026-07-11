@@ -235,7 +235,7 @@ def test_files_upload_invalid_extension(
     assert response.status_code == 415
 
 
-# ========== 人在回路反馈 (P0-Future-03) ==========
+# ========== 人在回路反馈 ==========
 
 
 def test_feedback_no_pending() -> None:
@@ -248,7 +248,7 @@ def test_feedback_no_pending() -> None:
     assert response.status_code == 404
 
 
-# ========== Agent Discovery Protocol (P1-Future-03) ==========
+# ========== Agent Discovery Protocol ==========
 
 
 def test_agent_discovery_endpoint() -> None:

@@ -340,7 +340,7 @@ async def test_embeddings_rerank_calls_fastembed_once_with_query_plus_docs(
     context_manager_for_rerank: ContextManager,
     mock_fastembed: MagicMock,
 ) -> None:
-    """FastEmbed 批量调用: 1 次 embed_texts, 入参为 [query] + documents (P1-5 优化)."""
+    """FastEmbed 批量调用: 1 次 embed_texts, 入参为 [query] + documents (优化)."""
     query = "查询"
     docs = ["文档一", "文档二", "文档三"]
     mock_fastembed.embed_texts.return_value = [
@@ -384,7 +384,7 @@ async def test_embeddings_rerank_caches_doc_level_key(
     mock_fastembed: MagicMock,
     rerank_settings: Settings,
 ) -> None:
-    """_embeddings_rerank 缓存 doc 级 key: sha256(doc_text) -> doc_emb (P1-8)."""
+    """_embeddings_rerank 缓存 doc 级 key: sha256(doc_text) -> doc_emb."""
     doc = "短文档"  # <= chunk_size, 单 chunk
     doc_emb = [0.5, 0.5]
     mock_fastembed.embed_texts.return_value = [

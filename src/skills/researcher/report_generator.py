@@ -1,16 +1,15 @@
 """ReportGenerator 报告生成器.
 
-设计参考: skills/writer.py.
 AGENTS.md 用户需求 3: Writer (报告合成).
 
 按动态角色 persona 合成长报告, 支持 tone 语气控制.
-P2-06: 报告生成后可选生成 1 张配图 (deepseek-v4-flash).
-P0-Future-04: detailed_report 实现子主题嵌套研究 (设计参考: detailed_report.py).
+报告生成后可选生成 1 张配图 (deepseek-v4-flash).
+detailed_report 实现子主题嵌套研究.
 
 行业适配采用 4 层机制, 不再使用行业分类器:
-- agent_role 参数 (设计参考: AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+- agent_role 参数 (AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
 
-P1-Future-04: basic_report 的 writer prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
+basic_report 的 writer prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 detailed_report 的子主题/引言/章节/结论 prompt 暂保留内联 (流程专用, 后续可扩展 PromptFamily).
 """
 
@@ -35,17 +34,17 @@ logger = logging.getLogger(__name__)
 # 兜底角色 persona (默认 researcher role)
 _DEFAULT_AGENT_ROLE = "你是一位资深研究分析专家, 擅长多领域综合研究."
 
-# V4-P1-03: 章节/段落 LLM 调用失败后的占位文本
+# 章节/段落 LLM 调用失败后的占位文本
 _SECTION_FAILURE_PLACEHOLDER = "[此章节生成失败, 请重试]"
 
-# V4-P1-03: LLM 调用单章节重试次数 (失败后再试 1 次)
+# LLM 调用单章节重试次数 (失败后再试 1 次)
 _LLM_RETRY_TIMES = 1
 
-# P1-1: 短报告 FAST tier 阈值 — word_limit <= 此值时优先用 FAST tier (低延迟),
+# 短报告 FAST tier 阈值 — word_limit <= 此值时优先用 FAST tier (低延迟),
 # 失败回退 SMART tier. 默认 2000 字 (FAST tier fast_token_limit=3000 足以覆盖).
 _FAST_TIER_WORD_THRESHOLD: int = 2000
 
-# V4-P2-01: 报告风格预设描述 (用于 detailed_report 内联 prompt 注入,
+# 报告风格预设描述 (用于 detailed_report 内联 prompt 注入,
 # 与 prompts.py DefaultPromptFamily._STYLE_PROMPTS 保持一致)
 _REPORT_STYLE_DESCRIPTIONS: dict[str, str] = {
     "academic": (
@@ -69,10 +68,9 @@ _REPORT_STYLE_DESCRIPTIONS: dict[str, str] = {
 class ReportGenerator:
     """报告生成器 (Writer 职责).
 
-    设计参考 ReportGenerator.
     用 smart_llm 合成长报告.
-    P2-06: image_generation_enabled=True 时调用 ImageGenerator 生成配图.
-    P0-Future-04: detailed_report 实现子主题嵌套研究 (设计参考 detailed_report).
+    image_generation_enabled=True 时调用 ImageGenerator 生成配图.
+    detailed_report 实现子主题嵌套研究.
     """
 
     settings: Settings
@@ -80,7 +78,7 @@ class ReportGenerator:
     _image_generator: ImageGenerator | None
     _prompt_family: PromptFamily
 
-    # P2-05: 多语言报告生成指令 (5 种语言, 中文默认无需额外指令)
+    # 多语言报告生成指令 (5 种语言, 中文默认无需额外指令)
     _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
         "zh": "请用中文撰写报告，使用中文标点和格式。",
         "en": "Please write the report in English with proper English punctuation and formatting.",
@@ -103,7 +101,7 @@ class ReportGenerator:
         self._prompt_family = prompt_family or get_prompt_family(self.settings.prompt_family)
 
     def _get_language_instruction(self, language: str | None) -> str:
-        """获取语言指令 (P2-05 多语言).
+        """获取语言指令 (多语言).
 
         中文 (zh) 为默认语言, 无需额外指令; 其他语言返回对应撰写指令,
         由调用方追加到 prompt 末尾, 让 LLM 直接用目标语言生成 (非翻译).
@@ -134,13 +132,13 @@ class ReportGenerator:
     ) -> dict[str, Any]:
         """生成研究报告 (Markdown), 按 report_type 路由.
 
-        - basic_report: 单次 LLM 合成 (设计参考 generate_report)
-        - detailed_report: 子主题嵌套研究 + TOC 拼接 (设计参考 detailed_report)
+        - basic_report: 单次 LLM 合成
+        - detailed_report: 子主题嵌套研究 + TOC 拼接
 
-        agent_role (设计参考 AGENT_ROLE): 角色 persona 字符串,
+        agent_role (AGENT_ROLE): 角色 persona 字符串,
         由 AgentCreator LLM 动态生成或调用方注入, 优先级高于默认角色.
 
-        language (P2-05): 报告语言代码 (zh|en|ja|ko|fr), 默认 zh 中文;
+        language: 报告语言代码 (zh|en|ja|ko|fr), 默认 zh 中文;
         非 zh 时在 prompt 末尾追加语言指令, 让 LLM 直接用目标语言生成.
 
         返回 dict 含:
@@ -187,9 +185,8 @@ class ReportGenerator:
     ) -> dict[str, Any]:
         """基础报告: 单次 LLM 合成 (原 generate_report 逻辑).
 
-        设计参考 generate_report.
         用户需求 6: 默认 Markdown, 至少 TOTAL_WORDS 字.
-        P2-06: image_generation_enabled=True 时生成 1 张配图插入报告.
+        image_generation_enabled=True 时生成 1 张配图插入报告.
         """
         async with trace_chain(
             name="basic-report-generator",
@@ -202,7 +199,7 @@ class ReportGenerator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 空上下文拒绝生成守卫 (设计参考 writer.py:82-88, 防幻觉)
+            # 空上下文拒绝生成守卫 (防幻觉)
             # 不仅检查列表为空, 还检查所有上下文是否均为空白字符串
             if not contexts or all(not str(c).strip() for c in contexts):
                 span.update(output={"error": "no_contexts"})
@@ -225,7 +222,7 @@ class ReportGenerator:
             # 构建来源引用列表 (APA 格式)
             references = self._build_references(sources)
 
-            # 设计参考: agent_role 作为角色 persona (来自 LLM 动态生成或调用方注入)
+            # agent_role 作为角色 persona (来自 LLM 动态生成或调用方注入)
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
             word_limit = total_words or self.settings.total_words
@@ -233,9 +230,9 @@ class ReportGenerator:
 
             structure_hint = self._basic_report_structure()
 
-            # P1-Future-04: prompt 经 PromptFamily 策略注入
-            # V4-P2-01: 注入 report_style 风格预设
-            # V4-P2-02: 末尾追加 Tone 语气提示词 (设计参考 17 种 Tone)
+            # prompt 经 PromptFamily 策略注入
+            # 注入 report_style 风格预设
+            # 末尾追加 Tone 语气提示词
             prompt = self._prompt_family.writer_prompt(
                 query=query,
                 contexts=combined_context,
@@ -249,15 +246,15 @@ class ReportGenerator:
                 report_style=self.settings.report_style,
             ) + self._prompt_family.get_tone_prompt(tone)
 
-            # P2-05: 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
+            # 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
             lang_instruction = self._get_language_instruction(language)
             if lang_instruction:
                 prompt += f"\n\n{lang_instruction}"
 
             messages = [{"role": "user", "content": prompt}]
-            # P1-1: 短报告 (word_limit <= _FAST_TIER_WORD_THRESHOLD) 优先用 FAST tier
+            # 短报告 (word_limit <= _FAST_TIER_WORD_THRESHOLD) 优先用 FAST tier
             # (低延迟), 失败回退 SMART tier; 长报告直接用 SMART tier (支持 2k+ 字长响应).
-            # V4-P1-03: LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
+            # LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
             use_fast_tier = word_limit <= _FAST_TIER_WORD_THRESHOLD
             if use_fast_tier:
                 report_md = await self._achat_with_retry(
@@ -271,10 +268,10 @@ class ReportGenerator:
                     step="writer",
                     fallback=_SECTION_FAILURE_PLACEHOLDER,
                 )
-                # P1-1: FAST tier 失败 (返回占位文本) 时回退 SMART tier
+                # FAST tier 失败 (返回占位文本) 时回退 SMART tier
                 if report_md == _SECTION_FAILURE_PLACEHOLDER:
                     logger.info(
-                        "P1-1: FAST tier 失败, 回退 SMART tier (word_limit=%d)",
+                        "FAST tier 失败, 回退 SMART tier (word_limit=%d)",
                         word_limit,
                     )
                     report_md = await self._achat_with_retry(
@@ -315,11 +312,11 @@ class ReportGenerator:
                 report_md += self._format_sources(sources)
             else:
                 # LLM 已生成参考文献章节, 仅补充来源 URL 列表 (无章节标题, 避免重复)
-                # V4-P2-02: 追加引用来源列表 (设计参考 APA 格式)
+                # 追加引用来源列表 (APA 格式)
                 pass  # 不再追加 _format_sources, 避免双重参考章节
 
-            # P2-05: YAML frontmatter (enable_frontmatter=True 时在报告首部追加元信息块)
-            # 设计参考 cli.py 的 YAML 输出, 便于下游解析/索引.
+            # YAML frontmatter (enable_frontmatter=True 时在报告首部追加元信息块)
+            # 便于下游解析/索引.
             if getattr(self.settings, "enable_frontmatter", False):
                 report_md = (
                     self._build_frontmatter(
@@ -331,7 +328,7 @@ class ReportGenerator:
                     + report_md
                 )
 
-            # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
+            # 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
             if self.settings.image_generation_enabled:
@@ -364,7 +361,7 @@ class ReportGenerator:
         session_id: str | None = None,
         language: str = "zh",
     ) -> dict[str, Any]:
-        """详细报告: 子主题嵌套研究 + TOC 拼接 (设计参考 detailed_report).
+        """详细报告: 子主题嵌套研究 + TOC 拼接.
 
         完整流程:
         1. 初始研究: 复用传入的 contexts (避免重复检索)
@@ -376,10 +373,10 @@ class ReportGenerator:
            - LLM 写子主题章节
         5. TOC + 引言 + 正文 + 结论 + 引用拼接
 
-        V4-P0-02: 子主题并行化, 用 asyncio.gather 并行处理所有子主题
+        子主题并行化, 用 asyncio.gather 并行处理所有子主题
                   (每个子主题独立 research + write, 互不依赖).
-        V4-P1-03: 单个子主题 LLM 调用失败时重试 1 次, 仍失败用占位文本, 不阻断整体.
-        V4-P2-01: 注入 report_style 风格预设.
+        单个子主题 LLM 调用失败时重试 1 次, 仍失败用占位文本, 不阻断整体.
+        注入 report_style 风格预设.
 
         AGENTS.md 第 10 章: 整个流程包裹在 trace_chain 内.
         AGENTS.md 第 9 章: 所有 LLM 调用经 LLMClient (achat 内部包裹 trace_generation).
@@ -400,7 +397,7 @@ class ReportGenerator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 空上下文拒绝生成守卫 (设计参考 writer.py:82-88, 防幻觉)
+            # 空上下文拒绝生成守卫 (防幻觉)
             # 不仅检查列表为空, 还检查所有上下文是否均为空白字符串
             if not contexts or all(not str(c).strip() for c in contexts):
                 span.update(output={"error": "no_contexts"})
@@ -423,7 +420,7 @@ class ReportGenerator:
             references = self._build_references(sources)
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
-            # 步骤 2+3: P1-2 子主题生成与引言并行 (两者均只依赖 query/contexts/
+            # 步骤 2+3: 子主题生成与引言并行 (两者均只依赖 query/contexts/
             # references/role_persona, 无数据依赖, 并行可节省引言 LLM 调用延迟 ~2-3s)
             subtopics, introduction = await asyncio.gather(
                 self._generate_subtopics(
@@ -444,7 +441,7 @@ class ReportGenerator:
                 ),
             )
 
-            # 步骤 4: V4-P0-02 子主题并行嵌套研究 + 去重 + 写章节
+            # 步骤 4: 子主题并行嵌套研究 + 去重 + 写章节
             research_conductor = ResearchConductor(
                 settings=self.settings,
                 llm=self._llm,
@@ -478,8 +475,8 @@ class ReportGenerator:
             )
 
             # 汇总并行结果 (按子主题顺序)
-            # V4-P1-04 优化 1+4+5: TOC 后置生成 + 失败章节标记 + 一致性校验
-            # 设计参考 detailed_report.py:197-205 (TOC 从实际 body 提取, 非独立生成)
+            # TOC 后置生成 + 失败章节标记 + 一致性校验
+            # TOC 从实际 body 提取, 非独立生成
             sections: list[str] = []
             valid_topics_for_toc: list[str] = []
             all_sources: list[dict[str, Any]] = list(sources)
@@ -523,7 +520,7 @@ class ReportGenerator:
                 )
 
             # 步骤 5: TOC + 引言 + 正文 + 结论 + 引用拼接
-            # 优化 1: TOC 只含有效子主题 (设计参考 TOC 后置生成)
+            # 优化 1: TOC 只含有效子主题 (TOC 后置生成)
             toc = self._generate_toc(valid_topics_for_toc)
             conclusion = await self._write_conclusion(
                 query,
@@ -547,14 +544,14 @@ class ReportGenerator:
                 f"{conclusion}\n\n"
             )
 
-            # V4-P2-02: 追加引用来源列表 (设计参考 APA 格式, 含子主题研究新增源)
+            # 追加引用来源列表 (APA 格式, 含子主题研究新增源)
             # 避免双重参考章节: 仅追加一次 _format_sources (含 ## 参考来源 章节标题)
             full_report += self._format_sources(all_sources)
 
             # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
             full_report = self._normalize_markdown(full_report)
 
-            # P2-06: 报告配图生成 (image_generation_enabled=True 时启用)
+            # 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
             if self.settings.image_generation_enabled:
@@ -595,14 +592,14 @@ class ReportGenerator:
         session_id: str | None,
         language: str = "zh",
     ) -> tuple[str | None, list[dict[str, Any]], bool]:
-        """V4-P0-02: 单个子主题的 research + write 独立函数 (并行单元).
+        """单个子主题的 research + write 独立函数 (并行单元).
 
         每个子主题独立调用 research + write, 互不依赖:
         1. ResearchConductor.conduct_research(sub_query, mode="basic")
         2. WrittenContentCompressor 去重 (锁保护, 避免并行竞态)
-        3. _write_section 写章节 (V4-P1-03: 内部已含 try/except + 重试)
+        3. _write_section 写章节 (内部已含 try/except + 重试)
 
-        异常处理: 单个子主题失败不阻断整体, 返回占位文本 (V4-P1-03).
+        异常处理: 单个子主题失败不阻断整体, 返回占位文本.
 
         Args:
             topic: 子主题名称
@@ -618,7 +615,7 @@ class ReportGenerator:
             dedup_lock: 保护 written_compressor 状态的异步锁
             user_id: 用户 ID
             session_id: 会话 ID
-            language: P2-05 报告语言代码 (zh|en|ja|ko|fr), 默认 zh
+            language: 报告语言代码 (zh|en|ja|ko|fr), 默认 zh
 
         Returns:
             (section_md, sub_sources, skipped):
@@ -627,7 +624,7 @@ class ReportGenerator:
             - skipped: 是否因去重被跳过
         """
         sub_query = f"{query} - {topic}"
-        # P0-2: 复用主研究 contexts, 仅在上下文不足时触发嵌套搜索 (消除 5 倍搜索冗余)
+        # 复用主研究 contexts, 仅在上下文不足时触发嵌套搜索 (消除 5 倍搜索冗余)
         # 主研究 combined_context 已含主查询的完整搜索结果, 子主题可直接复用
         # 仅当 combined_context 过短 (<2000 字符, 可能主研究未覆盖该子主题) 时补充搜索
         sub_contexts: list[str] = []
@@ -649,7 +646,7 @@ class ReportGenerator:
                 sub_contexts = []
                 sub_sources = []
 
-        # V4-P1-04 优化 2: 每个子主题使用独立 sub_context (设计参考 串行设计)
+        # 每个子主题使用独立 sub_context (串行设计)
         # 从 combined_context 中用 BM25 检索与 topic 相关的片段,
         # 而非整体复用, 避免并行场景下所有子主题 embedding 必然相似导致去重误判
         if sub_contexts:
@@ -661,11 +658,11 @@ class ReportGenerator:
         if len(sub_context) > max_context_chars:
             sub_context = sub_context[:max_context_chars]
 
-        # 2. WrittenContentCompressor 去重 (P4 修复: 缩小 dedup_lock 锁粒度)
+        # 2. WrittenContentCompressor 去重 (缩小 dedup_lock 锁粒度)
         # 锁外: compute_embedding 完成网络 I/O (embed_texts), 不持锁保持并行度
         # 锁内: check_and_update 做 numpy 相似度比对 + 更新内部状态 (同步操作)
         # 旧版将 should_keep 整体放锁内, embedding 网络调用使并行退化为串行
-        # V4-P1-04 优化 3: 使用 check_and_update_partial 只丢弃相似 chunk, 保留差异部分
+        # 使用 check_and_update_partial 只丢弃相似 chunk, 保留差异部分
         try:
             chunks, content_embs = await written_compressor.compute_embedding(sub_context)
             async with dedup_lock:
@@ -681,7 +678,7 @@ class ReportGenerator:
             logger.info("子主题 '%s' 内容与已写章节高度相似, 跳过", topic)
             return None, sub_sources, True
 
-        # 3. 写子主题章节 (V4-P1-03: _write_section 内部已含 try/except + 重试)
+        # 3. 写子主题章节 (_write_section 内部已含 try/except + 重试)
         # 优化 3: 使用过滤后的 context (只含不相似 chunk), 避免重复内容
         section_md = await self._write_section(
             topic,
@@ -696,12 +693,12 @@ class ReportGenerator:
         return section_md, sub_sources, False
 
     def _extract_topic_context(self, topic: str, combined_context: str) -> str:
-        """V4-P1-04 优化 2: 从 combined_context 中提取与 topic 相关的片段.
+        """从 combined_context 中提取与 topic 相关的片段.
 
         用 BM25 关键词匹配检索相关片段, 而非整体复用 combined_context,
         避免并行场景下所有子主题 embedding 必然相似导致去重误判.
 
-        设计参考 串行设计: 用 for 循环串行处理子主题, 每个子主题独立研究;
+        串行设计: 用 for 循环串行处理子主题, 每个子主题独立研究;
         本项目用 asyncio.gather 并行, 通过 BM25 检索为每个子主题构造独立 sub_context,
         使 embedding 不会必然相似.
 
@@ -770,17 +767,17 @@ class ReportGenerator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        """LLM 生成 3-5 个子主题 (设计参考 detailed_report subtopic list).
+        """LLM 生成 3-5 个子主题.
 
-        V2-P1 优化 (设计参考 detailed_report.py):
+        优化:
         - prompt 提取到 PromptFamily.subtopics_prompt (旧版内联)
-        - temperature: 0.4 → 0.25 (设计参考 draft_titles temp)
+        - temperature: 0.4 → 0.25
         - 用 STRATEGIC LLM 拆解 (与业界实践一致)
 
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
-        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
+        LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
         """
-        # V2-P1: prompt 经 PromptFamily.subtopics_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.subtopics_prompt 注入 (旧版内联)
         prompt = self._prompt_family.subtopics_prompt(
             query=query,
             context=context,
@@ -788,9 +785,9 @@ class ReportGenerator:
             max_subtopics=self.settings.max_subtopics,
         )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        # V4-P1-03: LLM 调用增加重试, 失败降级为 [query]
-        # V2-P1: temperature 0.4 → 0.25 (设计参考 draft_titles temp)
-        # P1-7: 子主题列表生成是短 JSON 数组任务, SMART 足够, 省 2/3 成本
+        # LLM 调用增加重试, 失败降级为 [query]
+        # temperature 0.4 → 0.25
+        # 子主题列表生成是短 JSON 数组任务, SMART 足够, 省 2/3 成本
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -820,19 +817,19 @@ class ReportGenerator:
     ) -> str:
         """LLM 写引言 (基于 query + contexts).
 
-        V2-P1 优化 (设计参考 detailed_report.py):
+        优化:
         - prompt 提取到 PromptFamily.introduction_prompt (旧版内联)
-        - temperature: 0.4 → 0.25 (设计参考 write_introduction temp)
+        - temperature: 0.4 → 0.25
 
-        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
-        V4-P2-01: 注入 report_style 风格预设.
+        LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        注入 report_style 风格预设.
         """
         current_date = datetime.now().strftime("%Y年%m月%d日")
-        # V4-P2-01: 注入风格描述
+        # 注入风格描述
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        # V2-P1: prompt 经 PromptFamily.introduction_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.introduction_prompt 注入 (旧版内联)
         prompt = self._prompt_family.introduction_prompt(
             query=query,
             context=context,
@@ -845,7 +842,7 @@ class ReportGenerator:
             word_max=self.settings.detailed_intro_word_max,
         )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        # V2-P1: temperature 0.4 → 0.25 (设计参考 write_introduction temp)
+        # temperature 0.4 → 0.25
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -876,22 +873,22 @@ class ReportGenerator:
     ) -> str:
         """LLM 写子主题章节 (基于 sub_context + sources).
 
-        V2-P1 优化 (设计参考 detailed_report.py):
+        优化:
         - prompt 提取到 PromptFamily.section_prompt (旧版内联)
-        - 章节字数 500-1000 → 800-1200 (设计参考 write_section 字数)
-        - temperature: 0.4 → 0.35 (设计参考 write_section temp)
-        - 加 MUST 具体观点 + 表格 + [n] 编号引用 (设计参考 writer_prompt)
+        - 章节字数 500-1000 → 800-1200
+        - temperature: 0.4 → 0.35
+        - 加 MUST 具体观点 + 表格 + [n] 编号引用
 
-        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
-        V4-P2-01: 注入 report_style 风格预设.
-        P2-05: 非 zh 时追加语言指令, 让 LLM 直接用目标语言生成章节.
+        LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        注入 report_style 风格预设.
+        非 zh 时追加语言指令, 让 LLM 直接用目标语言生成章节.
         """
-        # V4-P2-01: 注入风格描述
+        # 注入风格描述
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        # V2-P1: prompt 经 PromptFamily.section_prompt 注入 (旧版内联)
-        # 章节字数 500-1000 → 800-1200 (设计参考)
+        # prompt 经 PromptFamily.section_prompt 注入 (旧版内联)
+        # 章节字数 500-1000 → 800-1200
         prompt = self._prompt_family.section_prompt(
             topic=topic,
             context=context,
@@ -902,14 +899,14 @@ class ReportGenerator:
             word_min=self.settings.detailed_section_word_min,
             word_max=self.settings.detailed_section_word_max,
         )
-        # V4-P2-02: 末尾追加 Tone 语气提示词 (设计参考 17 种 Tone)
+        # 末尾追加 Tone 语气提示词
         prompt += self._prompt_family.get_tone_prompt(tone)
-        # P2-05: 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
+        # 多语言报告生成 (非 zh 时追加语言指令, 让 LLM 直接用目标语言生成)
         lang_instruction = self._get_language_instruction(language)
         if lang_instruction:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        # V2-P1: temperature 0.4 → 0.35 (设计参考 write_section temp)
+        # temperature 0.4 → 0.35
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -938,19 +935,19 @@ class ReportGenerator:
     ) -> str:
         """LLM 写结论 (基于 query + 已写章节摘要).
 
-        V2-P1 优化 (设计参考 detailed_report.py):
-        - prompt 提取到 PromptFamily.conclusion_prompt (旧版内联)
-        - temperature: 0.4 → 0.25 (设计参考 write_conclusion temp)
+        优化:
+        - prompt 提取到 PromptFamily.conclusion_prompt
+        - temperature: 0.4 → 0.25
 
-        V4-P1-03: LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
-        V4-P2-01: 注入 report_style 风格预设.
+        LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
+        注入 report_style 风格预设.
         """
         sections_summary = "\n\n".join(s[:500] for s in sections)
-        # V4-P2-01: 注入风格描述
+        # 注入风格描述
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        # V2-P1: prompt 经 PromptFamily.conclusion_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.conclusion_prompt 注入
         prompt = self._prompt_family.conclusion_prompt(
             query=query,
             sections_summary=sections_summary,
@@ -961,7 +958,7 @@ class ReportGenerator:
             word_max=self.settings.detailed_intro_word_max,
         )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        # V2-P1: temperature 0.4 → 0.25 (设计参考 write_conclusion temp)
+        # temperature 0.4 → 0.25
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -991,7 +988,7 @@ class ReportGenerator:
         step: str,
         fallback: str,
     ) -> str:
-        """V4-P1-03: LLM 调用通用重试封装.
+        """LLM 调用通用重试封装.
 
         失败时重试 _LLM_RETRY_TIMES 次, 仍失败则返回 fallback 占位文本.
         用于章节/段落级 LLM 调用, 避免整篇报告因单点失败而重试.
@@ -1046,7 +1043,7 @@ class ReportGenerator:
 
     @staticmethod
     def _slugify(text: str) -> str:
-        """将标题文本转为 markdown 锚点 slug (设计参考 detailed_report TOC).
+        """将标题文本转为 markdown 锚点 slug (detailed_report TOC).
 
         GitHub-flavored markdown 规则: 小写 ASCII, 空格转连字符,
         保留中文/字母/数字/连字符, 移除其余标点.
@@ -1063,7 +1060,7 @@ class ReportGenerator:
 
     @staticmethod
     def _generate_toc(subtopics: list[str]) -> str:
-        """生成目录 (设计参考 TOC, 含锚点链接).
+        """生成目录 (TOC, 含锚点链接).
 
         每个目录项为可点击的锚点链接, 跳转到对应章节标题.
         """
@@ -1084,7 +1081,7 @@ class ReportGenerator:
         user_id: str | None,
         session_id: str | None,
     ) -> tuple[str | None, str | None]:
-        """生成报告配图 (P2-06).
+        """生成报告配图.
 
         图像生成失败时降级 (报告不带图, 记录 warning), 不阻断主流程.
         返回 (image_url, image_b64), 失败均为 None.
@@ -1164,7 +1161,7 @@ class ReportGenerator:
 
     @staticmethod
     def _detailed_report_structure() -> str:
-        """详细报告静态结构提示 (P0-Future-04 后改用子主题嵌套动态生成, 此结构仅作参考).
+        """详细报告静态结构提示 (改用子主题嵌套动态生成, 此结构仅作参考).
 
         保留用于文档参考与潜在降级场景; _generate_detailed_report 不再使用此静态结构.
         """
@@ -1307,10 +1304,9 @@ class ReportGenerator:
         *,
         style: str = "APA",
     ) -> str:
-        """按引用风格构建参考文献列表 (P1-02: APA/MLA/Chicago/GB7714 可配置).
+        """按引用风格构建参考文献列表 (APA/MLA/Chicago/GB7714 可配置).
 
-        设计参考 prompts.py reference_prompt 的 report_format 字符串注入,
-        但在代码层实现真实格式化 (而非仅依赖 LLM 生成).
+        在代码层实现真实格式化 (而非仅依赖 LLM 生成).
 
         Args:
             sources: 来源列表, 含 title/url/snippet 等字段.
@@ -1361,13 +1357,13 @@ class ReportGenerator:
         return "\n\n".join(refs)
 
     def _format_sources(self, sources: list[dict[str, Any]]) -> str:
-        """格式化引用来源列表 (P1-02: 支持 APA/MLA/Chicago/GB7714 风格).
+        """格式化引用来源列表 (支持 APA/MLA/Chicago/GB7714 风格).
 
         通过 settings.report_format_style 配置风格, 默认 APA.
         与 _build_references 不同, 此方法生成带章节标题的完整来源列表,
         用于追加到报告末尾, 确保读者可访问原始来源.
 
-        设计参考 add_references (markdown_processing.py:94) 但功能更强:
+        add_references 增强版:
         - 同类实现仅生成 `- [url](url)` 简单列表
         - 本方法支持 4 种引用风格, 含作者/年份/标题
 
@@ -1377,7 +1373,7 @@ class ReportGenerator:
         """
         if not sources:
             return ""
-        # P1-02: 读取配置风格 (settings.report_format_style 默认 "APA")
+        # 读取配置风格 (settings.report_format_style 默认 "APA")
         # 对无 settings 的实例(如单元测试 fixture)安全降级到 "APA".
         settings = getattr(self, "settings", None)
         style = getattr(settings, "report_format_style", "APA") or "APA"
@@ -1388,7 +1384,7 @@ class ReportGenerator:
         for i, src in enumerate(sources, 1):
             title = src.get("title", "未知标题")
             url = src.get("url", src.get("href", ""))
-            # P1-02: 在每条来源后追加风格标识 (便于客户端识别引用风格)
+            # 在每条来源后追加风格标识 (便于客户端识别引用风格)
             lines.append(f"{i}. {title}. {url}  _[{style}]_")
         return "\n".join(lines)
 
@@ -1400,9 +1396,9 @@ class ReportGenerator:
         sources: list[dict[str, Any]],
         language: str = "zh",
     ) -> str:
-        """构建 YAML frontmatter 元信息块 (P2-05).
+        """构建 YAML frontmatter 元信息块.
 
-        设计参考 cli.py 的 YAML 输出, 在报告首部追加元信息,
+        在报告首部追加元信息,
         便于下游解析器(如 static index.html)提取标题/日期/来源数等.
 
         Args:

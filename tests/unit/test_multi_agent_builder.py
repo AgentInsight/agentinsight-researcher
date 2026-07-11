@@ -4,7 +4,7 @@
 - build_revision_subgraph: reviewer↔reviser 子图结构与守卫
 - build_multi_agent_graph: 线性+条件边主图结构与 max_iterations 守卫
 
-图结构 (设计参考: multi_agents/main.py):
+图结构:
     START → agent_creator → researcher → writer → fact_checker
     fact_checker → (accept → revision 子图 | revise → writer)
     revision 子图 → visualizer → publisher → END

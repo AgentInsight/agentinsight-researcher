@@ -1,9 +1,8 @@
 """PyMuPDF 抓取器 - PDF 文档.
 
-设计参考: scraper/pymupdf/pymupdf.py.
 适用于 PDF URL 与本地路径.
 
-P2-10 修复: 所有 fitz 同步调用经 asyncio.to_thread; 流式下载避免 OOM;
+所有 fitz 同步调用经 asyncio.to_thread; 流式下载避免 OOM;
 同步文件写入/删除经 asyncio.to_thread 包裹.
 """
 

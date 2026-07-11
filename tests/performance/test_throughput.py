@@ -213,7 +213,7 @@ async def _run_short_query_async(
 def test_concurrent_short_queries_5(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 5 个并发短查询全部在 15s 内完成.
 
-    P0-Future-06: 短查询不走 graph, 应支持并发.
+    短查询不走 graph, 应支持并发.
     AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
     """
     threshold_s = perf_thresholds["concurrent_5_s"]
@@ -247,7 +247,7 @@ def test_concurrent_short_queries_5(agent_url: str, perf_thresholds: dict[str, f
 def test_concurrent_short_queries_10(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 10 个并发短查询全部在 30s 内完成.
 
-    P0-Future-06: 短查询不走 graph, 应支持并发.
+    短查询不走 graph, 应支持并发.
     AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
     """
     threshold_s = perf_thresholds["concurrent_10_s"]

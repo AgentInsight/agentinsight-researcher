@@ -5,7 +5,7 @@
 - use_checkpointer=True 时挂载 PostgresSaver (mock)
 - use_checkpointer=False 时不挂 checkpointer
 
-图结构 (P2-Future-03):
+图结构:
     START → chat → END
 
 集成 (routes.py 检测追问 vs 新研究):
@@ -50,7 +50,7 @@ class TestBuildChatGraph:
     async def test_build_chat_graph_single_node(self) -> None:
         """验证 START → chat → END 单节点结构.
 
-        图结构 (P2-Future-03):
+        图结构:
             START → chat → END
         """
         settings = Settings(_env_file=None)

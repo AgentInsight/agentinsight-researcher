@@ -62,7 +62,7 @@ class MetasoSearcher(BaseSearcher):
             input={"query": query[:100], "max_results": max_results},
             metadata={"tool_name": "metaso", "region": "cn"},
         ) as span:
-            # 任务3 修复: 对齐秘塔 API 官方文档
+            # 对齐秘塔 API 官方文档
             # 之前错误: 用 "num": int, 缺 scope, 缺 Accept 头 → API 拒绝/返回非网页数据
             # 官方文档 (CSDN 实测): {"q","scope":"webpage","size":str,"includeSummary","includeRawContent","conciseSnippet"}
             headers = {

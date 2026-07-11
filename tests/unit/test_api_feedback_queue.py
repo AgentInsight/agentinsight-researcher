@@ -1,4 +1,4 @@
-"""单元测试: 全局反馈队列管理器 (P0-Future-03 Human-in-the-loop).
+"""单元测试: 全局反馈队列管理器 (Human-in-the-loop).
 
 验证 src/api/feedback_queue.py:
 - FeedbackQueue.put_feedback: 有待处理 Future → 解决返回 True

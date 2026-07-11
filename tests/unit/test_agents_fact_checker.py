@@ -123,7 +123,7 @@ async def test_fact_checker_handles_llm_error(
     """测试 LLM 返回非法 JSON 时 safe_json_parse 兜底为 accepted=True.
 
     FactChecker.check 用 safe_json_parse(fallback={"accepted": True, "issues": []}),
-    LLM 输出非 JSON 时降级为通过 (不阻断研究流程, 设计参考: fact_checker 容错).
+    LLM 输出非 JSON 时降级为通过 (不阻断研究流程, fact_checker 容错).
     """
     mock_llm.achat.return_value = LLMResponse(
         content="这不是合法 JSON",

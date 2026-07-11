@@ -121,7 +121,7 @@ async def test_get_cache_redis_exception_returns_none() -> None:
 async def test_get_cache_redis_returns_data() -> None:
     """Redis 命中时返回反序列化的数据.
 
-    P1-03: _get_cache 命中后会调用 zadd 更新 LRU 访问时间 (redis_cache_lru_enabled 默认 True),
+    _get_cache 命中后会调用 zadd 更新 LRU 访问时间 (redis_cache_lru_enabled 默认 True),
     故 _FakeRedis 需实现 zadd 方法, 否则 AttributeError 被 except 捕获返回 None.
     """
     retriever = _make_retriever()
@@ -135,7 +135,7 @@ async def test_get_cache_redis_returns_data() -> None:
             return self._data
 
         async def zadd(self, _key: str, _mapping: dict[str, float]) -> int:
-            """LRU 访问时间更新 (P1-03): 简单返回 0 即可, 测试不关心 LRU 副作用."""
+            """LRU 访问时间更新: 简单返回 0 即可, 测试不关心 LRU 副作用."""
             return 0
 
     retriever._redis = _FakeRedis(json.dumps(cached_data))

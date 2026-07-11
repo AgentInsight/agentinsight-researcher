@@ -59,7 +59,7 @@ def _chat_payload(query: str, session_id: str) -> dict[str, object]:
 def test_sustained_10_requests_no_degradation(agent_url: str) -> None:
     """验证 10 次顺序短查询无性能退化 (末次耗时 <= 首次 * 2).
 
-    P0-Future-06: 短查询不走 graph, 应保持稳定延迟.
+    短查询不走 graph, 应保持稳定延迟.
     若末次耗时显著超过首次, 可能存在资源泄漏/缓存退化.
     """
     request_count = 10

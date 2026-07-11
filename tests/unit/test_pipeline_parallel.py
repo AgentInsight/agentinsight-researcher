@@ -1,4 +1,4 @@
-"""单元测试: ResearchConductor 流水线并行化 (P0-2).
+"""单元测试: ResearchConductor 流水线并行化.
 
 验证 src/skills/researcher/research_conductor.py 的并行化优化:
 - plan_research 与 _retrieve_private_data 并行 (asyncio.gather, 无数据依赖)
@@ -271,7 +271,7 @@ async def test_parallel_execution_preserves_context_order(
     ):
         result = await conductor.conduct_research("q", user_id="u1", session_id="s1")
 
-    # 私有上下文优先 (P0-2: 合并顺序 private + web)
+    # 私有上下文优先 (合并顺序 private + web)
     assert result["contexts"][0] == "private-ctx"
     assert "web-sq1" in result["contexts"]
     # 私有 sources 优先

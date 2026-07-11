@@ -174,7 +174,7 @@ async def test_full_research_chain_non_stream() -> None:
     _log(f"非流式报告内容长度: {len(content)} 字")
     _log(f"内容预览: {content[:300]}{'...' if len(content) > 300 else ''}")
 
-    # usage 字段 (P1-04: 含 cost_usd)
+    # usage 字段 (含 cost_usd)
     assert "usage" in data, "缺少 usage 字段"
     assert "total_tokens" in data["usage"], "usage 缺少 total_tokens"
     assert data["usage"]["total_tokens"] > 0, f"total_tokens 应 > 0: {data['usage']}"

@@ -211,7 +211,7 @@ def test_compose_qa_rerank_healthcheck_uses_curl() -> None:
 def test_compose_qa_embeddings_healthcheck_not_cmd_form() -> None:
     """embeddings 健康检查不应是 CMD 形式 (会被 TEI ENTRYPOINT 拦截).
 
-    任务2 修复: TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截,
+    TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截,
     必须用 CMD-SHELL + curl 绝对路径绕过.
     """
     compose = _load_compose_qa()

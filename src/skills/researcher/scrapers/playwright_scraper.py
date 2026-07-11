@@ -1,12 +1,12 @@
 """Playwright 抓取器 - JS 渲染页面.
 
-设计参考 scraper/browser/browser.py (但用 Playwright 替代 Selenium).
+用 Playwright 替代 Selenium.
 适用于 JS 渲染的 SPA 页面.
 
-P0-6: 全局 _PlaywrightPool 单例复用 browser, 每次 scrape 仅创建新 page,
+全局 _PlaywrightPool 单例复用 browser, 每次 scrape 仅创建新 page,
 避免每个 URL 启动新 chromium 进程 (1-3s 开销).
 
-v3 优化 (P2-05):
+优化:
 - 浏览器池化: max_browsers=5 + 负载均衡 (min processing_count), 支持高并发
 - 域名级限流: Semaphore(1) per domain + 随机延迟, 避免单域名被封
 - 图片评分: get_relevant_images() 按尺寸/class 评分排序
@@ -53,7 +53,7 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
         # 方案 E: 自动检测已下载的完整 Chrome (而非 headless shell)
         # Playwright 1.61+ 默认查找 chromium_headless_shell-*/chrome-headless-shell
         # 但离线模式可能只下载了完整 Chrome (chromium-*/chrome-linux64/chrome)
-        # P0-1: 统一走 Settings SSOT, 不再绕过 settings 直接读 os.environ
+        # 统一走 Settings SSOT, 不再绕过 settings 直接读 os.environ
         browsers_path = settings.playwright_browsers_path or "/opt/pw-browsers"
         chrome_path = f"{browsers_path}/chromium-1228/chrome-linux64/chrome"
         # ASYNC240: 异步函数内不应使用阻塞的 os.path.exists
@@ -64,7 +64,7 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
 
 
 def _get_domain(url: str) -> str:
-    """从 URL 提取二级域名 (设计参考 NoDriverScraper.get_domain).
+    """从 URL 提取二级域名.
 
     示例: https://www.example.com/path → example.com
     用于域名级限流 (同域名请求串行化, 避免被封).
@@ -77,7 +77,7 @@ def _get_domain(url: str) -> str:
 
 
 class _PooledBrowser:
-    """池化浏览器包装 (设计参考: NoDriverScraper.Browser).
+    """池化浏览器包装.
 
     封装 Playwright browser 实例 + 负载计数 + 域名级 Semaphore.
     - processing_count: 当前并发处理数, 用于负载均衡 (min 选择)
@@ -123,7 +123,7 @@ class _PooledBrowser:
 
 
 class _PlaywrightPool:
-    """全局 Playwright 浏览器池 (单例, P0-6 修复 + P2-05 池化优化).
+    """全局 Playwright 浏览器池 (单例, 池化优化).
 
     v3 优化:
     - max_browsers=5: 池上限, 超过则复用负载最低的
@@ -233,7 +233,7 @@ class _PlaywrightPool:
 
     @classmethod
     async def release(cls, pooled: _PooledBrowser) -> None:
-        """释放 browser 槽位 (v3 新增, 设计参考: release_browser).
+        """释放 browser 槽位 (v3 新增).
 
         processing_count 归零时不关闭 (保留池化复用);
         仅 shutdown 时统一关闭.
@@ -277,7 +277,7 @@ class PlaywrightScraper(BaseScraper):
     比 BeautifulSoup 重, 仅在配置 SCRAPER=playwright 时启用.
     镜像内需预装 chromium.
 
-    v3 优化 (P2-05):
+    优化:
     - 浏览器池化: acquire/release 语义, 负载均衡
     - 域名限流: acquire 返回 domain_semaphore, async with 加锁
     - 图片评分: 调用 utils.get_relevant_images_from_html 评分排序
@@ -286,7 +286,7 @@ class PlaywrightScraper(BaseScraper):
     name = "playwright"
 
     async def scrape(self) -> dict[str, Any]:
-        """用 Playwright 抓取 JS 渲染页面 (P0-6: 复用全局浏览器池).
+        """用 Playwright 抓取 JS 渲染页面 (复用全局浏览器池).
 
         v3 修复:
         - acquire/release 语义: 配合池化负载均衡 + 域名限流
@@ -341,10 +341,10 @@ class PlaywrightScraper(BaseScraper):
                     # v2: BrowserContext 隔离, context.close 一次性释放 page+storage
                     context = await browser.new_context()
                     page = await context.new_page()
-                    # P1-3: domcontentloaded 替代 networkidle
+                    # domcontentloaded 替代 networkidle
                     await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
 
-                    # P1-3: 短等待 + 智能检测
+                    # 短等待 + 智能检测
                     try:
                         await page.wait_for_selector("body", timeout=5000)
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")

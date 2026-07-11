@@ -1,4 +1,4 @@
-"""单元测试: TEI Embeddings 熔断器 (P0-1).
+"""单元测试: TEI Embeddings 熔断器.
 
 验证 src/rag/embeddings.py 的 EmbeddingsCircuitBreaker:
 - CLOSED 状态: 失败计数 < threshold, 请求正常通过
@@ -35,12 +35,12 @@ pytestmark = pytest.mark.unit
 
 
 def test_circuit_failure_threshold_is_5() -> None:
-    """_CIRCUIT_FAILURE_THRESHOLD 应为 5 (P0-1 默认值)."""
+    """_CIRCUIT_FAILURE_THRESHOLD 应为 5 (默认值)."""
     assert _CIRCUIT_FAILURE_THRESHOLD == 5
 
 
 def test_circuit_recovery_timeout_is_60() -> None:
-    """_CIRCUIT_RECOVERY_TIMEOUT 应为 60.0s (P0-1 默认值)."""
+    """_CIRCUIT_RECOVERY_TIMEOUT 应为 60.0s (默认值)."""
     assert _CIRCUIT_RECOVERY_TIMEOUT == 60.0
 
 

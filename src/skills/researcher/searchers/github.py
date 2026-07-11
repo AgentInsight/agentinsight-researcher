@@ -41,7 +41,7 @@ class GitHubSearcher(BaseSearcher):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self.base_url = "https://api.github.com/search/repositories"
-        # P0-2: 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+        # 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
         self.token = settings.github_token or None
 
     async def search(

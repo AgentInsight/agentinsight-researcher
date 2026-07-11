@@ -1,4 +1,4 @@
-"""统一 Redis 客户端工厂 (P0-5 修复).
+"""统一 Redis 客户端工厂.
 
 AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:
 本模块仅负责客户端创建, 键前缀由调用方管理.
@@ -33,7 +33,7 @@ async def get_redis_client(settings: Settings | None = None) -> aioredis.Redis |
     if _client is not None:
         return _client
     settings = settings or get_settings()
-    # P0-2: 所有字段均已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+    # 所有字段均已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
     redis_url = settings.redis_url or None
     if not redis_url:
         return None

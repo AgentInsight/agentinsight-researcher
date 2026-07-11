@@ -1,4 +1,4 @@
-"""SimpleQA 评测器 (设计参考: evals/simple_evals/simpleqa_eval.py).
+"""SimpleQA 评测器.
 
 通过 HTTP API 调用 researcher, 对比标准答案计算准确率.
 评测维度:

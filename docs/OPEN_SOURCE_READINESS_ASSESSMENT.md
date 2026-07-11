@@ -259,7 +259,7 @@
 |--------|------|------|
 | README 徽章 | ✅ | CI / codecov / release / issues / stars / license / Python / FastAPI / LangGraph / ruff 共 10 个 |
 | 项目描述 | ✅ | "中文优先的研究分析智能体",中英双语,简洁清晰 |
-| 在线 Demo | ✅ | 官方 Demo 测试页面(http://119.91.32.102/...),含 30 秒上手指南 |
+| 在线 Demo | ✅ | 官方 Demo 测试页面(http://43.139.209.145/...),含 30 秒上手指南 |
 | GitHub Topics | ❌ | 仓库设置层面的 topics(如 `ai-agent`/`langgraph`/`rag`/`research`),需在 GitHub 仓库手动添加,无法文件化 |
 | 项目截图/GIF | ❌ | README 无截图,docs/ 无 assets/ 目录 |
 | 项目视频 | ❌ | 无 Demo 视频/GIF |

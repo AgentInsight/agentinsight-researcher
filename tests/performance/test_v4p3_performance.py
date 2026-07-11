@@ -1,6 +1,6 @@
-"""性能测试: V4-P3 两层方案性能 (BM25Filter).
+"""性能测试: 两层方案性能 (BM25Filter).
 
-V4-P3 两层方案设计:
+两层方案设计:
 - Layer 1 Fast Path: < 8K 字符, 直接拼接原文 (零计算)
 - Layer 2 BM25Filter: >= 8K 字符, jieba+BM25Okapi 本地过滤 (主路径)
 
@@ -44,7 +44,7 @@ def _generate_test_documents(chunk_count: int) -> list[dict[str, str]]:
 async def test_bm25_filter_response_time_under_200ms() -> None:
     """验证 BM25Filter 响应时间 < 200ms (258 chunks).
 
-    V4-P3 L2: BM25Filter 替代 EmbeddingsFilter 作为主路径.
+    L2: BM25Filter 替代 EmbeddingsFilter 作为主路径.
     基线: 258 chunks × 本地 jieba+BM25 = ~2 秒 (文档注释实测).
     阈值: 宽松到 200ms 允许首次 jieba 加载, 正常应在 10-50ms.
     首次 jieba 加载耗时约 1s, 需预热后再计时.
@@ -68,7 +68,7 @@ async def test_bm25_filter_response_time_under_200ms() -> None:
 async def test_bm25_filter_vs_fastembed_rerank_latency() -> None:
     """验证 BM25Filter 粗筛 + FastEmbed 精排两阶段延迟可接受.
 
-    V4-P3 两层路由架构:
+    两层路由架构:
     - BM25 粗筛 (本地 jieba+BM25Okapi): 50 chunks ~10ms
     - FastEmbed 精排 (本地 bge-small-zh ONNX): 50 → 20 chunks ~50ms
     - 旧 EmbeddingsFilter (已删除): 258 chunks × TEI 推理 = ~43 分钟
@@ -150,7 +150,7 @@ async def test_trafilatura_vs_bs_scraping_latency() -> None:
 async def test_fast_path_no_compression_latency() -> None:
     """验证 Fast Path (<8K) 零计算延迟 < 10ms.
 
-    V4-P3 L1: 文档总字符 < 8000 时跳过压缩, 直接拼接原文返回.
+    L1: 文档总字符 < 8000 时跳过压缩, 直接拼接原文返回.
     此路径应极快 (<10ms), 仅包含字符串拼接操作.
     """
     settings = get_settings()

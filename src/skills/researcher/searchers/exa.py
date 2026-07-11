@@ -1,6 +1,5 @@
 """Exa 搜索 - 国外搜索引擎.
 
-P2-Future-04: 设计参考 retrievers/exa/exa.py.
 通过 Exa API 进行语义搜索, 适用于全球场景.
 需 EXA_API_KEY 环境变量 (Bearer token 鉴权).
 """
@@ -38,9 +37,9 @@ class ExaSearcher(BaseSearcher):
         self._api_key = self.settings.exa_api_key
         self._client = httpx.AsyncClient(
             timeout=10.0
-        )  # P1: 15s→10s (trace 4ad14970 优化, 消除 >10s 离群点)
+        )  # 超时 10s, 消除 >10s 离群点
         self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
-        self._max_retries = 2  # P0: 限制 2 次避免 API 成本激增
+        self._max_retries = 2  # 限制 2 次避免 API 成本激增
 
     async def search(
         self,

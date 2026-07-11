@@ -1,7 +1,6 @@
 """Arxiv 学术搜索 - 国外学术论文.
 
 用户需求 5: 国外资料搜索, 学术论文专用.
-设计参考: retrievers/arxiv/arxiv.py.
 无需 API Key.
 
 v1.1 改造: 移除 arxiv 库依赖, 改用 httpx 直接调用 arxiv API (与其他搜索器一致).
@@ -9,7 +8,7 @@ v1.1 改造: 移除 arxiv 库依赖, 改用 httpx 直接调用 arxiv API (与其
 - 返回 Atom XML 格式, 用 xml.etree.ElementTree 解析
 - 优势: 减少依赖, 与项目其他搜索器保持一致的异步 httpx 模式
 
-P2-9 修复: 添加 httpx 超时(30s) + 指数退避重试(默认 3 次).
+添加 httpx 超时(30s) + 指数退避重试(默认 3 次).
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ class ArxivSearcher(BaseSearcher):
     """Arxiv 学术论文搜索 (国外, 无需 Key).
 
     v1.1 改造: 移除 arxiv 库依赖, 改用 httpx + XML 解析.
-    P2-9: 添加超时(30s) + 指数退避重试(默认 3 次).
+    添加超时(30s) + 指数退避重试(默认 3 次).
     """
 
     name = "arxiv"

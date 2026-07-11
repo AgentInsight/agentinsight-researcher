@@ -1,9 +1,8 @@
-"""研究报告持久化存储 (P1-Future-09).
+"""研究报告持久化存储.
 
-设计参考: backend/server/report_store.py.
 AGENTS.md 第 6/7 章硬约束:
 - 业务表含 agent_id + user_id 双列复合索引
-- 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复, 避免每次请求新建短连接)
+- 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (避免每次请求新建短连接)
 - save_report 失败不阻断主流程 (调用方 try/except)
 """
 
@@ -29,10 +28,9 @@ _SELECT_COLUMNS = (
 
 
 class ReportStore:
-    """报告持久化存储 (P1-Future-09).
+    """报告持久化存储.
 
-    设计参考: backend/server/report_store.py.
-    复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复),
+    复用 db_initializer.get_pool() 的 asyncpg 连接池单例,
     每次 CRUD 操作通过 pool.acquire() 获取连接, 用完自动归还, 不再新建短连接.
     """
 
@@ -42,7 +40,7 @@ class ReportStore:
     def _dsn(self) -> str:
         """获取 asyncpg 原生 DSN (postgresql://).
 
-        .. deprecated:: P0-4
+        .. deprecated::
             改为复用 ``db_initializer.get_pool()`` 连接池单例, 不再新建短连接.
             此方法仅为兼容外部调用保留, 后续版本可能移除.
 
@@ -50,7 +48,7 @@ class ReportStore:
         asyncpg 需要 postgresql:// 前缀, 故替换.
         """
         warnings.warn(
-            "ReportStore._dsn() is deprecated since P0-4; use db_initializer.get_pool() instead.",
+            "ReportStore._dsn() is deprecated; use db_initializer.get_pool() instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -77,7 +75,7 @@ class ReportStore:
             report_md: Markdown 报告原文
             report_format: 输出格式 (markdown/html/pdf/docx/json)
             sources: 引用来源列表
-            agent_role: 角色 persona 简称 (可选, 设计参考: server 约定)
+            agent_role: 角色 persona 简称 (可选)
 
         Returns:
             report_id (UUID 字符串)

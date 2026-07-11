@@ -160,7 +160,7 @@ async def test_process_sub_query_searches_and_scrapes(
     5. context_manager.get_similar_content 被调用 (压缩 + 去重)
     6. 返回 {context, sources, urls} 结构
 
-    任务2 修复: 实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
+    实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
     """
     # 模拟搜索引擎
     mock_searcher = MagicMock()
@@ -227,7 +227,7 @@ async def test_process_sub_query_handles_search_failure(
     asyncio.gather(return_exceptions=True) 捕获异常, all_results 为空,
     _process_sub_query 提前返回 {context:"", sources:[], urls:set()}.
 
-    任务2 修复: 实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
+    实际代码用 get_searchers_async (非 get_searchers), 需 patch 正确的符号.
     """
     # 模拟搜索引擎抛异常
     mock_searcher = MagicMock()

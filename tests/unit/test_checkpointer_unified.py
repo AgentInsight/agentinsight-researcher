@@ -2,7 +2,7 @@
 
 验证 src/memory/checkpointer.py 中 test_memory_checkpointer.py 未覆盖的分支优化点:
 - 双重检查锁并发安全 (asyncio.gather 多个 get_checkpointer 并发只创建一个实例)
-- 连接池 min/max 从 settings 读取 (P2-6 配置化, min_size > max_size 时钳制)
+- 连接池 min/max 从 settings 读取 (配置化, min_size > max_size 时钳制)
 - setup() 失败路径 (区别于 pool.open 失败, 抛 RuntimeError 不降级 MemorySaver)
 - _create_postgres_checkpointer 直接调用 (内部实现契约)
 - 连接池 kwargs 透传 (autocommit/prepare_threshold/row_factory)
@@ -136,11 +136,11 @@ async def test_double_checked_locking_fast_path_no_lock_contention(
     assert first is second
 
 
-# ========== 连接池配置 (P2-6) ==========
+# ========== 连接池配置 ==========
 
 
 async def test_pool_min_max_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P2-6: 连接池 min/max 从 settings.postgres_pool_min_size/max_size 读取."""
+    """连接池 min/max 从 settings.postgres_pool_min_size/max_size 读取."""
     captured: dict[str, Any] = {}
 
     class _CapturingPool:
@@ -245,7 +245,7 @@ async def test_pool_kwargs_passthrough_autocommit_prepare_threshold(
 
 
 async def test_pool_open_false_then_explicit_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AsyncConnectionPool(open=False) 构造后显式调用 open() (P0-02 连接池复用模式)."""
+    """AsyncConnectionPool(open=False) 构造后显式调用 open() (连接池复用模式)."""
     open_calls: list[bool] = []
 
     class _DeferredOpenPool:

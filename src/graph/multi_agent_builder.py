@@ -1,21 +1,20 @@
-"""多 Agent 图构建器 (P0-02 + P0-Future-01/02 + P2-Future-01 + P1-03 + P0-Future-03).
+"""多 Agent 图构建器.
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数, 显式条件边.
-设计参考 multi_agents/main.py + orchestrator 线性+条件边模式.
 
-P0-Future-01/02 重构: 由 Supervisor 循环模式改为线性+条件边模式.
+采用线性+条件边模式 (而非 Supervisor 循环模式):
 原因: reviewer/fact_checker 的 accept|revise 条件边与 Supervisor "回到 supervisor" 循环冲突.
-ResearcherSupervisor 类保留 (供未来单 Agent 模式或子图复用), 但不再作为图节点.
+ResearcherSupervisor 类保留 (供未来单 Agent 模式或子图复用), 但不作为图节点.
 
-P2-Future-01 新增: Visualizer 节点插入 reviewer accept 与 publisher 之间,
+Visualizer 节点插入 reviewer accept 与 publisher 之间,
 对最终报告生成 Mermaid 图表 (基于已通过评审的报告, 避免修订后图表过时).
 
-P1-03 子图复用: reviewer↔reviser 评审-修订循环提取为可复用子图
+reviewer↔reviser 评审-修订循环提取为可复用子图
 (build_revision_subgraph), 主图通过子图节点 "revision" 调用.
 子图共享同一份 ResearcherState schema, 内部用 add_conditional_edges 控制循环,
 max_revisions 守卫封装在子图内. 子图不挂 checkpointer, 由父图统一持久化.
 
-P0-Future-03 人在回路: settings.human_review_enabled=True 时, agent_creator 与
+人在回路: settings.human_review_enabled=True 时, agent_creator 与
 researcher 之间插入 human 节点, 审核研究计划/大纲. human 节点通过 WebSocket 推送
 计划给前端, 阻塞等待用户反馈 (asyncio.Future, 带超时). revisions_count 达
 max_plan_revisions 强制 accept. False 时跳过 human 节点, 保持原 agent_creator → researcher.
@@ -29,7 +28,7 @@ max_plan_revisions 强制 accept. False 时跳过 human 节点, 保持原 agent_
                    reviser → reviewer
     revision 子图 → visualizer → publisher → END
 
-守卫 (V4-P0-01 重构, 提取到 edges.py 作为可复用守卫工厂):
+守卫 (提取到 edges.py 作为可复用守卫工厂):
 - fact_checker revise → writer 循环: create_fact_check_guard(graph_max_iterations)
   - iteration_count 由 fact_checker 节点累加, 达 graph_max_iterations 强制 accept
 - reviewer revise → reviser 循环: create_revision_guard(max_revisions)
@@ -59,7 +58,7 @@ logger = logging.getLogger(__name__)
 def create_human_review_guard(
     max_plan_revisions: int = 3,
 ) -> Callable[[ResearcherState], str]:
-    """创建人在回路审核守卫路由函数 (P0-Future-03).
+    """创建人在回路审核守卫路由函数.
 
     专用于 human → agent_creator 评审-修订循环的条件边路由.
     返回 "accept" (通过, 进入 researcher) 或 "revise" (回 agent_creator 重新生成角色),
@@ -97,7 +96,7 @@ def create_human_review_guard(
 
 
 def build_revision_subgraph(settings: Settings | None = None) -> Any:
-    """构建 reviewer↔reviser 评审-修订可复用子图 (P1-03 子图复用).
+    """构建 reviewer↔reviser 评审-修订可复用子图.
 
     子图结构:
         START → reviewer → (accept → END | revise → reviser)
@@ -160,8 +159,8 @@ async def build_multi_agent_graph(
         fact_checker → (accept → revision 子图 | revise → writer)
         revision 子图 → publisher → END
 
-    P1-03: reviewer↔reviser 循环封装为可复用子图, 主图以 "revision" 节点调用.
-    P0-Future-03: settings.human_review_enabled=True 时插入 human 节点审核研究计划,
+    reviewer↔reviser 循环封装为可复用子图, 主图以 "revision" 节点调用.
+    settings.human_review_enabled=True 时插入 human 节点审核研究计划,
         False 时跳过 (保持 agent_creator → researcher 直连).
     """
     settings = settings or get_settings()
@@ -183,7 +182,7 @@ async def build_multi_agent_graph(
     graph.add_node("fact_checker", partial(fact_checker_node, settings=settings))
     graph.add_node("publisher", partial(publisher_node, settings=settings))
 
-    # P0-Future-03: 人在回路节点 (human_review_enabled=True 时启用)
+    # 人在回路节点 (human_review_enabled=True 时启用)
     # HumanAgent 通过 WebSocket 推送计划给前端, 阻塞等待用户反馈 (asyncio.Future, 带超时)
     human_review_enabled = bool(settings.human_review_enabled)
     if human_review_enabled:
@@ -192,7 +191,7 @@ async def build_multi_agent_graph(
         human_agent = HumanAgent(settings)
         graph.add_node("human", partial(human_node, human_agent=human_agent))
 
-    # P1-03: reviewer↔reviser 循环提取为可复用子图, 作为 "revision" 节点嵌入主图
+    # reviewer↔reviser 循环提取为可复用子图, 作为 "revision" 节点嵌入主图
     # 子图共享 ResearcherState, max_revisions 守卫封装在子图内
     revision_subgraph = build_revision_subgraph(settings)
     graph.add_node("revision", revision_subgraph)
@@ -200,7 +199,7 @@ async def build_multi_agent_graph(
     # 入口
     graph.set_entry_point("agent_creator")
 
-    # agent_creator → human | researcher (P0-Future-03 人在回路分支)
+    # agent_creator → human | researcher (人在回路分支)
     if human_review_enabled:
         # agent_creator → human → (accept → researcher | revise → agent_creator)
         # 含 max_plan_revisions 守卫, 达上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
@@ -242,7 +241,7 @@ async def build_multi_agent_graph(
     graph.add_edge("publisher", END)
 
     # 编译
-    # 分支优化 P-Checkpointer: get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
+    # get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
     checkpointer = None
     if use_checkpointer:
         from src.memory.checkpointer import get_checkpointer

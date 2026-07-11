@@ -1,6 +1,5 @@
 """Tavily Extract 抓取器 - 商用内容提取 API.
 
-设计参考 scraper/tavily_extract/tavily_extract.py.
 用 Tavily Extract API 作为内容抓取器, 输出已为 LLM 优化的纯文本
 (raw_content), 适用于反爬严格或 JS 渲染重的页面.
 

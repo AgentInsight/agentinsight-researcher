@@ -6,10 +6,9 @@ AGENTS.md 第 7 章硬约束:
 - score_threshold 默认 0.3, 低于阈值丢弃 (仅 rerank 启用时生效, 向量检索阶段不套用)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API
 
-对标 AgentInsightService common/retriever.py 的 HybridRetriever 模式.
 所有检索必须包裹在 trace_retriever span 内.
 
-P0 BM25 断点修复 (方案 A 路径 1, 保守快速修复):
+BM25 断点修复 (方案 A 路径 1, 保守快速修复):
 - retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant scroll 拉取 namespace 内所有 content
 - 语料缓存到 Redis (key 含 namespace 版本号, TTL 24h 兜底)
 - 文档新增/删除通过 invalidate_bm25_cache 失效缓存 (embed_and_index 后由调用方触发)
@@ -50,16 +49,16 @@ class HybridRetriever:
     AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量; rerank 默认不启用,
     rerank_enabled=True 时经 bge-reranker-v2-m3.
 
-    P0 BM25 断点修复: retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant 拉取 namespace
+    BM25 断点修复: retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant 拉取 namespace
     content 填充语料, Redis 缓存 (含版本号); 文档新增/删除通过 invalidate_bm25_cache
     失效缓存. 详见 _ensure_bm25_corpus / invalidate_bm25_cache 文档.
     """
 
     RETRIEVER_CACHE_TTL: int = 3600  # 检索结果缓存 TTL (秒, 1 小时, 可配置)
-    # P0 BM25 断点修复: BM25 语料 Redis 缓存 TTL (秒, 24 小时兜底过期)
+    # BM25 断点修复: BM25 语料 Redis 缓存 TTL (秒, 24 小时兜底过期)
     # 主路径靠 invalidate_bm25_cache 主动失效 (版本号 +1), TTL 仅兜底防止长期僵尸缓存
     _BM25_CORPUS_CACHE_TTL: int = 86400
-    # P0 BM25 断点修复: BM25 语料 Redis 缓存默认版本号 (从未 INCR 过的 namespace)
+    # BM25 断点修复: BM25 语料 Redis 缓存默认版本号 (从未 INCR 过的 namespace)
     _BM25_CORPUS_DEFAULT_VERSION: int = 1
 
     settings: Settings
@@ -67,20 +66,20 @@ class HybridRetriever:
     _qdrant: QdrantManager
     _rerank_client: httpx.AsyncClient
     _redis: Any  # aioredis.Redis | None (Redis 客户端, 不可用时为 None)
-    _redis_initialized: bool  # P0-5: 惰性初始化标记, 避免每次检索都调用 get_redis_client
+    _redis_initialized: bool  # 惰性初始化标记, 避免每次检索都调用 get_redis_client
     _bm25_corpus: list[list[str]]  # BM25 语料 (jieba 分词后)
     _bm25_docs: list[dict[str, Any]]  # BM25 原始文档 (跨 namespace 合并)
     _bm25: BM25Okapi | None
-    # P0 BM25 断点修复: 按 namespace 维度的内存语料缓存 (避免每次检索都重拉 Qdrant)
+    # 按 namespace 维度的内存语料缓存 (避免每次检索都重拉 Qdrant)
     # key = namespace, value = (docs, version) 已加载版本号
     _bm25_per_namespace: dict[str, tuple[list[dict[str, Any]], int]]
-    # P0 BM25 断点修复: BM25 语料加载 singleflight 锁 (按 namespace 分锁, 防止并发重复拉取)
+    # BM25 语料加载 singleflight 锁 (按 namespace 分锁, 防止并发重复拉取)
     _bm25_load_locks: weakref.WeakValueDictionary[str, asyncio.Lock]
-    # P1-6: BM25 分词结果缓存 (key=content sha256, value=tokens list)
+    # BM25 分词结果缓存 (key=content sha256, value=tokens list)
     # 避免重复语料更新时对同一 content 重复 jieba.cut
     _token_cache: dict[str, list[str]]
-    # P1-4: singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复计算)
-    # P1-1 修复: 使用 WeakValueDictionary, 锁对象无引用时自动 GC, 避免无界增长
+    # singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复计算)
+    # 使用 WeakValueDictionary, 锁对象无引用时自动 GC, 避免无界增长
     _inflight_locks: weakref.WeakValueDictionary[str, asyncio.Lock]
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -97,7 +96,7 @@ class HybridRetriever:
             timeout=30.0,
             headers=headers,
         )
-        # P0-5: Redis 缓存客户端改用统一工厂 get_redis_client() (AGENTS.md 第 7 章:
+        # Redis 缓存客户端改用统一工厂 get_redis_client() (AGENTS.md 第 7 章:
         # 键格式 {agent_id}:{user_id}:{module}:{type}:{id}, 键前缀由本类管理).
         # __init__ 是同步方法, 故惰性到首次 _get_cache/_set_cache 时初始化 (避免阻塞).
         # Redis 不可用时降级为无缓存, 不阻断检索.
@@ -106,14 +105,14 @@ class HybridRetriever:
         self._bm25_corpus = []
         self._bm25_docs = []
         self._bm25 = None
-        # P0 BM25 断点修复: 按 namespace 维度的内存语料缓存初始化
+        # 按 namespace 维度的内存语料缓存初始化
         self._bm25_per_namespace = {}
-        # P0 BM25 断点修复: BM25 语料加载 singleflight 锁初始化 (WeakValueDictionary 自动 GC)
+        # BM25 语料加载 singleflight 锁初始化 (WeakValueDictionary 自动 GC)
         self._bm25_load_locks = weakref.WeakValueDictionary()
-        # P1-6: 分词缓存初始化
+        # 分词缓存初始化
         self._token_cache = {}
-        # P1-4: singleflight 锁字典初始化
-        # P1-1 修复: WeakValueDictionary 自动 GC 无引用的锁, 避免无界增长
+        # singleflight 锁字典初始化
+        # WeakValueDictionary 自动 GC 无引用的锁, 避免无界增长
         self._inflight_locks = weakref.WeakValueDictionary()
 
     async def build_data_namespaces(self, user_id: str | None = None) -> tuple[list[str], bool]:
@@ -126,7 +125,7 @@ class HybridRetriever:
         - 共享数据: {agent_id}-data (所有用户共享)
         - 用户私有数据: {agent_id}-data:{user_id} (仅该用户可检索)
 
-        P1-04: 同时检查共享 namespace 是否有数据, 避免无数据时调用 embeddings (减少 429).
+        同时检查共享 namespace 是否有数据, 避免无数据时调用 embeddings (减少 429).
 
         Args:
             user_id: 用户 ID, 为 None 或空字符串时只检索共享数据
@@ -138,7 +137,7 @@ class HybridRetriever:
         namespaces: list[str] = []
         has_private = False
 
-        # P1-04: 检查共享 namespace 是否有数据, 无数据时不加入检索列表
+        # 检查共享 namespace 是否有数据, 无数据时不加入检索列表
         # 避免无数据时调用 embeddings (减少 429)
         shared_namespace = self._qdrant.build_data_shared_namespace()
         shared_has_data = await self._qdrant.namespace_has_data(shared_namespace)
@@ -174,7 +173,7 @@ class HybridRetriever:
         # 新 API: 含私有数据存在性检查, 仅当用户有私有数据时才加入私有 namespace
         namespaces, has_private = await self.build_data_namespaces(user_id)
 
-        # P1-04: namespaces 为空时直接返回 (共享和私有 namespace 均无数据)
+        # namespaces 为空时直接返回 (共享和私有 namespace 均无数据)
         # 避免无数据时调用 embeddings (减少 429), 上游走搜索引擎路径
         if not namespaces:
             logger.info(
@@ -183,16 +182,16 @@ class HybridRetriever:
             )
             return []
 
-        # P2-04: 检查 Redis 缓存 (命中直接返回, 不走 BM25+Vector)
+        # 检查 Redis 缓存 (命中直接返回, 不走 BM25+Vector)
         cache_key = self._cache_key(query, user_id)
         cached = await self._get_cache(cache_key, user_id)
         if cached is not None:
             logger.info("RAG 缓存命中: query=%s", query[:50])
             return cached
 
-        # P1-4: singleflight 互斥锁 (按 query+user_id hash 分锁, 防止缓存击穿)
+        # singleflight 互斥锁 (按 query+user_id hash 分锁, 防止缓存击穿)
         # 同一 query 并发请求只允许一个执行 BM25+Vector+Rerank, 其他等待结果
-        # P1-1 修复: WeakValueDictionary 锁获取 (无引用时自动 GC)
+        # WeakValueDictionary 锁获取 (无引用时自动 GC)
         inflight_key = cache_key  # 复用 cache_key (已含 agent_id+user_id+query_hash)
         lock = self._inflight_locks.get(inflight_key)
         if lock is None:
@@ -212,7 +211,7 @@ class HybridRetriever:
                 user_id=user_id,
                 session_id=session_id,
             ) as span:
-                # P0 BM25 断点修复: 检索前确保 BM25 语料已加载 (从 Qdrant scroll + Redis 缓存).
+                # BM25 断点修复: 检索前确保 BM25 语料已加载 (从 Qdrant scroll + Redis 缓存).
                 # 缓存命中时为快速路径 (Redis GET 版本号 + Redis GET 语料); 缓存未命中时
                 # 从 Qdrant scroll 拉取 namespace 内所有 content. 失败不阻断 (BM25 返回 []).
                 bm25_load_error: Exception | None = None
@@ -252,7 +251,7 @@ class HybridRetriever:
                     bm25_weight=self.settings.bm25_weight,
                 )
 
-                # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 设计参考 context 去重)
+                # 按内容 hash 去重 (相同内容不同来源的文档)
                 fused = self._deduplicate_by_content_hash(fused)
 
                 # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
@@ -275,7 +274,7 @@ class HybridRetriever:
                         "bm25_load_error": str(bm25_load_error) if bm25_load_error else None,
                     },
                 )
-                # P2-04: 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
+                # 写入 Redis 缓存 (TTL=RETRIEVER_CACHE_TTL 秒, Redis 不可用时静默跳过)
                 await self._set_cache(cache_key, reranked, user_id)
                 return reranked
 
@@ -303,12 +302,12 @@ class HybridRetriever:
         """BM25 检索 (基于内存语料, jieba 中文分词).
 
         AGENTS.md 第 7 章: rank-bm25 + jieba, 中文分词 + IDF.
-        P1-6: query 分词结果缓存 (重复 query 命中缓存, 避免重复 jieba.cut).
+        query 分词结果缓存 (重复 query 命中缓存, 避免重复 jieba.cut).
         """
         if not self._bm25 or not self._bm25_docs:
             return []
 
-        # P1-6: query 分词缓存 (query 通常重复率高)
+        # query 分词缓存 (query 通常重复率高)
         query_tokens = self._get_tokens(query)
         scores = self._bm25.get_scores(query_tokens)
 
@@ -369,9 +368,9 @@ class HybridRetriever:
         return [{**docs[content], "score": score} for content, score in ranked]
 
     def _deduplicate_by_content_hash(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """按内容 hash 去重 (设计参考 context 去重).
+        """按内容 hash 去重.
 
-        P1-02: RRF 融合后调用, 去除相同内容不同来源的重复文档.
+        RRF 融合后调用, 去除相同内容不同来源的重复文档.
         """
         seen: set[str] = set()
         deduped: list[dict[str, Any]] = []
@@ -397,7 +396,7 @@ class HybridRetriever:
         return f"{agent_id}:{uid}:cache_access_times"
 
     async def _ensure_redis(self) -> Any:
-        """P0-5: 惰性初始化 Redis 客户端 (复用 common.redis_client 全局单例).
+        """惰性初始化 Redis 客户端 (复用 common.redis_client 全局单例).
 
         __init__ 是同步方法, 无法 await, 故推迟到首次 _get_cache/_set_cache 时初始化.
         Redis 不可用时返回 None (降级无缓存, 不阻断检索).
@@ -417,7 +416,7 @@ class HybridRetriever:
         key: str,
         user_id: str | None = None,
     ) -> list[dict[str, Any]] | None:
-        """读取 Redis 缓存 (TTL + LRU 双策略, P1-03).
+        """读取 Redis 缓存 (TTL + LRU 双策略).
 
         命中时更新访问时间 (LRU 排序). Redis 不可用时降级返回 None, 不阻断检索.
         """
@@ -429,7 +428,7 @@ class HybridRetriever:
             data = await self._redis.get(key)
             if data is None:
                 return None
-            # P1-03: 命中时更新 LRU 访问时间 (ZADD score=当前时间戳)
+            # 命中时更新 LRU 访问时间 (ZADD score=当前时间戳)
             if self.settings.redis_cache_lru_enabled:
                 lru_key = self._lru_key(user_id)
                 await self._redis.zadd(lru_key, {key: time.time()})
@@ -444,7 +443,7 @@ class HybridRetriever:
         results: list[dict[str, Any]],
         user_id: str | None = None,
     ) -> None:
-        """写入 Redis 缓存 (TTL + LRU 双策略, P1-03).
+        """写入 Redis 缓存 (TTL + LRU 双策略).
 
         写入后检查总数, 超过 max_size 时淘汰最久未访问.
         Redis 不可用时静默跳过.
@@ -459,7 +458,7 @@ class HybridRetriever:
                 orjson.dumps(results, default=str),
                 ex=self.RETRIEVER_CACHE_TTL,
             )
-            # P1-03: 写入 LRU 访问时间 + 检查总数淘汰最久未访问
+            # 写入 LRU 访问时间 + 检查总数淘汰最久未访问
             if self.settings.redis_cache_lru_enabled:
                 lru_key = self._lru_key(user_id)
                 await self._redis.zadd(lru_key, {key: time.time()})
@@ -533,7 +532,7 @@ class HybridRetriever:
             return docs[:top_k]
 
     def _get_tokens(self, text: str) -> list[str]:
-        """P1-6: 带缓存的 jieba 分词 (key=text sha256).
+        """带缓存的 jieba 分词 (key=text sha256).
 
         重复 query/重复 content 命中缓存, 避免重复 jieba.cut.
         缓存上限 2000 条 (LRU 淘汰最旧).
@@ -553,11 +552,11 @@ class HybridRetriever:
         return tokens
 
     def update_bm25_corpus(self, docs: list[dict[str, Any]]) -> None:
-        """更新 BM25 内存语料 (3.5.3 死代码修复: 由 _ensure_bm25_corpus 自动调用).
+        """更新 BM25 内存语料 (由 _ensure_bm25_corpus 自动调用).
 
-        P1-6: 复用 _token_cache 避免对同一 content 重复 jieba.cut.
+        复用 _token_cache 避免对同一 content 重复 jieba.cut.
 
-        P0 BM25 断点修复: 本方法现由 _ensure_bm25_corpus 在 retrieve 入口自动调用,
+        本方法现由 _ensure_bm25_corpus 在 retrieve 入口自动调用,
         不再依赖业务代码显式触发. docs 来源: Qdrant scroll namespace 内所有 content
         (经 Redis 缓存). 调用方仍可直接调用以覆盖语料 (如测试场景).
         """
@@ -565,7 +564,7 @@ class HybridRetriever:
         self._bm25_corpus = [self._get_tokens(d["content"]) for d in docs]
         self._bm25 = BM25Okapi(self._bm25_corpus) if self._bm25_corpus else None
 
-    # ========== P0 BM25 断点修复: Qdrant 持久化稀疏检索 (方案 A 路径 1) ==========
+    # ========== BM25 断点修复: Qdrant 持久化稀疏检索 (方案 A 路径 1) ==========
     # 设计要点:
     # - BM25 语料来源: Qdrant scroll 拉取 namespace 内所有 content (替代旧版无调用方路径)
     # - Redis 缓存: 按 namespace + 版本号键, TTL 24h 兜底; 主路径靠 invalidate 主动失效
@@ -788,7 +787,7 @@ class HybridRetriever:
         - Redis 不可用时仅清内存缓存 (下次 retrieve 仍会从 Qdrant 拉, 行为正确)
 
         典型调用场景:
-        - embed_and_index (新增文档) 后: 任务5 在 embeddings.py 调用
+        - embed_and_index (新增文档) 后: 在 embeddings.py 调用
             await get_retriever().invalidate_bm25_cache(namespace, user_id)
         - delete_by_namespace (删除文档) 后: 调用方触发
             await get_retriever().invalidate_bm25_cache(namespace, user_id)
@@ -830,7 +829,7 @@ class HybridRetriever:
     async def close(self) -> None:
         """关闭资源.
 
-        P0-5: 不再关闭 Redis 客户端; Redis 改为全局单例 (common.redis_client),
+        不再关闭 Redis 客户端; Redis 改为全局单例 (common.redis_client),
         由 server.py lifespan 统一调用 close_redis_client() 关闭.
         """
         await self._embeddings.close()

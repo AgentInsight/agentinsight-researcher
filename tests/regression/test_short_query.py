@@ -4,7 +4,7 @@ AGENTS.md 第 13 章硬约束:
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 回归测试为合并 main 前门禁, 不推荐跳过
 
-P0-Future-05/06 短查询保护:
+短查询保护:
 - 短查询 (如"你好") 不走任何 graph, 直接返回 settings.short_query_reply
 - 响应快 (不调用 LLM/检索), 验证保护机制生效
 
@@ -41,7 +41,7 @@ def _unique_session_id() -> str:
 def test_short_query_returns_configured_reply() -> None:
     """验证短查询保护: 发送短查询 (如"你好") → 返回 settings.short_query_reply.
 
-    P0-Future-06: 短查询直接返回回复语, 不走任何 graph.
+    短查询直接返回回复语, 不走任何 graph.
     响应应快速返回 (不调用 LLM/检索).
     """
     sid = _unique_session_id()
@@ -73,7 +73,7 @@ def test_short_query_returns_configured_reply() -> None:
 def test_short_query_stream() -> None:
     """验证短查询流式响应: stream=true → SSE 流 + 返回 short_query_reply.
 
-    P0-Future-06: 短查询流式也应返回 short_query_reply.
+    短查询流式也应返回 short_query_reply.
     """
     sid = _unique_session_id()
     content_parts: list[str] = []
@@ -116,7 +116,7 @@ def test_short_query_stream() -> None:
 def test_short_query_fast_response() -> None:
     """验证短查询响应快速: 不走 graph, 应在 10s 内返回.
 
-    P0-Future-06: 短查询保护不走任何 graph, 直接返回 reply.
+    短查询保护不走任何 graph, 直接返回 reply.
     """
     import time
 
@@ -150,7 +150,7 @@ ASYNC_TEST_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.
 async def test_short_query_pure_digits_routed_async() -> None:
     """纯数字短查询 "123" → 200 (规则层 pure_digits 命中, 快速返回).
 
-    P0-Future-06: 纯数字查询命中 SHORT_QUERY 规则, 不走任何 graph.
+    纯数字查询命中 SHORT_QUERY 规则, 不走任何 graph.
     覆盖短查询路由 (pure_digits 规则).
     """
     sid = _unique_session_id()
@@ -172,7 +172,7 @@ async def test_short_query_pure_digits_routed_async() -> None:
 async def test_off_topic_chitchat_routed_async() -> None:
     """闲聊/离题查询 "讲个笑话" → 200 (OFF_TOPIC 路由, 快速返回).
 
-    P1-Future-07: 闲聊正则匹配 OFF_TOPIC, 不走任何 graph, 直接返回回复语.
+    闲聊正则匹配 OFF_TOPIC, 不走任何 graph, 直接返回回复语.
     覆盖闲聊/离题保护.
     """
     sid = _unique_session_id()

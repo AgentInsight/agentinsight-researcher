@@ -1,4 +1,4 @@
-"""单元测试: 抓取器增强 (P2-05) - 池化 + 域名限流 + 图片评分.
+"""单元测试: 抓取器增强 - 池化 + 域名限流 + 图片评分.
 
 验证 3 项抓取器增强实现:
 1. 图片评分 (scrapers/utils.py): parse_dimension / _score_image /
@@ -60,7 +60,7 @@ class TestParseDimension:
 
 
 class TestScoreImage:
-    """_score_image 单图评分 (设计参考: 评分规则)."""
+    """_score_image 单图评分 (评分规则)."""
 
     def _make_img(self, **attrs: object) -> MagicMock:
         img = MagicMock()
@@ -221,7 +221,7 @@ class TestGetRelevantImagesFromHtml:
 
 
 class TestDomainRateLimiter:
-    """DomainRateLimiter 域名级限流 (设计参考: NoDriverScraper)."""
+    """DomainRateLimiter 域名级限流."""
 
     def test_get_domain_basic(self) -> None:
         from src.skills.researcher.scrapers import DomainRateLimiter
@@ -351,7 +351,7 @@ def _make_mock_pooled_browser(processing_count: int = 0) -> MagicMock:
 
 
 class TestPlaywrightPoolLoadBalancing:
-    """_PlaywrightPool 池化负载均衡 (设计参考: NoDriverScraper)."""
+    """_PlaywrightPool 池化负载均衡."""
 
     @pytest.mark.asyncio
     async def test_first_browser_created(self, reset_pool: None) -> None:

@@ -1,6 +1,5 @@
-"""DeepResearch 递归深度研究器 (P0-01).
+"""DeepResearch 递归深度研究器.
 
-设计参考: deep_research.py.
 AGENTS.md 第 5 章: 节点为纯函数, 单一职责.
 通过 breadth×depth 递归树探索, 每层聚合上下文.
 """
@@ -32,7 +31,6 @@ logger = logging.getLogger(__name__)
 class DeepResearcher:
     """递归深度研究器 (breadth×depth 树探索).
 
-    设计参考: deep_research.
     每层: 1) 生成 breadth 个子查询 2) 并行检索 3) 聚合上下文 4) 递归下一层.
     """
 
@@ -40,7 +38,7 @@ class DeepResearcher:
     _llm: LLMClient
     _context_manager: ContextManager
     _visited_urls: set[str]
-    # P0-7: MCPCoordinator 惰性初始化
+    # MCPCoordinator 惰性初始化
     _mcp: MCPCoordinator | None
 
     def __init__(
@@ -53,11 +51,11 @@ class DeepResearcher:
         self._llm = llm or get_llm_client()
         self._context_manager = context_manager or ContextManager(self.settings)
         self._visited_urls = set()
-        # P0-7: MCPCoordinator 惰性初始化 (避免启动期构造开销)
+        # MCPCoordinator 惰性初始化 (避免启动期构造开销)
         self._mcp = None
 
     def _get_mcp(self) -> MCPCoordinator:
-        """惰性初始化 MCPCoordinator (P0-7).
+        """惰性初始化 MCPCoordinator.
 
         复用 self._llm 单例, 避免重复构造 LLMClient 导致 step_costs 累计丢失.
         """
@@ -89,7 +87,7 @@ class DeepResearcher:
         Returns:
             {"query", "context", "sources", "children": [...]}
         """
-        # V4-P2-02: 自适应深度仅在顶层调用且未显式传参时启用, 避免递归层重复评估
+        # 自适应深度仅在顶层调用且未显式传参时启用, 避免递归层重复评估
         if (
             _current_depth == 0
             and self.settings.deep_research_adaptive
@@ -182,7 +180,7 @@ class DeepResearcher:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, int]:
-        """评估查询复杂度, 返回自适应参数 (V4-P2-02).
+        """评估查询复杂度, 返回自适应参数.
 
         用 LLMTier.FAST 评估查询复杂度 (1-5), 映射到 breadth/depth/concurrency:
             1-2 (简单): breadth=2, depth=1, concurrency=2
@@ -354,7 +352,7 @@ class DeepResearcher:
                 if isinstance(r, BaseException):
                     logger.warning(f"{searcher.name} 调用失败: {r}")
                     continue
-                # P1-Future-02: 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
+                # 域名过滤兜底 (针对不支持 query_domains 的引擎, 如 arxiv)
                 if query_domains:
                     r = BaseSearcher._filter_by_domains(r, query_domains)
                 for item in r:
@@ -370,8 +368,8 @@ class DeepResearcher:
                 rate_limit_delay=self.settings.scraper_rate_limit_delay,
             )
 
-            # P0-7 修复: 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
-            # P1-5: 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 research_conductor 的重复 28 行块
+            # 接入 MCP 工具调用 (仅当 mcp_strategy != "disabled" 时)
+            # 抽取到 conduct_mcp_if_enabled 公共方法, 消除与 research_conductor 的重复 28 行块
             # 位置: scrape_urls 之后, context_manager.get_similar_content 之前
             context_parts: list[str] = []
             mcp_contexts = await conduct_mcp_if_enabled(

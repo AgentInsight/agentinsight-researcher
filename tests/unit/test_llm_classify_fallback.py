@@ -1,4 +1,4 @@
-"""单元测试: LLM 分类失败兜底字典化 (P1-8 分支优化).
+"""单元测试: LLM 分类失败兜底字典化 (分支优化).
 
 验证 src/skills/researcher/query_classifier.py:
 - _FALLBACK_INTENT_MAP: 字典查表取代 if-else (仅 'research' 显式映射)
@@ -49,7 +49,7 @@ def classifier() -> QueryIntentClassifier:
 
 
 def test_fallback_intent_map_contains_only_research() -> None:
-    """P1-8: _FALLBACK_INTENT_MAP 仅含 'research' 键 (其他值兜底 OFF_TOPIC)."""
+    """_FALLBACK_INTENT_MAP 仅含 'research' 键 (其他值兜底 OFF_TOPIC)."""
     assert "research" in _FALLBACK_INTENT_MAP
     assert _FALLBACK_INTENT_MAP["research"] == QueryIntent.RESEARCH
 
@@ -340,7 +340,7 @@ async def test_llm_classify_has_report_false_includes_hint(
 
 
 def test_fallback_uses_dict_lookup_not_if_else() -> None:
-    """P1-8: _fallback_intent 应使用字典查表 (无 if-else 分支).
+    """_fallback_intent 应使用字典查表 (无 if-else 分支).
 
     AGENTS.md 第 3 章: 共享逻辑下沉, 避免重复 if-else.
     验证源码不含 if-else 链 (允许 .get() 默认值).

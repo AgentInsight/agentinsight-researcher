@@ -111,7 +111,7 @@ def test_parse_image_response_returns_dict_with_required_keys() -> None:
     assert set(result.keys()) == expected_keys
 
 
-# ========== resolve_api_key 按路由前缀 (P1-3: 抽取到 common/llm_key_resolver) ==========
+# ========== resolve_api_key 按路由前缀 (抽取到 common/llm_key_resolver) ==========
 
 
 @pytest.fixture()

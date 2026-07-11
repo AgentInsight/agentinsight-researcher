@@ -1,6 +1,5 @@
 """AG2 角色定义: system_prompt + 消息传递协议.
 
-设计参考: multi_agents_ag2/agents/ 下的角色定义.
 4 个角色对应 multi_agents 流程: Researcher → Writer → Reviewer → Publisher.
 
 复用现有 Skill 组件 (本模块仅定义 prompt 与协议, 不创建 ConversableAgent):
@@ -57,7 +56,7 @@ PUBLISHER_SYSTEM_PROMPT = """你是一名报告发布专家 (Publisher), 在多 
 
 # ========== 角色顺序与 prompt 映射 ==========
 
-# AG2 GroupChat 中 Agent 的发言顺序 (设计参考: multi_agents 流程)
+# AG2 GroupChat 中 Agent 的发言顺序 (multi_agents 流程)
 AGENTS_ORDER: list[str] = ["researcher", "writer", "reviewer", "publisher"]
 
 # GroupChat 最大轮次 (初始消息 + 4 个 Agent 回复 + 余量)

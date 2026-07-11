@@ -1,6 +1,5 @@
-"""AG2 (autogen) 框架多 Agent 实现 (P2-Future-06).
+"""AG2 (autogen) 框架多 Agent 实现.
 
-设计参考: multi_agents_ag2/(5 文件 385 行).
 作为 LangGraph 的可选替代方案, 默认关闭 (settings.ag2_enabled=False).
 
 设计要点:

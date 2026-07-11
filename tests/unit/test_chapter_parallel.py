@@ -1,9 +1,9 @@
-"""单元测试: detailed_report 章节并行 (P1-2/V4-P0-02).
+"""单元测试: detailed_report 章节并行.
 
 验证 src/skills/researcher/report_generator.py 的 _generate_detailed_report 并行优化:
-- 子主题生成 (_generate_subtopics) 与引言 (_write_introduction) 并行 (P1-2)
-- 多子主题章节并行处理 (V4-P0-02 asyncio.gather, _research_and_write_subtopic)
-- 单子主题 LLM 失败重试 + 占位文本 (V4-P1-03 不阻断整体)
+- 子主题生成 (_generate_subtopics) 与引言 (_write_introduction) 并行
+- 多子主题章节并行处理 (asyncio.gather, _research_and_write_subtopic)
+- 单子主题 LLM 失败重试 + 占位文本 (不阻断整体)
 - 章节并行后报告拼接顺序正确 (TOC + 引言 + 正文 + 结论)
 
 AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM 全部 mock).
@@ -59,7 +59,7 @@ def _mock_heavy_constructors() -> Any:
         yield
 
 
-# ========== 子主题生成与引言并行 (P1-2) ==========
+# ========== 子主题生成与引言并行 ==========
 
 
 @pytest.mark.asyncio
@@ -69,7 +69,7 @@ async def test_subtopics_and_introduction_parallel(
 ) -> None:
     """_generate_subtopics 与 _write_introduction 应并行 (asyncio.gather).
 
-    P1-2: 两者均只依赖 query/contexts/references/role_persona, 无数据依赖.
+    两者均只依赖 query/contexts/references/role_persona, 无数据依赖.
     """
     subtopics_call_time: list[float] = []
     intro_call_time: list[float] = []
@@ -115,7 +115,7 @@ async def test_subtopics_and_introduction_parallel(
     assert abs(subtopics_call_time[0] - intro_call_time[0]) < 0.05
 
 
-# ========== 多子主题章节并行 (V4-P0-02) ==========
+# ========== 多子主题章节并行 ==========
 
 
 @pytest.mark.asyncio
@@ -162,7 +162,7 @@ async def test_multiple_subtopics_sections_parallel(
         assert max_diff < 0.05, f"章节启动时间差过大: {max_diff:.3f}s (非并行)"
 
 
-# ========== 单子主题失败不阻断整体 (V4-P1-03) ==========
+# ========== 单子主题失败不阻断整体 ==========
 
 
 @pytest.mark.asyncio
@@ -266,7 +266,7 @@ async def test_detailed_report_empty_contexts_returns_fallback(
     generator: ReportGenerator,
     mock_llm: MagicMock,
 ) -> None:
-    """空上下文 → 返回降级报告 (防幻觉守卫, 设计参考: writer.py:82-88)."""
+    """空上下文 → 返回降级报告 (防幻觉守卫)."""
     result = await generator._generate_detailed_report(
         query="q",
         contexts=[],  # 空上下文

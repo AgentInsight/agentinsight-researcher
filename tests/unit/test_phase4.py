@@ -3,7 +3,7 @@
 AGENTS.md 第 13/14 章硬约束:
 - 单元测试在构建期执行, 不得依赖外部服务 (Postgres/Qdrant/Redis/LLM)
 - 文件上传按 agent_id + user_id 隔离 (AGENTS.md 第 7 章)
-- 动态角色生成 (设计参考 choose_agent, AgentCreator LLM 动态生成行业 persona)
+- 动态角色生成 (AgentCreator LLM 动态生成行业 persona)
 - 前端测试页面单文件托管 (AGENTS.md 第 14 章)
 
 行业适配采用 4 层机制:
@@ -90,23 +90,23 @@ class TestFileUpload:
         assert response.json()["extension"] == "md"
 
 
-# ========== 动态角色配置 (设计参考 AGENT_ROLE, AGENTS.md 第 5/7 章) ==========
+# ========== 动态角色配置 (AGENT_ROLE, AGENTS.md 第 5/7 章) ==========
 
 
 class TestAgentRoleConfig:
-    """AgentCreator 动态角色配置测试 (设计参考 AGENT_ROLE).
+    """AgentCreator 动态角色配置测试 (AGENT_ROLE).
 
     行业适配采用 4 层机制, 不再使用 IndustryClassifier.
     仅测试配置项与默认值, 不测试 LLM 调用 (依赖外部服务).
     """
 
     def test_agent_role_default_is_none(self) -> None:
-        """测试 settings.agent_role 默认为 None (设计参考 默认无 AGENT_ROLE)."""
+        """测试 settings.agent_role 默认为 None (默认无 AGENT_ROLE)."""
         settings = Settings(_env_file=None)
         assert settings.agent_role is None
 
     def test_agent_role_can_be_injected(self) -> None:
-        """测试 settings.agent_role 可注入行业 persona 字符串 (设计参考 AGENT_ROLE)."""
+        """测试 settings.agent_role 可注入行业 persona 字符串 (AGENT_ROLE)."""
         settings = Settings(
             _env_file=None, agent_role="你是一位资深金融分析师, 擅长财务建模与投资研究."
         )

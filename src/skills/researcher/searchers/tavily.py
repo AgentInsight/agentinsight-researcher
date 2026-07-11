@@ -1,7 +1,6 @@
 """Tavily 搜索 - 国外搜索引擎.
 
 用户需求 5: 国外资料搜索.
-设计参考: retrievers/tavily/tavily_search.py.
 需 TAVILY_API_KEY 环境变量.
 """
 

@@ -1,6 +1,5 @@
 """Custom 搜索引擎 - 企业私有端点 (无 API Key).
 
-设计参考 retrievers/custom/custom.py.
 通过 `custom_retriever_endpoint` + `custom_retriever_arg` 配置接入企业
 自建检索服务, 实现一次接入复用 20+ retriever 之外的私有数据源.
 

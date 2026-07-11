@@ -118,7 +118,7 @@ tests/
 │   │ # ── 研究流程 / 性能优化 ──
 │   ├── test_research_conductor.py          # ResearchConductor 主流程
 │   ├── test_deep_research.py               # 深度研究
-│   ├── test_v4p3_integration.py            # 集成: V4-P3 三层路由 (mock 化)
+│   ├── test_v4p3_integration.py            # 集成: 三层路由 (mock 化)
 │   ├── test_v2_alignment.py                # V2 对齐优化 7 项
 │   ├── test_scraper_enhancements.py        # 抓取器增强: 池化/域名限流/图片评分
 │   ├── test_phase4.py                      # Phase 4 (文件上传+动态角色+静态页)
@@ -179,7 +179,7 @@ tests/
 │   ├── test_concurrent_load.py             # 并发负载
 │   ├── test_performance_baseline.py        # 性能基线
 │   ├── test_performance_rag.py             # RAG 性能
-│   ├── test_v4p3_performance.py            # V4-P3 三层路由性能
+│   ├── test_v4p3_performance.py            # 三层路由性能
 │   ├── test_context_compression_perf.py    # 上下文压缩性能
 │   └── __init__.py
 ├── manual/         # 手动调试脚本 (非自动化测试, pytest --ignore 跳过, .gitignore 不入仓)
@@ -218,7 +218,7 @@ pytest tests/performance/ -v -m performance
 ### 3.2 按目标执行
 
 ```bash
-# V4-P3 三层路由集成测试 (mock 化, 不依赖容器栈)
+# 三层路由集成测试 (mock 化, 不依赖容器栈)
 pytest tests/unit/test_v4p3_integration.py -v --no-header
 
 # MCP 协调器端到端 (mock MCP Server, 不依赖容器栈)
@@ -254,9 +254,9 @@ docker compose -p agentinsight down -v
 > `tests/conftest.py` 在容器栈未运行时自动跳过 `functional`/`regression`/`api`/`e2e`/
 > `performance`/`exploratory` 标记的测试, 避免大量连接失败噪声.
 
-## 4. V4-P3 三层方案测试覆盖矩阵
+## 4. 三层方案测试覆盖矩阵
 
-V4-P3 三层路由 (`src/skills/researcher/context_manager.py:get_similar_content`) 测试
+三层路由 (`src/skills/researcher/context_manager.py:get_similar_content`) 测试
 集中在 `tests/unit/test_v4p3_integration.py`, 全部 mock 化, 构建期可执行.
 
 ### 4.1 三层路由边界 (TestV4P3LayerRouting)
@@ -400,7 +400,7 @@ docker compose -p agentinsight down -v
 ### 8.1 test_metaso_searcher.py (秘塔搜索 METASO 修复验证)
 
 **文件**: `tests/unit/test_metaso_searcher.py`
-**验证目标**: `src/skills/researcher/searchers/metaso.py` 的任务3 修复
+**验证目标**: `src/skills/researcher/searchers/metaso.py` 的 payload/headers 修复
 **mark**: `unit` (构建期执行, mock httpx, 不依赖真实 API)
 
 修复背景: 之前秘塔 API 调用错误使用 `{"num": int}` 且缺 `scope` 与 `Accept` 头,
@@ -435,7 +435,7 @@ docker compose -p agentinsight down -v
 | packages/debs 字体包 | 3 | 含 `fonts-noto-cjk*.deb` / `fonts-wqy-*.deb` / 至少 2 个 wqy (zenhei+microhei) |
 | compose-qa 健康检查 | 5 | embeddings/rerank 用 `CMD-SHELL` (非 CMD) + 含 curl + 非 CMD 形式 |
 
-**任务2 修复背景**: TEI 镜像 `ENTRYPOINT=[text-embeddings-router]`, `CMD` 形式健康检查
+**背景**: TEI 镜像 `ENTRYPOINT=[text-embeddings-router]`, `CMD` 形式健康检查
 会被拦截, 必须改用 `CMD-SHELL` + curl 绝对路径 (`/usr/bin/curl`) 绕过.
 
 ## 9. tests/manual/ 目录

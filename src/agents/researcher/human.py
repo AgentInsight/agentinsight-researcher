@@ -1,6 +1,5 @@
-"""HumanAgent 人在回路节点 (P0-Future-03).
+"""HumanAgent 人在回路节点.
 
-设计参考: multi_agents/agents/human.py.
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点为纯函数.
 AGENTS.md 第 10 章: 用 trace_chain 包裹 (异步上下文管理器).
 

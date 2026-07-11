@@ -1,9 +1,4 @@
-"""递归文本分块工具 (设计参考: RecursiveCharacterTextSplitter).
-
-历史背景: 本模块原为 `EmbeddingsFilter` 类 (V2-P1), 通过远程 TEI bge-base-zh-v1.5
-做相似度过滤. V4-P3 改用 BM25Filter (本地 jieba+BM25Okapi) 替代主路由,
-`EmbeddingsFilter` 类已删除 (上下文压缩改用 FastEmbed bge-small-zh-v1.5, 见
-`WrittenContentCompressor` 与 `_embeddings_rerank`).
+"""递归文本分块工具.
 
 保留的 `_recursive_split` / `_merge_parts` / `_char_level_split` 为纯文本切分工具,
 被 `BM25Filter` 与 `WrittenContentCompressor` 复用, 保证 chunk 级一致性.
@@ -20,7 +15,7 @@ from typing import cast
 logger = logging.getLogger(__name__)
 
 
-# 递归分隔符 (设计参考: RecursiveCharacterTextSplitter 默认 separators)
+# 递归分隔符 (默认 separators)
 # 优先按段落分, 段落过大时按行分, 再按空格分, 最后按字符分.
 _RECURSIVE_SEPARATORS: list[str] = ["\n\n", "\n", " ", ""]
 
@@ -32,7 +27,7 @@ def recursive_split(
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[str]:
-    """递归切分文本 (对标 langchain RecursiveCharacterTextSplitter._split_text).
+    """递归切分文本 (RecursiveCharacterTextSplitter._split_text).
 
     算法:
     1. 用第一个 separator 切分文本
@@ -88,7 +83,7 @@ def _merge_parts(
         chunk_overlap: 块重叠
         next_separators: 下一级 separators (递归用)
 
-    V2-P1 修复: overlap 仅保留上一片段尾部 chunk_overlap 字符 (而非整个 part),
+    overlap 仅保留上一片段尾部 chunk_overlap 字符 (而非整个 part),
     避免累积后超长违反 chunk_size 上限. 同时增加超长 part 无下一级 separator 时
     的字符级兜底.
     """

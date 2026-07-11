@@ -116,7 +116,7 @@ class FastEmbedClient:
                         self.settings.fastembed_model_name,
                     )
 
-                # P0: ONNX Runtime 并行执行 (trace 4ad14970 优化, 推理加速 2-4x)
+                # ONNX Runtime 并行执行 (推理加速 2-4x)
                 # intra_op_num_threads: 单操作内部并行 (矩阵乘法), 通过 fastembed threads 参数
                 # inter_op_num_threads: 操作间并行, 通过 OMP_NUM_THREADS 环境变量
                 cpu_count = os.cpu_count() or 4
@@ -148,10 +148,10 @@ class FastEmbedClient:
                 self._load_failed = True
                 raise
 
-    # 任务7: 分批并行阈值. 实测 200 chunks 时 batch_size=32 收益 32.1% (>= 30% 阈值).
+    # 分批并行阈值. 实测 200 chunks 时 batch_size=32 收益 32.1% (>= 30% 阈值).
     # 小批量 (< 此阈值) 用单次 to_thread, 避免线程池调度开销.
     _PARALLEL_BATCH_THRESHOLD: int = 32
-    _PARALLEL_BATCH_SIZE: int = 64  # P2: 32→64 (trace 4ad14970 优化, 提升 ONNX 吞吐 ~20%)
+    _PARALLEL_BATCH_SIZE: int = 64  # 提升 ONNX 吞吐 ~20%
 
     async def embed_texts(
         self,
@@ -162,9 +162,9 @@ class FastEmbedClient:
     ) -> list[list[float]]:
         """批量嵌入文本 (512维).
 
-        任务7 优化: sync 调用卸载到线程池 + 大批量分批并行.
+        sync 调用卸载到线程池 + 大批量分批并行.
         - 实测: sync 直接调用 100% 阻塞事件循环 (影响 SSE 流式响应)
-        - 实测: 200 chunks 分批并行 (b=32) 耗时收益 +32.1%, 事件循环阻塞率 100%→35.7%
+        - 实测: 200 chunks 分批并行 (b=32) 耗时收益 +32.1%, 事件循环阻塞率降至 35.7%
         - 决策依据: temp/fastembed_parallel_test_results.json
         """
         if not texts:
@@ -215,7 +215,7 @@ class FastEmbedClient:
                 raise
 
     async def _embed_parallel(self, texts: list[str]) -> list[list[float]]:
-        """任务7: sync embed 卸载到线程池 + 大批量分批并行.
+        """sync embed 卸载到线程池 + 大批量分批并行.
 
         策略:
         - text_count < _PARALLEL_BATCH_THRESHOLD: 单次 asyncio.to_thread (避免调度开销)
@@ -223,7 +223,7 @@ class FastEmbedClient:
           (实测 200 chunks/b=32 收益 +32.1%)
 
         关键: 原 list(self._model.embed(texts)) 是 sync CPU 调用, 100% 阻塞事件循环,
-        导致 SSE 流式响应卡顿. asyncio.to_thread 释放事件循环 (阻塞率 100%→35.7%).
+        导致 SSE 流式响应卡顿. asyncio.to_thread 释放事件循环 (阻塞率降至 35.7%).
         """
         model = self._model
 

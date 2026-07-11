@@ -3,7 +3,7 @@
 AGENTS.md 第 13/14 章硬约束:
 - e2e 必须在容器栈 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
-- /v1/feedback 为允许调用的端点 (人在回路反馈通道, P0-Future-03)
+- /v1/feedback 为允许调用的端点 (人在回路反馈通道)
 - WS /v1/ws/{session_id} 为允许调用的端点 (人在回路审核请求通道)
 - 仅 human_review_enabled=True 时前端才应调用 /v1/feedback 与 WS
 
@@ -94,7 +94,7 @@ async def _connect_websocket(session_id: str) -> object | None:
     """连接 WebSocket, 返回 ws 对象; 连接失败 (鉴权/Origin/未启用) 返回 None.
 
     AGENTS.md 第 14 章: /v1/ws/{session_id} 为允许调用的端点.
-    生产环境强制 JWT 鉴权 + Origin 校验 (V4-P0-03).
+    生产环境强制 JWT 鉴权 + Origin 校验.
     """
     ws_uri = f"{WS_BASE}/v1/ws/{session_id}"
     try:

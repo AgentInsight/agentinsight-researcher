@@ -31,7 +31,7 @@ def track_create_task(monkeypatch: pytest.MonkeyPatch) -> list:
     - _cleanup_legacy_chat_seeds
     - _warmup_embeddings
     - _warmup_fastembed
-    - _warmup_graph (P1-OPT-009: 全局单图编译预热)
+    - _warmup_graph (全局单图编译预热)
 
     本 fixture 拦截 create_task 调用, 记录任务对象,
     测试中可 await 这些任务确保后台逻辑执行完毕后再验证 mock.
@@ -95,7 +95,7 @@ def mock_lifespan_deps(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         MagicMock(return_value=mock_fe_client),
     )
 
-    # P1-OPT-009: 图预热 mock (lifespan _warmup_graph 后台任务调用 build_researcher_graph)
+    # 图预热 mock (lifespan _warmup_graph 后台任务调用 build_researcher_graph)
     # 重置 routes 全局单例, 避免跨测试污染
     import src.api.routes as _routes_mod
 
@@ -225,7 +225,7 @@ async def test_warmup_fastembed_is_background_task(
     mock_lifespan_deps.embed_texts.assert_called_once_with(["预热"])
 
 
-# ========== P1-OPT-009: 图预热测试 ==========
+# ========== 图预热测试 ==========
 
 
 async def test_warmup_graph_called_on_startup(

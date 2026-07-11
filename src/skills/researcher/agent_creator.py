@@ -1,6 +1,5 @@
 """AgentCreator LLM 动态角色生成器.
 
-设计参考: actions/agent_creator.py + prompts.py auto_agent_instructions().
 设计哲学: 行业角色是运行时 LLM 推理产物, 无 if-else 行业分支.
 LLM 根据查询语义自主选择最合适的角色.
 
@@ -10,7 +9,7 @@ LLM 根据查询语义自主选择最合适的角色.
 - Retriever 层: searchers/ 下含 arxiv/pubmed/semantic_scholar 等专业数据源
 - MCP 层: MCP_SERVERS 注册行业专用工具服务器 (mcp_coordinator)
 
-P1-Future-04: prompt 文本经 PromptFamily 策略注入 (支持中英多语言切换).
+prompt 文本经 PromptFamily 策略注入 (支持中英多语言切换).
 """
 
 from __future__ import annotations
@@ -28,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 class AgentCreator:
-    """LLM 动态角色生成器 (设计参考: choose_agent).
+    """LLM 动态角色生成器.
 
-    优先级 (设计参考: AGENT_ROLE 配置):
+    优先级 (AGENT_ROLE 配置):
     1. 调用方传入 agent_role (settings.agent_role 或 ChatRequest.agent_role) → 直接使用
     2. 否则 LLM 根据查询语义动态生成行业 persona
     """
@@ -39,10 +38,10 @@ class AgentCreator:
     _llm: LLMClient
     _prompt_family: PromptFamily
 
-    # few-shot 例子 (设计参考: prompts.py auto_agent_instructions)
+    # few-shot 例子
     # LLM 根据这些例子自主推理, 不存在 if-else 行业分支
-    # P1-Future-04: 保留为类属性供向后兼容, 实际使用 PromptFamily.agent_creator_prompt()
-    # 任务 9: 扩展到 10 个行业 + task/response 风格 + 三要素要求
+    # 保留为类属性供向后兼容, 实际使用 PromptFamily.agent_creator_prompt()
+    # 扩展到 10 个行业 + task/response 风格 + 三要素要求
     AUTO_AGENT_INSTRUCTIONS = """你是一个研究助手角色选择专家。根据用户的研究查询,选择最合适的研究角色 persona。
 
 生成角色 persona 时必须满足以下三项要求:
@@ -98,13 +97,13 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         session_id: str | None = None,
         agent_role: str | None = None,
     ) -> dict[str, Any]:
-        """LLM 动态生成研究角色 (设计参考: choose_agent).
+        """LLM 动态生成研究角色.
 
         Args:
             query: 用户研究查询
             user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
             session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
-            agent_role: 调用方注入的角色 persona (设计参考: AGENT_ROLE 配置),
+            agent_role: 调用方注入的角色 persona (AGENT_ROLE 配置),
                         优先级高于 LLM 自动生成, 非空时直接使用, 跳过 LLM 调用.
 
         Returns:
@@ -146,9 +145,9 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """LLM 动态生成角色 persona (设计参考: agent_creator.py).
+        """LLM 动态生成角色 persona.
 
-        V2-P1 优化 (设计参考: choose_agent):
+        优化:
         - tier: FAST → SMART (角色生成需更精准)
         - temperature: 0.0 → 0.15 (略带随机性生成多样化角色)
         """
@@ -159,8 +158,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
             ]
             response = await self._llm.achat(
                 messages,
-                tier=LLMTier.SMART,  # V2-P1: FAST → SMART (角色生成用 SMART 层)
-                temperature=0.15,  # V2-P1: 0.0 → 0.15 (略带随机性生成多样化角色)
+                tier=LLMTier.SMART,  # FAST → SMART (角色生成用 SMART 层)
+                temperature=0.15,  # 0.0 → 0.15 (略带随机性生成多样化角色)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="agent-creator-llm",

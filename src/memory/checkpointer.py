@@ -9,9 +9,7 @@ AGENTS.md 第 3/6 章硬约束:
   (开发环境也需 postgres, 强制依赖一致性, 避免 dev/prod 行为漂移).
 - 连接失败时抛出异常 (fail fast), 由调用方决定是否阻断启动.
 
-对标 AgentInsightService common/memory.py.
-
-P0-02: 连接池复用.
+连接池复用.
 - 模块级单例 _checkpointer_instance 避免每次调用创建新连接.
 - AsyncPostgresSaver + AsyncConnectionPool 复用同一 asyncpg 连接池,
   池 min/max 从 settings.postgres_pool_min_size/postgres_pool_max_size 读取.
@@ -28,13 +26,13 @@ from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# P0-02: 模块级单例, 避免重复创建连接/连接池.
+# 模块级单例, 避免重复创建连接/连接池.
 _checkpointer_instance: Any = None
 _pool_lock = asyncio.Lock()
 
 
 async def get_checkpointer(settings: Settings | None = None) -> Any:
-    """获取 LangGraph Checkpointer 单例 (P0-02 连接池复用).
+    """获取 LangGraph Checkpointer 单例 (连接池复用).
 
     分支优化方案 P-Checkpointer: 统一 PostgresSaver.
     - 移除 dev/prod 分支, 所有环境均使用 PostgresSaver
@@ -69,11 +67,11 @@ async def get_checkpointer(settings: Settings | None = None) -> Any:
 
 
 async def _create_postgres_checkpointer(settings: Settings) -> Any:
-    """创建 AsyncPostgresSaver (P0-02 连接池复用).
+    """创建 AsyncPostgresSaver (连接池复用).
 
     用 AsyncConnectionPool 复用连接, 池 min/max 从
     settings.postgres_pool_min_size/postgres_pool_max_size 读取
-    (P2-6 配置化, 支持按负载调整).
+    (配置化, 支持按负载调整).
 
     分支优化方案 P-Checkpointer: 移除 MemorySaver 降级.
     连接池创建/setup 失败时记录 ERROR 并抛出 RuntimeError (fail fast),
@@ -93,7 +91,7 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
         from psycopg.rows import dict_row
         from psycopg_pool import AsyncConnectionPool
 
-        # P2-6: 连接池 min/max 从 settings 读取, 支持按负载调整
+        # 连接池 min/max 从 settings 读取, 支持按负载调整
         # min_size 不超过 max_size, 且均 ≥1, 避免 AsyncConnectionPool ValueError
         max_size = max(int(settings.postgres_pool_max_size), 1)
         min_size = max(min(int(settings.postgres_pool_min_size), max_size), 1)
@@ -133,7 +131,7 @@ async def _create_postgres_checkpointer(settings: Settings) -> Any:
 
 
 async def close_checkpointer_pool() -> None:
-    """关闭 Checkpointer 的 psycopg 连接池 (应用 shutdown 时调用, P1-10).
+    """关闭 Checkpointer 的 psycopg 连接池 (应用 shutdown 时调用).
 
     幂等: 无实例时直接返回.
     """

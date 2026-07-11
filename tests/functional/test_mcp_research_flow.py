@@ -291,7 +291,7 @@ def test_mcp_disabled_strategy_skips_call() -> None:
 def test_mcp_config_update_invalidates_cache() -> None:
     """配置变更 (PUT enabled 切换) 后, 后续研究流程不命中过期缓存.
 
-    AGENTS.md P1-04: mcp_routes CRUD 后调用 clear_cache 失效缓存.
+    AGENTS.md: mcp_routes CRUD 后调用 clear_cache 失效缓存.
     本用例验证: 修改 MCP 配置后, 下次研究流程能感知配置变更 (不崩溃).
     """
     name = _unique_config_name()

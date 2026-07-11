@@ -95,7 +95,7 @@ class _FakeQdrantClient:
         field_schema: Any = None,
         **kwargs: Any,
     ) -> None:
-        """P0-14: 模拟 create_payload_index (namespace payload 索引创建)."""
+        """模拟 create_payload_index (namespace payload 索引创建)."""
         pass
 
     async def upsert(self, **kwargs: Any) -> Any:

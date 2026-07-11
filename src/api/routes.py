@@ -5,8 +5,6 @@ AGENTS.md 第 13/14 章硬约束:
 - 测试页面只能走对外 OpenAI 兼容接口, 禁止调用后端私有端点
 - API 测试必须覆盖流式 SSE + 非流式 + 错误码
 - 包含携带 Bearer JWT Token 与不携带两种场景
-
-阶段 3/4 实现: 接入 LangGraph 研究流水线 + 文件上传 (用户需求 8).
 """
 
 from __future__ import annotations
@@ -48,12 +46,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["openai-compatible"])
 
-# P0-4: 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
+# 后台任务引用保留 (防止 GC 静默取消 asyncio.create_task)
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
 def _create_background_task(coro: Any) -> asyncio.Task[Any]:
-    """创建后台任务并保留引用 (P0-4: 防止 GC 静默取消).
+    """创建后台任务并保留引用 (防止 GC 静默取消).
 
     标准模式: set + done_callback(discard), 任务完成后自动从集合移除.
     """
@@ -66,7 +64,7 @@ def _create_background_task(coro: Any) -> asyncio.Task[Any]:
 # ========== LangGraph 图单例 (延迟构建, 复用) ==========
 _compiled_graph: Any | None = None
 _multi_agent_graph: Any | None = None
-_chat_graph: Any | None = None  # P2-Future-03: 对话追问图单例
+_chat_graph: Any | None = None  # 对话追问图单例
 
 
 async def _get_graph(multi_agent: bool = False) -> Any:
@@ -74,7 +72,7 @@ async def _get_graph(multi_agent: bool = False) -> Any:
 
     AGENTS.md 第 5 章: 生产 StateGraph 必须挂 PostgresSaver.
     首次调用时构建, 后续复用 (单例).
-    P0-02: multi_agent=True 时构建多 Agent Supervisor 图.
+    multi_agent=True 时构建多 Agent Supervisor 图.
     """
     global _compiled_graph, _multi_agent_graph
     if multi_agent:
@@ -91,7 +89,7 @@ async def _get_graph(multi_agent: bool = False) -> Any:
 
 
 async def _get_chat_graph() -> Any:
-    """获取/构建对话追问图单例 (P2-Future-03).
+    """获取/构建对话追问图单例.
 
     AGENTS.md 第 5 章: 生产 StateGraph 必须挂 PostgresSaver.
     复用同一 thread_id 隔离, 支持多会话并发.
@@ -106,9 +104,9 @@ async def _get_chat_graph() -> Any:
 
 
 async def _has_report(session_id: str) -> bool:
-    """检查会话是否已有报告 (P0-Future-05/06).
+    """检查会话是否已有报告.
 
-    P1-2 修复: 优先查 research_reports 表 (有 session_id 索引), 避免每次
+    优先查 research_reports 表 (有 session_id 索引), 避免每次
     aget_state 加载全量 State; 查询失败时降级回 aget_state.
 
     AGENTS.md 第 6 章: thread_id 做会话隔离, checkpointer 自动持久化.
@@ -119,7 +117,7 @@ async def _has_report(session_id: str) -> bool:
     Returns:
         True 表示会话已有报告 (用于意图分类 has_report 参数).
     """
-    # P1-2: 优先走 report_store (按 session_id 索引查询, 比 aget_state 快几个数量级)
+    # 优先走 report_store (按 session_id 索引查询, 比 aget_state 快几个数量级)
     try:
         from src.memory.report_store import get_report_store
 
@@ -135,7 +133,7 @@ async def _has_report(session_id: str) -> bool:
     except Exception as e:  # noqa: BLE001
         logger.warning("report_store 查询失败, 降级 aget_state (session=%s): %s", session_id, e)
 
-    # P1-2 降级: report_store 查询失败时回退到 aget_state
+    # report_store 查询失败时回退到 aget_state
     try:
         graph = await _get_graph()
         config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
@@ -153,7 +151,7 @@ async def _load_chitchat_history(session_id: str) -> list[dict[str, str]]:
 
     AGENTS.md 第 6 章: 会话级数据通过 Checkpointer 隔离, thread_id 从请求上下文注入.
     ChitchatResponder 绕过 LangGraph 图, 需手动从 checkpointer 读取历史消息,
-    否则跨请求上下文丢失 (Bug: 会话持久化测试 test_session_id_consistency 失败).
+    否则跨请求上下文丢失.
 
     Args:
         session_id: 会话 ID (thread_id)
@@ -254,21 +252,21 @@ class ChatCompletionRequest(BaseModel):
     )
     multi_agent: bool = Field(
         False,
-        description="P0-02: 是否启用多 Agent Supervisor 模式 (默认单图流水线)",
+        description="是否启用多 Agent Supervisor 模式 (默认单图流水线)",
     )
     agent_role: str | None = Field(
         None,
         description=(
-            "设计参考 AGENT_ROLE 配置: 用户可注入行业 persona 字符串, "
+            "用户可注入行业 persona 字符串, "
             "优先级高于 LLM 动态生成 (AgentCreator). "
             "行业适配采用 4 层机制, 不再使用行业分类器."
         ),
     )
     query_domains: list[str] | None = Field(
         None,
-        description="P1-Future-02: 域名过滤白名单, 仅检索这些域名的结果",
+        description="域名过滤白名单, 仅检索这些域名的结果",
     )
-    # SELF_HOST=False 时点数校验/扣除所需参数 (对标 AgentInsightService)
+    # SELF_HOST=False 时点数校验/扣除所需参数
     # 优先级: org_id > project_id (二者至少传一个才会触发校验/扣除)
     org_id: str | None = Field(
         None,
@@ -281,23 +279,23 @@ class ChatCompletionRequest(BaseModel):
 
 
 class ChatCompletionResponse(BaseModel):
-    """OpenAI 兼容非流式响应 (P0-01: 增加 sources 结构化字段)."""
+    """OpenAI 兼容非流式响应 (增加 sources 结构化字段)."""
 
     id: str
     object: str = "chat.completion"
     created: int
     model: str
     choices: list[dict[str, Any]]
-    # P1-04: usage 含 cost_usd (float), 放宽为 dict[str, Any] 兼容真实成本
+    # usage 含 cost_usd (float), 放宽为 dict[str, Any] 兼容真实成本
     usage: dict[str, Any]
-    # P0-01: 显式返回 sources 结构化列表 (设计参考 add_references)
+    # 显式返回 sources 结构化列表
     # 含 title/url/snippet/score 字段, 测试页面与下游消费者可直接渲染
     sources: list[dict[str, Any]] = []
     # 报告输出格式 (markdown/html/pdf/docx/json), 客户端据此选择渲染/下载策略
     report_format: str | None = None
     # PDF 等二进制格式生成的文件路径, 客户端可通过 /v1/reports/{report_id}/download 获取
     file_path: str | None = None
-    # 报告主键 UUID (P1-Future-09 重构: 一个 session 可生成多个报告, 下载基于 report_id)
+    # 报告主键 UUID (一个 session 可生成多个报告, 下载基于 report_id)
     # 客户端可用此值构造 /v1/reports/{report_id}/download 链接获取多格式输出
     report_id: str | None = None
 
@@ -314,7 +312,6 @@ async def chat_completions(
     """OpenAI 兼容研究端点.
 
     AGENTS.md 第 14 章: 测试页面统一调用此端点, 请求体带 stream: true.
-    阶段 3: 接入 LangGraph 研究流水线.
     """
     settings = get_settings()
 
@@ -334,12 +331,12 @@ async def chat_completions(
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
 
-    # P0-Future-05/06 + P1-Future-07: 查询意图分类 (短查询 + 离题闲聊 + 对话/研究路由)
+    # 查询意图分类 (短查询 + 离题闲聊 + 对话/研究路由)
     # 先检查会话是否已有报告 (用于分类器 has_report 参数)
     has_report = await _has_report(session_id)
     intent = await get_query_intent_classifier().classify(query, has_report)
 
-    # P1-Future-07: CHAT 首轮保护 — 无已有报告时降级 OFF_TOPIC
+    # CHAT 首轮保护 — 无已有报告时降级 OFF_TOPIC
     # 避免首轮闲聊走 chat graph 消耗 SMART LLM; 显式 report_type 时强制走 researcher graph
     if (
         intent == QueryIntent.CHAT
@@ -353,15 +350,15 @@ async def chat_completions(
         )
         intent = QueryIntent.OFF_TOPIC
 
-    # P0-Future-06 + P1-Future-07: 短查询/离题闲聊 — 走 ChitchatResponder
-    # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: 始终走 FAST_LLM 人性化响应, FAST 失败时降级 multi-template
+    # 短查询/离题闲聊 — 走 ChitchatResponder
+    # CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md: 始终走 FAST_LLM 人性化响应, FAST 失败时降级 multi-template
     if intent in (QueryIntent.SHORT_QUERY, QueryIntent.OFF_TOPIC):
         # ChitchatResponder (FAST_LLM + Persona + 三段式 + 多模板兜底)
         category = (
             _infer_off_topic_category(query) if intent == QueryIntent.OFF_TOPIC else "greeting"
         )
         responder = get_chitchat_responder()
-        # 会话持久化: 从 checkpointer 加载历史并注入 ChitchatResponder (修复 test_session_id_consistency)
+        # 会话持久化: 从 checkpointer 加载历史并注入 ChitchatResponder
         history = await _load_chitchat_history(session_id)
         if intent == QueryIntent.SHORT_QUERY:
             if request.stream:
@@ -458,7 +455,7 @@ async def chat_completions(
             )
             return _with_session_id(response, session_id)
 
-    # P1-Future-06: CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
+    # CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
     # 显式指定 report_type 时强制走 researcher graph (用户明确要新研究)
     if intent == QueryIntent.CHAT and request.report_type is None:
         # 走 chat graph (复用会话历史 + report_md 上下文, 首轮时 report_md 为空)
@@ -489,7 +486,7 @@ async def chat_completions(
             )
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
-    # SELF_HOST=False 时, 进入研究前校验 Agent 点数 (对标 AgentInsightService)
+    # SELF_HOST=False 时, 进入研究前校验 Agent 点数
     # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图校验/扣除
     if not settings.self_host and (request.org_id or request.project_id):
         from src.api.agentinsight_client import get_agentinsight_client
@@ -517,8 +514,8 @@ async def chat_completions(
     report_type = request.report_type or settings.default_report_type
     report_format = request.report_format or settings.default_report_format
     tone = request.tone or "objective"
-    # P0-01: report_type == "deep_research" 时启用递归深度研究
-    # V7-修复: summary 和 subtopics 正确映射到对应 research_mode, 避免被降级为 basic
+    # report_type == "deep_research" 时启用递归深度研究
+    # summary 和 subtopics 正确映射到对应 research_mode, 避免被降级为 basic
     if report_type == "deep_research":
         research_mode = "deep"
     elif report_type in ("summary", "subtopics"):
@@ -529,7 +526,7 @@ async def chat_completions(
     # 加载已上传文件上下文 (用户需求 8)
     uploaded_files_context: list[str] = []
     if request.uploaded_files:
-        # P2-11: _load_uploaded_files_context 已改为 async, 内部文件 I/O 经 asyncio.to_thread
+        # _load_uploaded_files_context 已改为 async, 内部文件 I/O 经 asyncio.to_thread
         uploaded_files_context = await _load_uploaded_files_context(
             request.uploaded_files, user_id, agent_id
         )
@@ -546,10 +543,10 @@ async def chat_completions(
         "tone": tone,
         "uploaded_files_context": uploaded_files_context,
         "messages": [],
-        # 设计参考: agent_role (来自 ChatRequest 或 settings) 优先级高于 LLM 动态生成
+        # agent_role (来自 ChatRequest 或 settings) 优先级高于 LLM 动态生成
         "agent_role": request.agent_role or settings.agent_role or "",
         "agent_role_server": "",
-        # P1-Future-02: 域名过滤白名单
+        # 域名过滤白名单
         "query_domains": request.query_domains or [],
         "sub_queries": [],
         "contexts": [],
@@ -557,13 +554,13 @@ async def chat_completions(
         "visited_urls": [],
         "curated_sources": [],
         "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
-        "report_formats": {},  # P2-1: {md|html|pdf|docx|json: 内容或路径}
+        "report_formats": {},  # {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
-        # P0-01: 深度研究配置
+        # 深度研究配置
         "research_mode": research_mode,
         "deep_research_breadth": settings.deep_research_breadth,
         "deep_research_depth": settings.deep_research_depth,
-        # P0-02: 多 Agent 迭代计数器 (Annotated[int, operator.add] 累加)
+        # 多 Agent 迭代计数器 (Annotated[int, operator.add] 累加)
         "iteration_count": 0,
     }
 
@@ -686,7 +683,7 @@ async def _stream_research(
 ) -> Any:
     """流式 SSE 响应生成器.
 
-    阶段 3: 接入 LangGraph astream, 逐节点 yield 进度 + 最终报告.
+    接入 LangGraph astream, 逐节点 yield 进度 + 最终报告.
     AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -735,7 +732,7 @@ async def _stream_research(
                 "source_curator": "来源策展",
                 "report_generator": "生成报告",
                 "publisher": "格式化输出",
-                # P0-02 多 Agent 节点
+                # 多 Agent 节点
                 "supervisor": "调度决策",
                 "reviewer": "评估来源",
                 "writer": "撰写报告",
@@ -781,7 +778,7 @@ async def _stream_research(
                                 else ""
                             )
                             if token:
-                                # P0-4: 保留 Task 引用防止 GC 取消 (扣点任务有副作用)
+                                # 保留 Task 引用防止 GC 取消 (扣点任务有副作用)
                                 _create_background_task(
                                     get_agentinsight_client().deduct_agent_usage(token)
                                 )
@@ -799,7 +796,7 @@ async def _stream_research(
                         paragraphs = report_md.split("\n\n")
                         for para in paragraphs:
                             yield _sse_chunk({"content": para + "\n\n"})
-                            # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                            # 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                             await asyncio.sleep(0.001)
                         continue  # 跳过下面的进度提示
                     elif node_name == "publisher":
@@ -808,7 +805,7 @@ async def _stream_research(
                         # 推送 report_id (前端用于构造 /v1/reports/{report_id}/download 链接)
                         if delta.get("report_id"):
                             yield _sse_chunk({"report_id": delta["report_id"]})
-                        # P2-1: 流式推送最终格式的报告内容 (统一从 report_formats 读取)
+                        # 流式推送最终格式的报告内容 (统一从 report_formats 读取)
                         new_formats = delta.get("report_formats") or {}
                         if new_formats.get("html"):
                             yield _sse_chunk({"content": new_formats["html"]})
@@ -822,12 +819,12 @@ async def _stream_research(
                         continue
 
                     yield _sse_chunk({"content": progress})
-                    # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                    # 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                     await asyncio.sleep(0.001)
 
             # 输出最终报告元信息
             fmt = request.report_format or "markdown"
-            # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+            # 优先从 report_formats 读取, 兼容期回退旧字段
             final_formats = final_state.get("report_formats") or {}
             final_content = (
                 final_formats.get("html")
@@ -843,7 +840,7 @@ async def _stream_research(
             if fmt == "pdf" and pdf_path:
                 yield _sse_chunk({"file_path": pdf_path, "report_format": "pdf"})
 
-            # P0-01: 流式推送 sources 元信息帧 (在 finish 之前)
+            # 流式推送 sources 元信息帧 (在 finish 之前)
             # 客户端可通过 delta.sources 获取结构化来源列表
             final_sources = final_state.get("curated_sources") or final_state.get("sources", [])
             normalized_sources: list[dict[str, Any]] = []
@@ -860,8 +857,8 @@ async def _stream_research(
             if normalized_sources:
                 yield _sse_chunk({"sources": normalized_sources})
 
-            # P1-4: 报告持久化移到后台任务 (不阻塞 [DONE], 先 yield [DONE] 再后台持久化)
-            # P0-4: 保留 Task 引用防止 GC 取消
+            # 报告持久化移到后台任务 (不阻塞 [DONE], 先 yield [DONE] 再后台持久化)
+            # 保留 Task 引用防止 GC 取消
             async def _persist_report() -> None:
                 try:
                     from src.memory.report_store import get_report_store
@@ -895,7 +892,7 @@ async def _stream_research(
         except Exception as e:
             logger.exception("研究流水线执行失败")
             yield _sse_chunk({"content": f"\n\n**研究执行失败**: {str(e)[:200]}"})
-            # P1-6: 错误时 finish_reason="error" (客户端可据此区分失败)
+            # 错误时 finish_reason="error" (客户端可据此区分失败)
             yield _sse_chunk({}, finish_reason="error")
             yield "data: [DONE]\n\n"
             return
@@ -914,7 +911,7 @@ async def _run_research(
 ) -> ChatCompletionResponse:
     """非流式研究执行.
 
-    阶段 3: 接入 LangGraph ainvoke.
+    接入 LangGraph ainvoke.
     AGENTS.md 第 10 章: trace_agent 根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -936,13 +933,13 @@ async def _run_research(
         settings = get_settings()
         try:
             graph = await _get_graph(multi_agent=request.multi_agent)
-            # P1-5: graph.ainvoke 超时保护 (防止节点卡死永久挂起, 外部评审补充)
+            # graph.ainvoke 超时保护 (防止节点卡死永久挂起)
             final_state = await asyncio.wait_for(
                 graph.ainvoke(initial_state, config=graph_config),
                 timeout=settings.graph_total_timeout,
             )
             fmt = request.report_format or "markdown"
-            # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+            # 优先从 report_formats 读取, 兼容期回退旧字段
             final_formats = final_state.get("report_formats") or {}
             if fmt == "html" and final_formats.get("html"):
                 content = final_formats["html"]
@@ -959,7 +956,7 @@ async def _run_research(
                 content = final_formats.get("md") or final_state.get("report_md", "")
             if not content:
                 content = "未生成报告内容 (可能上下文为空)"
-            # P2-7: 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
+            # 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
             # graph 完成后调用 report_store.save_report, 保存失败仅 warn 不影响响应
             # (用户已收到报告内容, 不返回 500; AGENTS.md 第 5 章节点纯函数约束)
             # 客户端用 report_id 构造 /v1/reports/{report_id}/download 链接
@@ -984,7 +981,7 @@ async def _run_research(
             except Exception:
                 logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
 
-            # P0-01: sources 作为结构化字段返回 (优先 curated_sources, 回退 sources)
+            # sources 作为结构化字段返回 (优先 curated_sources, 回退 sources)
             sources = final_state.get("curated_sources") or final_state.get("sources", [])
             # 规范化: 仅保留 title/url/snippet/score 四字段, 便于客户端渲染
             normalized_sources: list[dict[str, Any]] = []
@@ -999,7 +996,7 @@ async def _run_research(
                         }
                     )
 
-            # P1-04: 读取 LLMClient 真实成本 (优先于字符估算)
+            # 读取 LLMClient 真实成本 (优先于字符估算)
             total_cost_usd = final_state.get("total_cost_usd", 0.0) or 0.0
             total_tokens = final_state.get("total_tokens", 0) or 0
             token_logs = final_state.get("token_logs", []) or []
@@ -1091,7 +1088,7 @@ async def _run_research(
     )
 
 
-# ========== 短查询保护 (P0-Future-06, 不走任何 graph) + 离题闲聊保护 (P1-Future-07) ==========
+# ========== 短查询保护 (不走任何 graph) + 离题闲聊保护 ==========
 
 
 async def _stream_short_query(
@@ -1101,7 +1098,7 @@ async def _stream_short_query(
     *,
     intent: str = "short_query",
 ) -> Any:
-    """流式 SSE 短查询/离题回复生成器 (P0-Future-06 + P1-Future-07).
+    """流式 SSE 短查询/离题回复生成器.
 
     直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
     AGENTS.md 第 10 章: 用 trace_agent 包裹作为根 span.
@@ -1159,7 +1156,7 @@ async def _run_short_query(
     *,
     intent: str = "short_query",
 ) -> ChatCompletionResponse:
-    """非流式短查询/离题回复 (P0-Future-06 + P1-Future-07).
+    """非流式短查询/离题回复.
 
     直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
     AGENTS.md 第 10 章: trace_agent 根 span.
@@ -1207,14 +1204,13 @@ async def _run_short_query(
     )
 
 
-# ========== ChitchatResponder 辅助函数 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0) ==========
+# ========== ChitchatResponder 辅助函数 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md) ==========
 
 
 def _infer_off_topic_category(query: str) -> str:
     """从用户查询推断 OFF_TOPIC 子类.
 
-    P0 简单实现: 关键词匹配. P1 可由分类器语义匹配返回 category.
-    8 类: greeting/identity/emotion/entertainment/common_sense/capability_check/topic_switch/evaluation.
+    关键词匹配实现. 8 类: greeting/identity/emotion/entertainment/common_sense/capability_check/topic_switch/evaluation.
     """
     q = query.lower().strip()
     # 身份询问
@@ -1263,7 +1259,7 @@ async def _stream_chitchat(
     save_user_id: str | None = None,
     save_agent_id: str | None = None,
 ) -> Any:
-    """流式 SSE 闲聊响应生成器 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0).
+    """流式 SSE 闲聊响应生成器.
 
     从 ChitchatResponder 的 AsyncIterator 逐块 yield 内容, 包装为 SSE 格式.
     AGENTS.md 第 10 章: trace_agent 根 span.
@@ -1346,7 +1342,7 @@ async def _run_chitchat(
     *,
     intent: str = "short_query",
 ) -> ChatCompletionResponse:
-    """非流式闲聊响应 (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0).
+    """非流式闲聊响应.
 
     从 ChitchatResponder 获取完整字符串响应.
     AGENTS.md 第 10 章: trace_agent 根 span.
@@ -1398,7 +1394,7 @@ async def _run_chitchat(
     )
 
 
-# ========== 对话追问 (P2-Future-03 ChatAgentWithMemory) ==========
+# ========== 对话追问 (ChatAgentWithMemory) ==========
 
 
 async def _stream_chat(
@@ -1407,7 +1403,7 @@ async def _stream_chat(
     request: ChatCompletionRequest,
     session_id: str,
 ) -> Any:
-    """流式 SSE 对话追问响应生成器 (P2-Future-03).
+    """流式 SSE 对话追问响应生成器.
 
     走 chat graph (单节点), 流式输出 AI 回答.
     AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
@@ -1470,13 +1466,13 @@ async def _stream_chat(
                                 paragraphs = msg_text.split("\n\n")
                                 for para in paragraphs:
                                     yield _sse_chunk({"content": para + "\n\n"})
-                                    # P0-01 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
+                                    # 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                                     await asyncio.sleep(0.001)
 
         except Exception as e:
             logger.exception("对话追问流式执行失败")
             yield _sse_chunk({"content": f"\n\n**对话执行失败**: {str(e)[:200]}"})
-            # P1-6: 错误时 finish_reason="error"
+            # 错误时 finish_reason="error"
             yield _sse_chunk({}, finish_reason="error")
             yield "data: [DONE]\n\n"
             return
@@ -1492,7 +1488,7 @@ async def _run_chat(
     request: ChatCompletionRequest,
     session_id: str,
 ) -> ChatCompletionResponse:
-    """非流式对话追问执行 (P2-Future-03).
+    """非流式对话追问执行.
 
     走 chat graph (单节点), 返回完整 AI 回答.
     AGENTS.md 第 10 章: trace_agent 根 span.
@@ -1514,7 +1510,7 @@ async def _run_chat(
         settings = get_settings()
         try:
             graph = await _get_chat_graph()
-            # P1-5: graph.ainvoke 超时保护
+            # graph.ainvoke 超时保护
             final_state = await asyncio.wait_for(
                 graph.ainvoke(initial_state, config=graph_config),
                 timeout=settings.graph_total_timeout,
@@ -1559,7 +1555,7 @@ async def _run_chat(
 
 # ========== 文件上传 (用户需求 8) ==========
 
-# P1-13: 文件 magic number 签名表 (纯 Python, 无外部依赖, 避免新增 python-magic)
+# 文件 magic number 签名表 (纯 Python, 无外部依赖, 避免新增 python-magic)
 _FILE_MAGIC_SIGNATURES: dict[str, list[bytes]] = {
     "pdf": [b"%PDF"],
     # OOXML (docx/xlsx/pptx) 是 ZIP 格式: PK\x03\x04 (含文件) 或 PK\x05\x06 (空)
@@ -1575,7 +1571,7 @@ _FILE_MAGIC_SIGNATURES: dict[str, list[bytes]] = {
 
 
 def _validate_magic_number(data: bytes, ext: str) -> bool:
-    """校验文件 magic number (P1-13: 防止恶意文件伪装扩展名).
+    """校验文件 magic number (防止恶意文件伪装扩展名).
 
     纯 Python 实现, 不依赖 python-magic / filetype 库 (AGENTS.md: 避免不必要依赖).
     """
@@ -1619,7 +1615,7 @@ async def upload_file(
             detail=f"不支持的文件类型: .{ext}, 允许: {', '.join(settings.allowed_extensions_list)}",
         )
 
-    # P2-1: 优先用 file.size 早期校验大小 (UploadFile.size 由 Content-Length 注入)
+    # 优先用 file.size 早期校验大小 (UploadFile.size 由 Content-Length 注入)
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     if file.size is not None and file.size > max_bytes:
         raise HTTPException(
@@ -1627,7 +1623,7 @@ async def upload_file(
             detail=f"文件大小 {file.size / (1024 * 1024):.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
         )
 
-    # P2-1: 分块流式读取 (避免全量读入内存), 同时校验大小 + magic number
+    # 分块流式读取 (避免全量读入内存), 同时校验大小 + magic number
     chunk_size = 1024 * 1024  # 1MB
     chunks: list[bytes] = []
     total_bytes = 0
@@ -1642,7 +1638,7 @@ async def upload_file(
                 status_code=413,
                 detail=f"文件大小 {total_bytes / (1024 * 1024):.2f}MB 超过限制 {settings.max_upload_size_mb}MB",
             )
-        # P1-13: 首个 chunk 校验 magic number (防止恶意文件伪装扩展名)
+        # 首个 chunk 校验 magic number (防止恶意文件伪装扩展名)
         if not magic_checked:
             if not _validate_magic_number(chunk, ext):
                 raise HTTPException(
@@ -1660,11 +1656,11 @@ async def upload_file(
 
     # 存储路径 (按 agent_id + user_id 隔离)
     upload_dir = Path(settings.upload_dir) / agent_id / user_id
-    # P2-11: 同步文件 I/O 经 asyncio.to_thread 包裹, 避免阻塞事件循环
+    # 同步文件 I/O 经 asyncio.to_thread 包裹, 避免阻塞事件循环
     await asyncio.to_thread(upload_dir.mkdir, parents=True, exist_ok=True)
     save_path = upload_dir / f"{file_id.split(':')[-2]}_{file_id.split(':')[-1]}.{ext}"
 
-    # 写入文件 (P2-11: asyncio.to_thread 包裹同步 write_bytes)
+    # 写入文件 (asyncio.to_thread 包裹同步 write_bytes)
     await asyncio.to_thread(save_path.write_bytes, contents)
 
     logger.info(
@@ -1694,7 +1690,7 @@ async def _load_uploaded_files_context(
     """加载已上传文件内容作为研究上下文.
 
     AGENTS.md 第 7 章: 按 agent_id + user_id 隔离, 禁止跨用户访问.
-    P2-11: 所有同步文件 I/O (exists/glob/read_text/第三方库 open) 经 asyncio.to_thread
+    所有同步文件 I/O (exists/glob/read_text/第三方库 open) 经 asyncio.to_thread
     包裹, 避免阻塞事件循环. _extract_file_content 内部含 fitz/Document/openpyxl/pptx
     等同步库调用, 整体托管到线程执行.
     """
@@ -1719,7 +1715,7 @@ async def _load_uploaded_files_context(
 
             # 查找文件 (按 uuid 前缀匹配)
             upload_dir = Path(settings.upload_dir) / agent_id / user_id
-            # P2-11: exists/glob 同步 I/O 经 asyncio.to_thread 包裹
+            # exists/glob 同步 I/O 经 asyncio.to_thread 包裹
             if not await asyncio.to_thread(upload_dir.exists):
                 continue
             # B023: 显式绑定循环变量到 lambda 默认参数, 避免闭包延迟绑定
@@ -1734,7 +1730,7 @@ async def _load_uploaded_files_context(
                 continue
 
             file_path = matches[0]
-            # P2-11: _extract_file_content 含 read_text/fitz.open/Document 等同步 I/O,
+            # _extract_file_content 含 read_text/fitz.open/Document 等同步 I/O,
             # 整体经 asyncio.to_thread 包裹, 避免阻塞事件循环
             content = await asyncio.to_thread(
                 _extract_file_content,
@@ -1842,11 +1838,11 @@ async def list_models() -> Any:
     }
 
 
-# ========== 人在回路反馈 (P0-Future-03 Human-in-the-loop) ==========
+# ========== 人在回路反馈 (Human-in-the-loop) ==========
 
 
 class FeedbackRequest(BaseModel):
-    """人在回路反馈请求 (P0-Future-03).
+    """人在回路反馈请求.
 
     AGENTS.md 第 14 章: /v1/feedback 为允许调用的端点 (人在回路反馈通道).
     用户通过此端点提交对研究计划/大纲的审核反馈, 解决 HumanAgent 等待的 Future.
@@ -1864,7 +1860,7 @@ class FeedbackRequest(BaseModel):
 
 @router.post("/feedback")
 async def submit_feedback(request: FeedbackRequest) -> Any:
-    """提交人在回路审核反馈 (P0-Future-03).
+    """提交人在回路审核反馈.
 
     AGENTS.md 第 14 章: /v1/feedback 为允许调用的端点.
     HumanAgent 在 human 节点通过 FeedbackQueue.wait_feedback() 阻塞等待,

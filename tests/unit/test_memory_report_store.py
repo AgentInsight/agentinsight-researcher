@@ -183,7 +183,7 @@ def _make_settings() -> Settings:
 
 
 class _MockPool:
-    """伪造 asyncpg.Pool (P0-4: report_store 改用 get_pool 连接池)."""
+    """伪造 asyncpg.Pool (report_store 改用 get_pool 连接池)."""
 
     def __init__(self, conn: _MockConn) -> None:
         self._conn = conn
@@ -201,7 +201,7 @@ class _MockPool:
 
 
 def _install_mock_pool(monkeypatch: pytest.MonkeyPatch, mock_conn: _MockConn) -> None:
-    """注入 mock get_pool (P0-4: report_store 通过 get_pool 获取连接池, 不再直连).
+    """注入 mock get_pool (report_store 通过 get_pool 获取连接池, 不再直连).
 
     mock get_pool 返回 _MockPool, 其 acquire() yield _MockConn.
     """

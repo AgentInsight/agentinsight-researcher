@@ -1,6 +1,6 @@
 """MCP 配置管理 API.
 
-任务7: 前端 MCP 配置功能 + Postgres 持久化.
+前端 MCP 配置功能 + Postgres 持久化.
 Agent 通过 postgres 获取对应的 MCP 配置.
 
 AGENTS.md 第 7/9 章:
@@ -8,7 +8,7 @@ AGENTS.md 第 7/9 章:
 - 工具 (MCP) 配置集中在 tools/registry.py, 此处仅提供 CRUD 持久化
 - 所有持久化层 (Postgres) 以 agent_id 区分各 Agent, 用户私有数据按 user_id 区分
 
-MCP 传输模式 (对标 MCP 协议):
+MCP 传输模式:
 - stdio (本地模式): 通过 stdin/stdout 与本地进程通信, command 必填, server_url 可选
 - sse (远程模式): 通过 SSE 连接远程 HTTP 服务器, server_url 必填, command 不需要
 - streamable_http (远程模式): 通过 HTTP 流连接远程服务器, server_url 必填, command 不需要

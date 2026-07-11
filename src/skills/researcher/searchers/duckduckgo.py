@@ -1,7 +1,6 @@
 """DuckDuckGo 搜索 - 国内兜底 (无需 API Key).
 
 用户需求 5: 国内资料搜索兜底方案, 无需 Key.
-设计参考: retrievers/duckduckgo/duckduckgo.py.
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ import asyncio
 import logging
 
 # 优先 ddgs 新包名 (v8+), 回退 duckduckgo_search 旧包名 (v6/v7)
-# P1-04: 抑制 duckduckgo_search 弃用警告 (旧包仍可用, 仅提示升级到 ddgs)
+# 抑制 duckduckgo_search 弃用警告 (旧包仍可用, 仅提示升级到 ddgs)
 import warnings as _warnings
 from typing import Any
 
@@ -18,8 +17,8 @@ from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
 
-# P1-5: DuckDuckGo 搜索超时保护 (秒)
-# P0-1 优化: 运行时从 settings.search_timeout 读取 (默认 10.0), 此常量仅作为兜底默认值
+# DuckDuckGo 搜索超时保护 (秒)
+# 运行时从 settings.search_timeout 读取 (默认 10.0), 此常量仅作为兜底默认值
 # 网络挂起时强制降级返回空列表, 避免研究流程卡死
 DUCKDUCKGO_TIMEOUT = 10
 
@@ -78,13 +77,12 @@ class DuckDuckGoSearcher(BaseSearcher):
                 return []
             try:
                 # ddgs 是同步库, 用 asyncio.to_thread 包装
-                # P1-5: 用 asyncio.wait_for 包裹, 防止网络挂起导致整个研究流程卡死
-                # P0-1 优化: 超时从 settings.search_timeout 读取 (默认 10.0), 替代原硬编码 30s
+                # 用 asyncio.wait_for 包裹, 防止网络挂起导致整个研究流程卡死
                 timeout = self.settings.search_timeout
 
                 def _sync_search() -> list[dict[str, Any]]:
                     results: list[dict[str, Any]] = []
-                    # P1-04: 抑制 duckduckgo_search 弃用警告 (构造 + __enter__ + text 调用均可能触发)
+                    # 抑制 duckduckgo_search 弃用警告 (构造 + __enter__ + text 调用均可能触发)
                     with _warnings.catch_warnings():
                         _warnings.filterwarnings(
                             "ignore",

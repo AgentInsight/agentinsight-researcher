@@ -1,4 +1,4 @@
-"""单元测试: V2 优化对齐 (V2-P0/P1).
+"""单元测试: V2 优化对齐.
 
 验证 V2 优化的 7 项改动:
 1. settings.py: 新增配置字段 (written_content_similarity_threshold / dashscope_api_key /
@@ -31,26 +31,26 @@ class TestV2Settings:
     """V2 settings.py 新增配置字段验证."""
 
     def test_written_content_similarity_threshold_default(self) -> None:
-        """默认值 0.5 (设计参考 WrittenContentCompressor)."""
+        """默认值 0.5 (WrittenContentCompressor)."""
         s = Settings()
         assert s.written_content_similarity_threshold == 0.5
 
     def test_dashscope_api_key_field_exists(self) -> None:
-        """V2-P0: dashscope_api_key 字段存在 (方案 B smart_llm=qwen-max 用)."""
+        """dashscope_api_key 字段存在 (方案 B smart_llm=qwen-max 用)."""
         s = Settings()
         # 默认 None, 部署时通过 .env 注入
         assert hasattr(s, "dashscope_api_key")
         assert s.dashscope_api_key is None
 
     def test_embeddings_filter_chunk_size_default(self) -> None:
-        """设计参考 RecursiveCharacterTextSplitter chunk_size=1000."""
+        """RecursiveCharacterTextSplitter chunk_size=1000."""
         s = Settings()
         assert s.embeddings_filter_chunk_size == 1000
         assert s.embeddings_filter_chunk_overlap == 100
         assert s.embeddings_filter_top_k == 20
 
     def test_detailed_section_word_min_max(self) -> None:
-        """V2-P1: 章节字数 500-1000 → 800-1200 对齐业界实践."""
+        """章节字数 500-1000 → 800-1200 对齐业界实践."""
         s = Settings()
         assert s.detailed_section_word_min == 800
         assert s.detailed_section_word_max == 1200
@@ -65,7 +65,7 @@ class TestV2Prompts:
     """V2 prompts.py 强化验证."""
 
     def test_writer_prompt_contains_must_requirements(self) -> None:
-        """V2-P1: writer_prompt MUST 含具体观点 + 表格 + [n] 编号引用."""
+        """writer_prompt MUST 含具体观点 + 表格 + [n] 编号引用."""
         family = DefaultPromptFamily()
         prompt = family.writer_prompt(
             query="测试",
@@ -89,7 +89,7 @@ class TestV2Prompts:
         assert "1200" in prompt
 
     def test_curator_prompt_contains_quantitative_value(self) -> None:
-        """V2-P1: curator_prompt 强调 Quantitative Value 第 5 维."""
+        """curator_prompt 强调 Quantitative Value 第 5 维."""
         family = DefaultPromptFamily()
         prompt = family.curator_prompt(
             query="测试",
@@ -107,7 +107,7 @@ class TestV2Prompts:
             assert dim in prompt
 
     def test_default_family_has_4_detailed_report_prompts(self) -> None:
-        """V2-P1: DefaultPromptFamily 实现 4 个 detailed_report prompt 方法."""
+        """DefaultPromptFamily 实现 4 个 detailed_report prompt 方法."""
         family = DefaultPromptFamily()
         # 4 个方法都存在且返回非空字符串
         sub = family.subtopics_prompt("q", "ctx", "role", 5)
@@ -122,7 +122,7 @@ class TestV2Prompts:
         assert isinstance(conc, str) and "结论" in conc
 
     def test_english_family_has_4_detailed_report_prompts(self) -> None:
-        """V2-P1: EnglishPromptFamily 实现 4 个 detailed_report prompt 方法."""
+        """EnglishPromptFamily 实现 4 个 detailed_report prompt 方法."""
         family = EnglishPromptFamily()
         sub = family.subtopics_prompt("q", "ctx", "role", 5)
         assert isinstance(sub, str) and "subtopic" in sub.lower()
@@ -136,14 +136,14 @@ class TestV2Prompts:
         assert isinstance(conc, str) and "Conclusion" in conc
 
     def test_section_prompt_word_count_800_1200(self) -> None:
-        """V2-P1: section_prompt 默认字数 800-1200 对齐业界实践."""
+        """section_prompt 默认字数 800-1200 对齐业界实践."""
         family = DefaultPromptFamily()
         prompt = family.section_prompt("topic", "ctx", "refs", "role", "objective", "academic")
         assert "800" in prompt
         assert "1200" in prompt
 
     def test_english_writer_prompt_contains_must_requirements(self) -> None:
-        """V2-P1: 英文 writer_prompt 同样含 MUST 具体观点+表格+[n]引用."""
+        """英文 writer_prompt 同样含 MUST 具体观点+表格+[n]引用."""
         family = EnglishPromptFamily()
         prompt = family.writer_prompt(
             query="test",
@@ -162,7 +162,7 @@ class TestV2Prompts:
         assert "[n]" in prompt
 
     def test_english_curator_prompt_contains_quantitative_value(self) -> None:
-        """V2-P1: 英文 curator_prompt 同样含 Quantitative Value."""
+        """英文 curator_prompt 同样含 Quantitative Value."""
         family = EnglishPromptFamily()
         prompt = family.curator_prompt(
             query="test",
@@ -178,9 +178,9 @@ class TestV2Prompts:
 
 
 class TestRecursiveSplit:
-    """V2-P1: recursive_split / cosine_similarity 模块级工具验证.
+    """recursive_split / cosine_similarity 模块级工具验证.
 
-    V4-P3 重构: 旧 `EmbeddingsFilter` 类已删除 (上下文压缩改用 FastEmbed),
+    重构: 旧 `EmbeddingsFilter` 类已删除 (上下文压缩改用 FastEmbed),
     保留 `recursive_split` / `cosine_similarity` 为模块级函数供 BM25Filter
     与 WrittenContentCompressor 复用.
     """
@@ -244,10 +244,10 @@ class TestRecursiveSplit:
 
 
 class TestWrittenContentCompressorV2:
-    """V2-P1: WrittenContentCompressor 阈值走 settings + chunk 级去重."""
+    """WrittenContentCompressor 阈值走 settings + chunk 级去重."""
 
     def test_threshold_from_settings(self) -> None:
-        """V2-P1: 阈值默认从 settings.written_content_similarity_threshold 读取."""
+        """阈值默认从 settings.written_content_similarity_threshold 读取."""
         from src.skills.researcher.context_manager import WrittenContentCompressor
 
         settings = Settings()
@@ -256,7 +256,7 @@ class TestWrittenContentCompressorV2:
         assert compressor.threshold == 0.42
 
     def test_threshold_default_0_5(self) -> None:
-        """V2-P1: 默认阈值 0.5 (设计参考)."""
+        """默认阈值 0.5."""
         from src.skills.researcher.context_manager import WrittenContentCompressor
 
         settings = Settings()
@@ -264,7 +264,7 @@ class TestWrittenContentCompressorV2:
         assert compressor.threshold == 0.5
 
     def test_threshold_param_overrides_settings(self) -> None:
-        """V2-P1: 显式参数优先级高于 settings."""
+        """显式参数优先级高于 settings."""
         from src.skills.researcher.context_manager import WrittenContentCompressor
 
         settings = Settings()
@@ -273,7 +273,7 @@ class TestWrittenContentCompressorV2:
         assert compressor.threshold == 0.6
 
     def test_reset_clears_chunks(self) -> None:
-        """V2-P1: reset 清空 _written_chunks (新增字段)."""
+        """reset 清空 _written_chunks (新增字段)."""
         from src.skills.researcher.context_manager import WrittenContentCompressor
 
         compressor = WrittenContentCompressor(Settings())
@@ -288,11 +288,11 @@ class TestWrittenContentCompressorV2:
 
 
 class TestAgentCreatorV2:
-    """V2-P1: AgentCreator tier/temperature 对齐业界实践."""
+    """AgentCreator tier/temperature 对齐业界实践."""
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_smart_tier(self) -> None:
-        """V2-P1: _generate_via_llm 用 SMART tier (旧版 FAST)."""
+        """_generate_via_llm 用 SMART tier (旧版 FAST)."""
         from src.llm.client import LLMTier
         from src.skills.researcher.agent_creator import AgentCreator
 
@@ -310,7 +310,7 @@ class TestAgentCreatorV2:
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_temperature_0_15(self) -> None:
-        """V2-P1: _generate_via_llm temperature=0.15 (旧版 0.0)."""
+        """_generate_via_llm temperature=0.15 (旧版 0.0)."""
         from src.skills.researcher.agent_creator import AgentCreator
 
         creator = AgentCreator(Settings())
@@ -328,7 +328,7 @@ class TestAgentCreatorV2:
 
 
 class TestSourceCuratorV2:
-    """V2-P1: SourceCurator 加 Quantitative Value 维度."""
+    """SourceCurator 加 Quantitative Value 维度."""
 
     def test_score_quantitative_value_empty(self) -> None:
         """空内容返回 0."""
@@ -374,7 +374,7 @@ class TestSourceCuratorV2:
         assert score == 0.0
 
     def test_score_credibility_includes_quant_value(self) -> None:
-        """V2-P1: _score_credibility 内部已调用 _score_quantitative_value."""
+        """_score_credibility 内部已调用 _score_quantitative_value."""
         from src.skills.researcher.source_curator import SourceCurator
 
         curator = SourceCurator(Settings())
@@ -398,10 +398,10 @@ class TestSourceCuratorV2:
 
 
 class TestReportGeneratorV2:
-    """V2-P1: ReportGenerator detailed_report 章节字数 800-1200."""
+    """ReportGenerator detailed_report 章节字数 800-1200."""
 
     def test_section_prompt_uses_settings_word_count(self) -> None:
-        """V2-P1: _write_section 使用 settings.detailed_section_word_min/max."""
+        """_write_section 使用 settings.detailed_section_word_min/max."""
         # 通过 PromptFamily.section_prompt 验证 settings 注入
         family = DefaultPromptFamily()
         prompt = family.section_prompt(

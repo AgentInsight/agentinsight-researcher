@@ -1,4 +1,4 @@
-"""RAGAS 评测运行器 (对标 AGENTS.md 第 10 章, CI 门禁).
+"""RAGAS 评测运行器 (AGENTS.md 第 10 章, CI 门禁).
 
 从 JSON 加载查询集 (含 question + ground_truth), 对每个查询:
   调用 researcher → 获取报告+来源 → 调用 RAGASEvaluator → 输出汇总报告 + 门禁判定.

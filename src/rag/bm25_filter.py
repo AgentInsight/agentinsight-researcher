@@ -1,11 +1,11 @@
-"""BM25Filter 关键词过滤器 (V4-P3 L2 方案, 替代旧 EmbeddingsFilter 中段路由).
+"""BM25Filter 关键词过滤器 (替代 EmbeddingsFilter 中段路由).
 
-设计参考: EmbeddingsFilter 的轻量替代方案, 针对本项目 TEI CPU 部署的性能瓶颈:
-- 旧 EmbeddingsFilter (已删除): 258 chunks × TEI 推理 = ~43 分钟 (Trace aac742d8 实测)
+针对本项目 TEI CPU 部署的性能瓶颈:
+- EmbeddingsFilter 方案: 258 chunks × TEI 推理 = ~43 分钟 (实测)
 - BM25Filter: 258 chunks × 本地 jieba+BM25 = ~2 秒 (1000× 加速)
 
 设计原则:
-1. 签名与旧 EmbeddingsFilter.filter 完全一致, 支持平滑替换
+1. 签名与 EmbeddingsFilter.filter 完全一致, 支持平滑替换
 2. 复用 embeddings_filter.recursive_split 模块级函数 (保证 chunk 级一致性)
 3. 复用 retriever._get_tokens 模式 (jieba 分词 + LRU 缓存, 但实例独立)
 4. 零网络调用, 零 TEI 依赖, 纯本地 CPU 计算
@@ -45,7 +45,7 @@ _TOKEN_CACHE_MAX_SIZE: int = 2000
 
 
 class BM25Filter:
-    """BM25 关键词过滤器 (L2 方案, 替代旧 EmbeddingsFilter 中段路由).
+    """BM25 关键词过滤器 (替代 EmbeddingsFilter 中段路由).
 
     核心流程:
     1. 递归分块 (复用 embeddings_filter.recursive_split, chunk_size=1000, overlap=100)
@@ -53,7 +53,7 @@ class BM25Filter:
     3. BM25Okapi 语料构建 (显式传 k1=settings.bm25_k1, b=settings.bm25_b)
     4. BM25 打分 + Top-K 召回 (零网络调用)
 
-    对比旧 EmbeddingsFilter (已删除):
+    对比 EmbeddingsFilter:
     - 优势: 零网络调用, 10-200ms 响应 (vs 200-2000ms), 无 TEI 依赖
     - 劣势: 关键词匹配, 语义召回弱 (无法处理同义词/跨语言)
     - 定位: >=8K 字符区段主路径 (含 >50K 超长上下文, 全量覆盖)
@@ -84,7 +84,7 @@ class BM25Filter:
     ) -> list[str]:
         """按 BM25 分数过滤文档块, 返回 Top-K 内容列表.
 
-        签名与旧 EmbeddingsFilter.filter 一致 (便于平滑替换).
+        签名与 EmbeddingsFilter.filter 一致 (便于平滑替换).
 
         Args:
             query: 查询文本 (用于 BM25 打分)

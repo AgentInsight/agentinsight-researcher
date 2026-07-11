@@ -45,14 +45,14 @@ smart_token_limit: int = 6000
 strategic_token_limit: int = 4000
 ```
 
-**分层语义**(设计参考: FAST/SMART/STRATEGIC):
+**分层语义**(FAST/SMART/STRATEGIC):
 | 层级 | 模型 | 用途 | 调用点数量 | 单价(¥/1K) |
 |------|------|------|----------|------------|
 | FAST | zhipuai/glm-4-flash | 摘要/分类/JSON 解析/Mermaid 图表 | 8 | 输入 0.0001 / 输出 0.0001 |
 | SMART | deepseek/deepseek-v4-flash | 报告写作/章节生成/来源策展/评审 | 14 | 输入 0.001 / 输出 0.002 |
 | STRATEGIC | deepseek/deepseek-v4-pro | 子主题拆解/规划/事实核查 | 4 | 输入 0.002 / 输出 0.008 |
 
-**降级链**(P1-Future-05,`src/llm/client.py:129-133`):STRATEGIC 失败 → SMART → FAST,流式已开始 yield 后不降级。
+**降级链**(`src/llm/client.py:129-133`):STRATEGIC 失败 → SMART → FAST,流式已开始 yield 后不降级。
 
 ### 1.2 同类项目 LLM 架构(基于公开知识)
 
@@ -75,7 +75,7 @@ strategic_token_limit: int = 4000
 | Skill / 节点 | 文件 | AIR Tier | 同类项目对应 | 备注 |
 |---|---|---|---|---|
 | QueryIntentClassifier | `query_classifier.py:887` | FAST | (无) | AIR 独有,三层分类,大多数命中规则/语义层不调 LLM |
-| AgentCreator | `agent_creator.py:162` | SMART | smart_llm (gpt-4o) | V2-P1: FAST→SMART 对齐同类项目 |
+| AgentCreator | `agent_creator.py:162` | SMART | smart_llm (gpt-4o) | FAST→SMART 对齐同类项目 |
 | ResearchConductor.plan_research | `research_conductor.py:114` | STRATEGIC | smart_llm | 子查询拆解 |
 | ResearchConductor._conduct_summary | `research_conductor.py:325` | FAST | (无) | summary 模式专用 |
 | ResearchConductor._generate_subtopics | `research_conductor.py:424` | STRATEGIC | smart_llm | subtopics 模式 |
@@ -86,7 +86,7 @@ strategic_token_limit: int = 4000
 | ReportGenerator._write_introduction | `report_generator.py:688` | SMART | smart_llm | detailed_report 引言 |
 | ReportGenerator._write_section | `report_generator.py:752` | SMART | smart_llm | detailed_report 章节 |
 | ReportGenerator._write_conclusion | `report_generator.py:803` | SMART | smart_llm | detailed_report 结论 |
-| DeepResearcher._assess_complexity | `deep_research.py:200` | FAST | (无) | V4-P2-02 自适应深度 |
+| DeepResearcher._assess_complexity | `deep_research.py:200` | FAST | (无) | 自适应深度 |
 | DeepResearcher._generate_sub_queries | `deep_research.py:276` | STRATEGIC | smart_llm | 递归子查询 |
 | Reviewer | `reviewer.py:202` | SMART | smart_llm | 多 Agent 图专用 |
 | Reviser | `reviser.py:123` | SMART | smart_llm | 多 Agent 图专用 |
@@ -565,7 +565,7 @@ revision → visualizer → publisher → END
 3. **Token 预算硬上限**:
    - `TokenBudgetAllocator`(`src/llm/token_budget.py`)按节点比例分配,writer 50% / researcher 20% / planner 10% 等
    - `max_total_tokens = 128000` 单次研究流程总预算
-   - 节点超支抛 `BudgetExceededError`(P1-02)
+   - 节点超支抛 `BudgetExceededError`
 
 4. **LLM 降级链**:`STRATEGIC → SMART → FAST`,失败时自动降级到更便宜模型(`client.py:129-133`)
 

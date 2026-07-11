@@ -1,6 +1,5 @@
 """Publisher 发布器.
 
-设计参考: multi_agents/agents/publisher.py.
 AGENTS.md 用户需求 6: 输出报告格式需支持 Markdown/HTML/PDF, 默认 Markdown.
 """
 
@@ -19,9 +18,8 @@ logger = logging.getLogger(__name__)
 class Publisher:
     """报告发布器.
 
-    设计参考: Publisher 模式.
     支持 Markdown (默认) / HTML / PDF / DOCX / JSON / LaTeX / EPUB 输出
-    (P1-05 扩展 docx + json; P2-01 扩展 latex + epub + 多格式同时导出).
+    (扩展 docx + json; 扩展 latex + epub + 多格式同时导出).
     """
 
     settings: Settings
@@ -47,10 +45,10 @@ class Publisher:
         - markdown: 返回 Markdown 原文
         - html: 返回 HTML 渲染
         - pdf: 返回 PDF 文件路径
-        - docx: 返回 DOCX 二进制 (P1-05)
-        - json: 返回结构化 JSON 字符串 (P1-05)
-        - latex: 返回 LaTeX 源码 (P2-01, 学术场景)
-        - epub: 返回 EPUB 二进制 (P2-01, 电子书场景)
+        - docx: 返回 DOCX 二进制
+        - json: 返回结构化 JSON 字符串
+        - latex: 返回 LaTeX 源码 (学术场景)
+        - epub: 返回 EPUB 二进制 (电子书场景)
         """
         async with trace_chain(
             name="publisher",
@@ -103,7 +101,7 @@ class Publisher:
             return {"format": "markdown", "content": report_md, "path": None}
 
     def _to_docx(self, content: str, *, title: str = "") -> bytes:
-        """Markdown → DOCX (python-docx, P1-05).
+        """Markdown → DOCX (python-docx).
 
         简易 Markdown 解析 (标题/段落/列表), 失败返回空 bytes.
         中文字体通过修改 Normal 样式 + eastAsia 属性设置, 确保 Word/WPS 正确显示.
@@ -169,7 +167,7 @@ class Publisher:
         agent_role_server: str = "",
         research_mode: str = "",
     ) -> str:
-        """报告 → JSON (结构化输出, P1-05)."""
+        """报告 → JSON (结构化输出)."""
         import json
         from datetime import datetime
 
@@ -270,7 +268,7 @@ th {{ background: #f8f9fa; font-weight: 600; }}
         return html_path
 
     def _to_latex(self, report_md: str) -> str:
-        """Markdown → LaTeX (学术场景, P2-01).
+        """Markdown → LaTeX (学术场景).
 
         基础转换: 标题/列表/粗体, 纯 Python 实现不引入新依赖.
         """
@@ -331,7 +329,7 @@ th {{ background: #f8f9fa; font-weight: 600; }}
         return "\n".join(latex_lines)
 
     def _to_epub(self, report_md: str, *, title: str = "") -> bytes:
-        """Markdown → EPUB (电子书场景, P2-01, 纯 stdlib zipfile 实现)."""
+        """Markdown → EPUB (电子书场景, 纯 stdlib zipfile 实现)."""
         import io
         import re
         import uuid
@@ -445,12 +443,12 @@ th {{ background: #f8f9fa; font-weight: 600; }}
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """一次报告生成多种格式 (P2-01).
+        """一次报告生成多种格式.
 
         返回 dict, key 为格式名 (markdown/html/pdf_path/docx/json/latex/epub),
         value 为对应内容 (字符串/字节/文件路径).
 
-        P1-4: 改用 asyncio.gather 并行执行多种格式导出, 延迟不再随格式数线性增长;
+        改用 asyncio.gather 并行执行多种格式导出, 延迟不再随格式数线性增长;
         return_exceptions=True 隔离单个格式失败, 不影响其他格式.
         每个 publish() 内部已有 trace_chain 包裹, 并行后仍保留追踪能力.
 

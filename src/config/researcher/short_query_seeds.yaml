@@ -1,4 +1,4 @@
-# 短查询种子模式 (P0-Future-05/06)
+# 短查询种子模式
 # 懒初始化时预填充到 Qdrant short_query_patterns namespace, 用 Embeddings 语义匹配.
 # 涵盖问候/告别/确认/数字/测试/感谢/天气/时间等常见短查询.
 # 共 178 条不重复种子.

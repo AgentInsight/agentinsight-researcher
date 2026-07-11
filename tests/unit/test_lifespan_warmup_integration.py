@@ -41,7 +41,7 @@ def _clear_fastembed_singleton() -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_graph_singleton() -> None:
-    """每个用例前后重置 routes._compiled_graph 全局单例 (P1-OPT-009, 避免跨测试污染)."""
+    """每个用例前后重置 routes._compiled_graph 全局单例 (避免跨测试污染)."""
     import src.api.routes as routes_mod
 
     routes_mod._compiled_graph = None
@@ -99,11 +99,11 @@ def _patch_lifespan_deps(fastembed_client_mock: MagicMock | None = None) -> list
             new=AsyncMock(),
         ),
         patch("src.skills.researcher.scrapers.close_shared_http_client", new=AsyncMock()),
-        # P1-1/P1-10: lifespan shutdown 新增的清理调用
+        # lifespan shutdown 新增的清理调用
         patch("server.close_jwt_middleware", new=AsyncMock()),
         patch("src.memory.db_initializer.close_pool", new=AsyncMock()),
         patch("src.memory.checkpointer.close_checkpointer_pool", new=AsyncMock()),
-        # P1-OPT-009: 图预热 mock (lifespan _warmup_graph 后台任务调用 build_researcher_graph)
+        # 图预热 mock (lifespan _warmup_graph 后台任务调用 build_researcher_graph)
         patch("src.graph.builder.build_researcher_graph", new=AsyncMock()),
     ]
     if fastembed_client_mock is not None:

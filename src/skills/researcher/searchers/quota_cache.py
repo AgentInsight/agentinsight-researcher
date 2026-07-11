@@ -34,15 +34,12 @@ class QuotaCache:
         self._settings = settings
         self._redis: Any | None = None
         # redis_url 优先从 settings 读取, 不存在则禁用
-        # P0-2: 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
+        # 字段已在 Settings 中声明, 直接访问 (消除 getattr 防御式编程)
         self._redis_url = settings.redis_url or None
         self._enabled = bool(self._redis_url)
 
     async def _get_redis(self) -> Any | None:
-        """P0-5: 惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
-
-        P0-5 修复: 原 from_url 未传 password 参数, 现由 get_redis_client 统一注入
-        (password=settings.redis_auth), 保证鉴权一致.
+        """惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
         """
         if not self._enabled:
             return None
@@ -158,7 +155,7 @@ class QuotaCache:
     async def list_exceeded(self) -> list[dict[str, Any]]:
         """列出当前所有额度已满的引擎 (监控用).
 
-        P1-3 修复: 使用 SCAN 迭代器替代 KEYS 命令, 避免 O(N) 阻塞 Redis.
+        使用 SCAN 迭代器替代 KEYS 命令, 避免 O(N) 阻塞 Redis.
         """
         r = await self._get_redis()
         if r is None:
@@ -166,7 +163,7 @@ class QuotaCache:
         try:
             agent_id = self._settings.agent_name or "agentinsight-researcher"
             pattern = f"{agent_id}:_global:searcher:quota:*"
-            # P1-3: SCAN 迭代器, count=100 平衡 RTT 与阻塞时间
+            # SCAN 迭代器, count=100 平衡 RTT 与阻塞时间
             keys: list[str] = []
             async for key in r.scan_iter(match=pattern, count=100):
                 keys.append(key)

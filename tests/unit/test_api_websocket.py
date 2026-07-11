@@ -1,4 +1,4 @@
-"""单元测试: WebSocket 双向实时通信 (P2-Future-02).
+"""单元测试: WebSocket 双向实时通信.
 
 验证 src/api/websocket.py:
 - ping → pong 响应

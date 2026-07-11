@@ -1,9 +1,8 @@
 """Arxiv 抓取器 - 学术论文 (含全文).
 
-设计参考: scraper/arxiv/arxiv.py.
 适用于 arxiv.org URL, 直接获取论文摘要与全文.
 
-P2-9 修复: httpx 流式下载 + 超时/重试 + tempfile 替代 /tmp.
+httpx 流式下载 + 超时/重试 + tempfile 替代 /tmp.
 """
 
 from __future__ import annotations

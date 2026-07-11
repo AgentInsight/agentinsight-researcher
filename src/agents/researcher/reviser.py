@@ -1,7 +1,7 @@
-"""Reviser 报告修订 Agent (P0-Future-01).
+"""Reviser 报告修订 Agent.
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-设计参考: reviser 角色 + 章节级修订循环.
+reviser 角色 + 章节级修订循环.
 
 Reviser 职责:
 - 根据 Reviewer 反馈修订报告, 返回新的 report_md
@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 class Reviser:
-    """报告修订 Agent (P0-Future-01).
+    """报告修订 Agent.
 
     根据 Reviewer 反馈修订报告, 返回新的 report_md.
-    设计参考: reviser 角色 + 章节级修订循环.
+    reviser 角色 + 章节级修订循环.
     """
 
     settings: Settings

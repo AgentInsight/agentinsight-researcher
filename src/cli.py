@@ -1,4 +1,4 @@
-"""命令行入口 (P1-06).
+"""命令行入口.
 
 提供 ``python -m src.cli`` 命令行研究入口, 复用 LangGraph 研究流水线.
 
@@ -101,7 +101,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="agent_role",
         default=None,
         help=(
-            "设计参考 AGENT_ROLE 配置: 注入行业 persona 字符串, "
+            "注入行业 persona 字符串, "
             "优先级高于 LLM 动态生成 (AgentCreator). "
             "行业适配采用 4 层机制, 不再使用行业分类器."
         ),
@@ -148,10 +148,10 @@ def _build_initial_state(
         "report_format": report_format,
         "tone": tone,
         "total_words": total_words,
-        # 设计参考: agent_role (来自 --agent-role 或 settings) 优先级高于 LLM 动态生成
+        # agent_role (来自 --agent-role 或 settings) 优先级高于 LLM 动态生成
         "agent_role": agent_role or settings.agent_role or "",
         "agent_role_server": "",
-        # P1-Future-02: 域名过滤白名单
+        # 域名过滤白名单
         "query_domains": query_domains or [],
         # 研究流程占位
         "messages": [],
@@ -162,7 +162,7 @@ def _build_initial_state(
         "curated_sources": [],
         # 输出占位
         "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
-        "report_formats": {},  # P2-1: {md|html|pdf|docx|json: 内容或路径}
+        "report_formats": {},  # {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
         # 深度研究配置
         "research_mode": mode,
@@ -184,9 +184,9 @@ def _emit_result(
     - pdf: 提示 PDF 路径; -o 时复制到目标路径
     - docx: 二进制, -o 写文件; 无 -o 则提示需指定路径
 
-    P2-1: 优先从 report_formats 读取, 兼容期回退旧字段 (report_pdf_path/report_docx).
+    优先从 report_formats 读取, 兼容期回退旧字段 (report_pdf_path/report_docx).
     """
-    # P2-1: 优先从 report_formats 读取, 兼容期回退旧字段
+    # 优先从 report_formats 读取, 兼容期回退旧字段
     formats = final_state.get("report_formats") or {}
 
     if fmt == "pdf":
@@ -219,7 +219,7 @@ def _emit_result(
         sys.stdout.buffer.flush()
         return 0
 
-    # 文本类: markdown / html / json (P2-1: 优先 report_formats, 兼容旧字段)
+    # 文本类: markdown / html / json
     field_map = {"markdown": "md", "html": "html", "json": "json"}
     key = field_map[fmt]
     content = str(
@@ -264,7 +264,7 @@ async def main() -> int:
     words: int | None = args.words
     multi_agent: bool = args.multi_agent
     agent_role: str | None = args.agent_role
-    # P1-Future-02: 解析域名过滤白名单 (逗号分隔)
+    # 解析域名过滤白名单 (逗号分隔)
     query_domains_str: str | None = args.query_domains
     query_domains: list[str] | None = None
     if query_domains_str:

@@ -1,6 +1,5 @@
-"""Firecrawl 抓取器 (P1-Future-08).
+"""Firecrawl 抓取器.
 
-设计参考: scraper/firecrawl.py (82 行).
 Firecrawl 是商业 LLM 友好抓取服务, 输出已为 LLM 优化的 Markdown/HTML.
 
 依赖说明:

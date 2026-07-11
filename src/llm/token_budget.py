@@ -1,13 +1,13 @@
-"""Token 预算分配器与成本归因 (P1-02).
+"""Token 预算分配器与成本归因.
 
-设计参考 add_costs() 按步骤归因成本的设计, 升级为:
+add_costs() 按步骤归因成本的设计, 升级为:
 - 并发安全 (asyncio.Lock)
 - 节点级预算上限 (BudgetExceededError)
 - 模型级成本拆分 (LLM + Embedding)
-- US 区域倍率 (设计参考 1.1x)
+- US 区域倍率 (1.1x)
 
 AGENTS.md 第 5 章: max_iterations 为硬上限, 由节点计数器 + 条件边强制.
-P1-02 在此基础上增加 token 预算硬上限, 避免单节点超支导致整体失败.
+本模块在此基础上增加 token 预算硬上限, 避免单节点超支导致整体失败.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class BudgetExceededError(Exception):
-    """预算超支异常 (P1-02).
+    """预算超支异常.
 
     当某节点累计 token 超过分配的预算时抛出, 由上层捕获降级处理.
     """
@@ -35,7 +35,7 @@ class BudgetExceededError(Exception):
 
 @dataclass
 class StepCost:
-    """单步骤成本记录 (设计参考 step_costs 字典的 value)."""
+    """单步骤成本记录 (step_costs 字典的 value)."""
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -72,7 +72,7 @@ class StepCost:
 
 
 class TokenBudgetAllocator:
-    """节点级 token 预算分配器 (P1-02).
+    """节点级 token 预算分配器.
 
     根据 settings.max_total_tokens 按比例分配给各节点:
     - planner: 10%
@@ -81,10 +81,10 @@ class TokenBudgetAllocator:
     - reviewer: 10%
     - reviser: 10%
 
-    设计参考 add_costs() 的分步归因, 升级为预算上限管控.
+    add_costs() 的分步归因, 升级为预算上限管控.
     """
 
-    # 节点预算比例 (设计参考 step_costs 的步骤定义, 升级为比例分配)
+    # 节点预算比例 (step_costs 的步骤定义, 升级为比例分配)
     NODE_RATIOS: dict[str, float] = {
         "planner": 0.10,
         "researcher": 0.20,
@@ -95,7 +95,7 @@ class TokenBudgetAllocator:
         "_default": 0.05,
     }
 
-    # US 区域倍率 (设计参考 costs.py 的 1.1x)
+    # US 区域倍率 (costs.py 的 1.1x)
     US_REGION_MULTIPLIER: float = 1.1
 
     def __init__(self, total_budget: int) -> None:
@@ -106,7 +106,7 @@ class TokenBudgetAllocator:
         """
         self.total_budget = total_budget
         self._lock = asyncio.Lock()
-        # 步骤成本归因 (设计参考 step_costs, 升级为 StepCost 对象)
+        # 步骤成本归因 (step_costs, 升级为 StepCost 对象)
         self._step_costs: dict[str, StepCost] = {}
         # 节点预算上限 (按比例分配)
         self._node_budgets: dict[str, int] = {
@@ -137,7 +137,7 @@ class TokenBudgetAllocator:
         cost_usd: float = 0.0,
         check_budget: bool = True,
     ) -> None:
-        """累加一次调用的成本到指定节点 (设计参考 add_costs).
+        """累加一次调用的成本到指定节点 (add_costs).
 
         AGENTS.md 第 10 章: 成本归因通过 trace span 自动传播, 不需手动传递.
 
@@ -176,7 +176,7 @@ class TokenBudgetAllocator:
                     raise BudgetExceededError(node, used, budget)
 
     async def get_step_costs(self) -> dict[str, dict[str, Any]]:
-        """返回所有步骤的成本快照 (设计参考 step_costs 属性).
+        """返回所有步骤的成本快照 (step_costs 属性).
 
         Returns:
             {node: {prompt_tokens, completion_tokens, total_tokens, call_count,
@@ -196,7 +196,7 @@ class TokenBudgetAllocator:
             }
 
     async def get_total_cost(self) -> dict[str, Any]:
-        """返回总成本汇总 (设计参考 get_total_cost)."""
+        """返回总成本汇总 (get_total_cost)."""
         async with self._lock:
             total_prompt = sum(sc.prompt_tokens for sc in self._step_costs.values())
             total_completion = sum(sc.completion_tokens for sc in self._step_costs.values())
@@ -211,14 +211,14 @@ class TokenBudgetAllocator:
             }
 
 
-# ========== per-session 单例 (P0-2: 避免跨会话预算串扰) ==========
+# ========== per-session 单例 (避免跨会话预算串扰) ==========
 # key = session_id, value = TokenBudgetAllocator 实例
 _allocators: dict[str, TokenBudgetAllocator] = {}
 _allocators_lock = asyncio.Lock()
 
 
 async def get_token_budget_allocator(session_id: str = "") -> TokenBudgetAllocator:
-    """获取指定会话的 TokenBudgetAllocator (P0-2: per-session 隔离).
+    """获取指定会话的 TokenBudgetAllocator (per-session 隔离).
 
     每个 session_id 拥有独立的 allocator 实例, 避免:
     - 会话 A 消耗 planner 预算后会话 B 的 planner 命中超支阈值

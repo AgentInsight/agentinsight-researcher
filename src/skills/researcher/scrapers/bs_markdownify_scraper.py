@@ -1,7 +1,7 @@
 """BeautifulSoup + markdownify 抓取器 (L1 降级链 L2).
 
 Trafilatura 降级后的第二级抓取器, 输出 LLM 友好 Markdown 而非纯文本.
-对标 firecrawl_scraper.py 的 Markdown 输出规约, 但完全本地化 (零 API 调用).
+遵循 firecrawl_scraper.py 的 Markdown 输出规约, 但完全本地化 (零 API 调用).
 
 优势 (对比原 BeautifulSoupScraper):
 - 输出 Markdown (保留标题/列表/链接结构, BS 输出纯文本丢失结构)
@@ -53,7 +53,7 @@ class BSMarkdownifyScraper(BaseScraper):
             response.raise_for_status()
             html = response.text
 
-            # HTML 大小上限检查 (对标 BeautifulSoupScraper, 5MB)
+            # HTML 大小上限检查 (参考 BeautifulSoupScraper, 5MB)
             max_html_size = 5 * 1024 * 1024
             if len(html) > max_html_size:
                 logger.warning(
@@ -72,7 +72,7 @@ class BSMarkdownifyScraper(BaseScraper):
             if soup.title:
                 title = soup.title.string or ""
 
-            # 清理脚本/样式/导航/页脚/页眉 (对标 BeautifulSoupScraper)
+            # 清理脚本/样式/导航/页脚/页眉 (参考 BeautifulSoupScraper)
             for tag in soup(["script", "style", "nav", "footer", "header"]):
                 tag.decompose()
 

@@ -1,4 +1,4 @@
-"""回归测试: TOC 一致性优化 (V4-P1-04 优化 1-6).
+"""回归测试: TOC 一致性优化 (优化 1-6).
 
 验证 temp/report_toc_content_mismatch_optimization.md 中的 6 项优化在完整研究流程中生效:
 1. TOC 后置生成 (从实际 sections 提取, 而非从完整 subtopics 生成)

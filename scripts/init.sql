@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     query TEXT NOT NULL,                       -- 原始研究请求
     report_type VARCHAR(32) NOT NULL DEFAULT 'basic_report',
     report_format VARCHAR(16) NOT NULL DEFAULT 'markdown',
-    agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona (设计参考: agent_role)
-    agent_role_server VARCHAR(64),             -- 角色简称 (设计参考: server 约定, 如 financial_analyst)
+    agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona
+    agent_role_server VARCHAR(64),             -- 角色简称 (如 financial_analyst)
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/running/completed/failed
     total_cost_usd NUMERIC(12,6) DEFAULT 0,
     total_tokens BIGINT DEFAULT 0,
@@ -32,8 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user ON research_sessions
 CREATE INDEX IF NOT EXISTS idx_research_sessions_session ON research_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_sessions_expires ON research_sessions(expires_at);
 
--- ========== 业务表: 研究报告存储 (P1-Future-09) ==========
--- 设计参考: backend/server/report_store.py
+-- ========== 业务表: 研究报告存储 ==========
 -- report_id UUID 主键, 支持 save/get/list/delete 四类操作
 CREATE TABLE IF NOT EXISTS research_reports (
     report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -51,11 +50,11 @@ CREATE TABLE IF NOT EXISTS research_reports (
 CREATE INDEX IF NOT EXISTS idx_research_reports_session ON research_reports(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_user ON research_reports(user_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
--- P1-7: 复合索引 (agent_id + user_id), 符合 AGENTS.md 第 7 章多 Agent 数据隔离约定
+-- 复合索引 (agent_id + user_id), 符合 AGENTS.md 第 7 章多 Agent 数据隔离约定
 CREATE INDEX IF NOT EXISTS idx_research_reports_agent_user ON research_reports(agent_id, user_id);
--- P1-7: session + agent + user 三列复合索引, 加速按会话检索报告
+-- session + agent + user 三列复合索引, 加速按会话检索报告
 CREATE INDEX IF NOT EXISTS idx_research_reports_session_agent_user ON research_reports(session_id, agent_id, user_id);
--- 迁移: 已有 research_reports 表补充 P1-Future-09 新增列 (PostgreSQL 9.6+)
+-- 迁移: 已有 research_reports 表补充新增列 (PostgreSQL 9.6+)
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_id UUID DEFAULT gen_random_uuid();
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS query TEXT;
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_format VARCHAR(32) DEFAULT 'markdown';
@@ -158,7 +157,7 @@ CREATE OR REPLACE TRIGGER trg_uploaded_files_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- 6. 新增 MCP 配置表 (任务7: 前端 MCP 配置 + Postgres 持久化)
+-- 6. 新增 MCP 配置表 (前端 MCP 配置 + Postgres 持久化)
 -- is_system=TRUE 为系统预置公用 MCP (用户不可编辑/删除, 可克隆到自己的列表)
 CREATE TABLE IF NOT EXISTS mcp_configs (
     id BIGSERIAL PRIMARY KEY,
@@ -365,7 +364,7 @@ ON CONFLICT (agent_id, user_id, name) DO UPDATE SET
 WHERE mcp_configs.version < EXCLUDED.version
   AND mcp_configs.is_system = TRUE;
 
--- 7. P1-7 修复: research_reports 字段长度统一 VARCHAR(64) (与其他表一致)
+-- 7. research_reports 字段长度统一 VARCHAR(64) (与其他表一致)
 -- 已有部署的 research_reports 表通过 ALTER 迁移, 新部署由 CREATE TABLE 直接正确
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN session_id TYPE VARCHAR(64);
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN user_id TYPE VARCHAR(64);

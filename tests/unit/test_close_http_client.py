@@ -1,10 +1,10 @@
-"""单元测试: close_shared_http_client 关闭共享 httpx 客户端 (P0-7/P1-3).
+"""单元测试: close_shared_http_client 关闭共享 httpx 客户端.
 
 验证 src/skills/researcher/scrapers/__init__.py 的 close_shared_http_client:
 - 关闭已存在的 httpx.AsyncClient 单例 (释放 TCP 连接池)
 - 幂等: 无实例时直接返回 (不抛异常)
 - 二次调用安全 (关闭后再次调用不报错)
-- server.py lifespan shutdown 阶段调用清理 (P0-7)
+- server.py lifespan shutdown 阶段调用清理
 
 AGENTS.md 第 13 章: 单元测试不依赖外部服务.
 """
@@ -142,7 +142,7 @@ async def test_get_shared_http_client_concurrent_safe() -> None:
 
 @pytest.mark.asyncio
 async def test_server_lifespan_calls_close_shared_http_client_on_shutdown() -> None:
-    """server.py lifespan shutdown 阶段调用 close_shared_http_client (P0-7).
+    """server.py lifespan shutdown 阶段调用 close_shared_http_client.
 
     AGENTS.md 第 5 章: 释放底层 TCP 连接池, 避免依赖进程退出回收.
     验证 lifespan 上下文管理器退出时调用清理函数.

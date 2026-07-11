@@ -111,7 +111,7 @@ async def test_concurrent_research_sessions_5_parallel() -> None:
 async def test_tei_circuit_breaker_recovery_time() -> None:
     """验证 TEI 熔断器恢复时间.
 
-    AGENTS.md 第 7 章 P0-1: TEI 熔断器配置:
+    AGENTS.md 第 7 章: TEI 熔断器配置:
     - failure_threshold: 连续失败 5 次
     - recovery_timeout: 熔断后恢复探测时间 60s
 
@@ -148,7 +148,7 @@ async def test_tei_circuit_breaker_recovery_time() -> None:
 async def test_redis_cache_hit_rate_under_load() -> None:
     """验证 Redis 缓存命中率 (负载下).
 
-    AGENTS.md 第 7 章 P1-3: 进程内 LRU+TTL 缓存, 提升 embedding 命中率.
+    AGENTS.md 第 7 章: 进程内 LRU+TTL 缓存, 提升 embedding 命中率.
     本测试验证缓存机制在高负载下的命中率.
 
     注意: redis 未安装时跳过本测试.

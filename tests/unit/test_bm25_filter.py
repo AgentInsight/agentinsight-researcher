@@ -1,4 +1,4 @@
-"""BM25Filter 单元测试 (V4-P3 两层路由 L2 方案).
+"""BM25Filter 单元测试 (两层路由 L2 方案).
 
 测试覆盖:
 1. 基本过滤: query 与 chunks 关键词重叠, BM25 打分排序
@@ -7,8 +7,6 @@
 4. 分词缓存: 重复文本命中缓存
 5. 两层路由阈值: >=8K 走 BM25Filter (含 >50K 超长上下文, 全量覆盖)
 6. trace_retriever span 集成
-
-对标 test_v2_alignment.py::TestRecursiveSplit 测试模式.
 """
 
 from __future__ import annotations

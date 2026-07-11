@@ -1,6 +1,5 @@
 """SearchAPI 搜索 - 国外搜索引擎.
 
-P2-Future-04: 设计参考 retrievers/searchapi/searchapi.py.
 通过 SearchAPI.io 进行搜索, 适用于全球场景.
 需 SEARCHAPI_API_KEY 环境变量 (query param 鉴权).
 """

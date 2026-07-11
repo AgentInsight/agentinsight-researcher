@@ -1,4 +1,4 @@
-"""单元测试: V4-P3 两层路由集成测试.
+"""单元测试: 两层路由集成测试.
 
 验证 src/skills/researcher/context_manager.py 的 get_similar_content 两层路由:
 - Layer 1 Fast Path: total_chars < bm25_filter_char_threshold (8000) 且
@@ -160,7 +160,7 @@ class TestV4P3LayerRouting:
         self,
         context_manager: ContextManager,
     ) -> None:
-        """V4-P3 两层路由: 大文档 (>=8K) 走 BM25Filter.
+        """两层路由: 大文档 (>=8K) 走 BM25Filter.
 
         现两层路由: >=8K 统一走 BM25Filter (含 >50K 超长上下文).
         BM25 返回 2 chunks (<=30) → 跳过 _embeddings_rerank 精排.
@@ -431,7 +431,7 @@ class TestV4P3L1FallbackChain:
 
 
 class TestV4P3DegradeStrategy:
-    """验证 V4-P3 各层级的降级策略."""
+    """验证各层级的降级策略."""
 
     async def test_bm25_filter_timeout_degrades_to_keyword_match(
         self,
@@ -512,7 +512,7 @@ class TestV4P3DegradeStrategy:
     ) -> None:
         """bm25_filter_enabled=False 时降级到 _keyword_fallback (不调远程 TEI).
 
-        V4-P3 两层路由: 旧 `_embeddings_filter` 方法已删除, bm25_filter_enabled=False
+        两层路由: 旧 `_embeddings_filter` 方法已删除, bm25_filter_enabled=False
         时直接走关键词匹配降级路径 (不依赖远程 TEI embed_texts).
         """
         docs = _make_docs(total_chars=60000, doc_count=100)

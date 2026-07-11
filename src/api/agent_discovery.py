@@ -1,4 +1,4 @@
-"""Agent Discovery Protocol 端点 (P1-Future-03).
+"""Agent Discovery Protocol 端点.
 
 提供 GET /.well-known/agent-discovery.json 公开发现端点,
 声明 Agent 元信息、服务清单、能力列表与鉴权方式.
@@ -23,7 +23,7 @@ _AGENT_VERSION = "0.1.0"
 
 @router.get("/.well-known/agent-discovery.json")
 async def agent_discovery() -> JSONResponse:
-    """Agent Discovery Protocol 公开发现端点 (P1-Future-03).
+    """Agent Discovery Protocol 公开发现端点.
 
     无需鉴权, 返回 Agent 元信息供客户端自动发现与对接.
     """

@@ -1,4 +1,4 @@
-"""Chat Graph 构建器 (P2-Future-03).
+"""Chat Graph 构建器.
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数, 显式条件边.
 单节点 chat 图, 复用同一 PostgresSaver (同 thread_id 隔离).
@@ -35,7 +35,7 @@ async def build_chat_graph(
     *,
     use_checkpointer: bool = True,
 ) -> Any:
-    """构建单节点对话追问图 (P2-Future-03).
+    """构建单节点对话追问图.
 
     图结构:
         START → chat → END
@@ -64,7 +64,7 @@ async def build_chat_graph(
     graph.set_entry_point("chat")
     graph.add_edge("chat", END)
 
-    # 分支优化 P-Checkpointer: get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
+    # get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)
     checkpointer = None
     if use_checkpointer:
         from src.memory.checkpointer import get_checkpointer
@@ -77,5 +77,5 @@ async def build_chat_graph(
 
     compiled = graph.compile(checkpointer=checkpointer)
 
-    logger.info("Chat graph 已构建 (单节点, P2-Future-03)")
+    logger.info("Chat graph 已构建 (单节点)")
     return compiled

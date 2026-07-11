@@ -1,6 +1,6 @@
 """单元测试: MetasoSearcher 秘塔 AI 搜索 (验证 METASO 修复).
 
-验证 src/skills/researcher/searchers/metaso.py 的任务3 修复:
+验证 src/skills/researcher/searchers/metaso.py 的 payload/headers 修复:
 - payload 构造: scope="webpage", size=str(max_results), includeSummary=True
 - headers 含 Accept: application/json (修复前缺失导致 API 拒绝)
 - 响应解析: {"result": {"webpages": [...]}} 与 {"webpages": [...]} 双结构兼容
@@ -81,7 +81,7 @@ async def test_search_no_api_key_returns_empty_list() -> None:
     searcher._client.post.assert_not_called()
 
 
-# ========== payload 构造 (任务3 修复核心) ==========
+# ========== payload 构造 ==========
 
 
 @pytest.mark.asyncio
@@ -142,7 +142,7 @@ async def test_search_payload_contains_query_field() -> None:
     assert payload["q"] == "大模型行业"
 
 
-# ========== headers 构造 (任务3 修复核心) ==========
+# ========== headers 构造 ==========
 
 
 @pytest.mark.asyncio

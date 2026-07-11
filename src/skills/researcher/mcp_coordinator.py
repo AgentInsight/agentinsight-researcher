@@ -1,18 +1,17 @@
 """MCP Coordinator MCP 协调器.
 
-设计参考 mcp/ 模块.
 AGENTS.md 用户需求 9: 支持用户配置 MCP 作为数据源.
 
-三策略 (设计参考):
+三策略:
 - fast (默认): 仅对原始查询运行一次, 缓存复用
 - deep: 每子查询都运行
 - disabled: 完全跳过
 
-V4-P1-01: 工具调用结果 TTL 缓存, 缓存 key = hash(query + tool_name + tool_args),
+工具调用结果 TTL 缓存, 缓存 key = hash(query + tool_name + tool_args),
 命中直接返回, 未命中调用 MCP Server 后写入缓存.
 
-P1-04: 多工具并发调用 (asyncio.gather + 信号量), 默认并发上限 3,
-单个工具失败不影响其他工具. 保留 V4-P1-01 TTL 缓存逻辑.
+多工具并发调用 (asyncio.gather + 信号量), 默认并发上限 3,
+单个工具失败不影响其他工具. 保留 TTL 缓存逻辑.
 """
 
 from __future__ import annotations
@@ -31,20 +30,20 @@ from src.observability.tracing import trace_tool
 
 logger = logging.getLogger(__name__)
 
-# 模块级 TTL 缓存 (V4-P1-01): key -> (result, expire_time)
-# P2-8: 用 OrderedDict 实现 LRU 淘汰, max 256 项
+# 模块级 TTL 缓存: key -> (result, expire_time)
+# 用 OrderedDict 实现 LRU 淘汰, max 256 项
 _MCP_CACHE: OrderedDict[str, tuple[Any, float]] = OrderedDict()
 _MCP_CACHE_MAX_SIZE = 256
 
-# P1-04: MCP 工具调用并发上限 (信号量)
+# MCP 工具调用并发上限 (信号量)
 MCP_MAX_CONCURRENCY = 3
 
-# P1-5: 单个 MCP 工具调用超时上限 (秒)
+# 单个 MCP 工具调用超时上限 (秒)
 MCP_TOOL_TIMEOUT_SECONDS = 30.0
 
 
 def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> str:
-    """生成 MCP 工具调用缓存 key (V4-P1-01).
+    """生成 MCP 工具调用缓存 key.
 
     key = md5(query + tool_name + tool_args 序列化), 保证可哈希且定长.
 
@@ -66,10 +65,10 @@ def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> st
 
 
 async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, Any]]:
-    """从 postgres 获取用户的启用 MCP 配置 (任务7).
+    """从 postgres 获取用户的启用 MCP 配置.
 
     AGENTS.md 第 7 章: 数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
-    Agent 初始化时调用, 合并到 MCP_SERVERS (设计参考 动态工具注册).
+    Agent 初始化时调用, 合并到 MCP_SERVERS (动态工具注册).
 
     Args:
         user_id: 用户 ID (从请求上下文注入).
@@ -110,7 +109,7 @@ async def conduct_mcp_if_enabled(
     user_id: str | None,
     session_id: str | None,
 ) -> list[str]:
-    """MCP 工具调用公共入口 (P1-5 DRY 收敛).
+    """MCP 工具调用公共入口 (DRY 收敛).
 
     取代 deep_research.py:373 和 research_conductor.py:649 的重复 28 行 MCP 调用块.
     两处原逻辑均为: if mcp_strategy != "disabled": try get_mcp + get_user_mcp_configs +
@@ -150,7 +149,6 @@ async def conduct_mcp_if_enabled(
 class MCPCoordinator:
     """MCP 协调器.
 
-    设计参考 MCPResearchSkill.
     管理用户配置的 MCP Server 作为数据源.
     """
 
@@ -158,7 +156,7 @@ class MCPCoordinator:
     _llm: LLMClient
     _cache: list[str] | None
     _cache_query: str | None
-    # P1-11: MultiServerMCPClient 缓存, key = hash(server_configs)
+    # MultiServerMCPClient 缓存, key = hash(server_configs)
     _client_cache: dict[str, Any]
 
     def __init__(
@@ -173,7 +171,7 @@ class MCPCoordinator:
         self._client_cache = {}
 
     def _get_or_create_client(self, server_configs: dict[str, Any]) -> Any | None:
-        """缓存并复用 MultiServerMCPClient (P1-11).
+        """缓存并复用 MultiServerMCPClient.
 
         避免每次 conduct_research 都重新构建客户端 (含连接初始化).
         key = hash(server_configs JSON 序列化), 相同配置复用客户端.
@@ -213,7 +211,6 @@ class MCPCoordinator:
         """MCP 研究 (三策略).
 
         返回 MCP 检索到的上下文列表.
-        设计参考 conduct_research_with_tools.
         """
         strat = strategy or self.settings.mcp_strategy
         if strat == "disabled":
@@ -265,13 +262,12 @@ class MCPCoordinator:
     ) -> list[str]:
         """执行 MCP 工具调用.
 
-        设计参考 MCPClientManager + MCPToolSelector.
-        支持两种传输模式 (对标 MCP 协议):
+        支持两种传输模式 (MCP 协议):
         - stdio (本地模式): 通过 command/args/env 启动本地进程, 经 stdin/stdout 通信
         - sse / streamable_http (远程模式): 通过 server_url 连接远程 HTTP 服务器
         """
         try:
-            # 转换配置格式 (设计参考 convert_configs_to_langchain_format)
+            # 转换配置格式
             # 根据数据库 transport_type 字段构建配置 (不再从 URL 推断)
             server_configs = {}
             for cfg in mcp_configs:
@@ -319,7 +315,7 @@ class MCPCoordinator:
                 logger.warning("MCP 无可用配置 (所有配置均无效)")
                 return []
 
-            # P1-11: 复用缓存的 MultiServerMCPClient (相同配置不重复构建)
+            # 复用缓存的 MultiServerMCPClient (相同配置不重复构建)
             client = self._get_or_create_client(server_configs)
             if client is None:
                 logger.warning("langchain-mcp-adapters 未安装, MCP 数据源不可用")
@@ -330,7 +326,7 @@ class MCPCoordinator:
                 logger.warning("MCP 未返回任何工具")
                 return []
 
-            # LLM 智能选工具 + 生成参数 (设计参考 MCPToolSelector)
+            # LLM 智能选工具 + 生成参数
             max_tools = self.settings.mcp_max_tools
             selected = await self._select_tool_with_llm(
                 query,
@@ -340,8 +336,8 @@ class MCPCoordinator:
                 session_id=session_id,
             )
 
-            # P1-04: 并发执行工具调用 (asyncio.gather + 信号量, 默认并发 3)
-            # 单个工具失败返回 None 不影响其他工具; 保留 V4-P1-01 TTL 缓存逻辑
+            # 并发执行工具调用 (asyncio.gather + 信号量, 默认并发 3)
+            # 单个工具失败返回 None 不影响其他工具; 保留 TTL 缓存逻辑
             cache_enabled = self.settings.mcp_cache_enabled
             sem = asyncio.Semaphore(MCP_MAX_CONCURRENCY)
             results = await asyncio.gather(
@@ -366,7 +362,7 @@ class MCPCoordinator:
         cache_enabled: bool,
         sem: asyncio.Semaphore,
     ) -> str | None:
-        """执行单个 MCP 工具调用 (P1-04 并发 + V4-P1-01 TTL 缓存).
+        """执行单个 MCP 工具调用 (并发 + TTL 缓存).
 
         缓存命中直接返回 (不消耗信号量); 缓存未命中在信号量内调用工具.
         单个工具失败返回 None, 不影响其他工具 (由 gather 调用方过滤).
@@ -382,32 +378,32 @@ class MCPCoordinator:
             工具结果字符串, 失败/空结果返回 None
         """
         tool_name = getattr(tool, "name", "")
-        # V4-P1-01: TTL 缓存检查 (缓存命中不消耗信号量)
+        # TTL 缓存检查 (缓存命中不消耗信号量)
         cache_key: str | None = None
         if cache_enabled:
             cache_key = _make_cache_key(query, tool_name, tool_args)
             if cache_key in _MCP_CACHE:
                 cached_result, expire = _MCP_CACHE[cache_key]
                 if time.time() < expire:
-                    # P2-8: 命中时移动到末尾 (LRU 最近使用)
+                    # 命中时移动到末尾 (LRU 最近使用)
                     _MCP_CACHE.move_to_end(cache_key)
                     logger.debug("MCP 缓存命中: tool=%s", tool_name)
                     return str(cached_result)
                 else:
                     # 过期: 删除
                     _MCP_CACHE.pop(cache_key, None)
-        # P1-04: 信号量限制并发
+        # 信号量限制并发
         async with sem:
             try:
-                # P1-5: 单工具调用超时 (30s), 避免长时间阻塞
+                # 单工具调用超时 (30s), 避免长时间阻塞
                 result = await asyncio.wait_for(
                     tool.ainvoke(tool_args),
                     timeout=MCP_TOOL_TIMEOUT_SECONDS,
                 )
                 if result:
-                    # V4-P1-01: 调用成功写入缓存
+                    # 调用成功写入缓存
                     if cache_key is not None:
-                        # P2-8: LRU 淘汰, 超过 max_size 时弹出最旧项
+                        # LRU 淘汰, 超过 max_size 时弹出最旧项
                         _MCP_CACHE[cache_key] = (
                             result,
                             time.time() + self.settings.mcp_cache_ttl,
@@ -435,7 +431,7 @@ class MCPCoordinator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[tuple[Any, dict[str, Any]]]:
-        """LLM 智能选工具 + 生成参数 (设计参考 MCPToolSelector).
+        """LLM 智能选工具 + 生成参数.
 
         返回 [(tool, tool_args), ...], 最多 max_tools 个.
         LLM 不可用或失败时降级到关键词匹配 (_select_tools).
@@ -552,9 +548,9 @@ class MCPCoordinator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[Any]:
-        """LLM 智能选工具 (设计参考 MCPToolSelector).
+        """LLM 智能选工具.
 
-        阶段 4 完整实现, 此处用简单匹配.
+        完整实现, 此处用简单匹配.
         """
         if not tools:
             return []
@@ -579,7 +575,7 @@ class MCPCoordinator:
     def clear_cache(self) -> None:
         """清空 MCPCoordinator 实例级缓存 (fast 策略复用缓存).
 
-        P1-04: MCP 配置 CRUD (create/update/delete/clone) 后应调用此方法失效缓存,
+        MCP 配置 CRUD (create/update/delete/clone) 后应调用此方法失效缓存,
         避免用户修改 MCP 配置后命中过期缓存. 同时清空模块级 _MCP_CACHE (TTL 缓存)
         与 _client_cache (MultiServerMCPClient 缓存), 确保下次 conduct_research 重新加载.
 
@@ -601,12 +597,12 @@ class MCPCoordinator:
         _MCP_CACHE.clear()
 
 
-# ========== 全局单例 (P1-5: 供 conduct_mcp_if_enabled 公共方法使用) ==========
+# ========== 全局单例 (供 conduct_mcp_if_enabled 公共方法使用) ==========
 _mcp_coordinator_instance: MCPCoordinator | None = None
 
 
 def get_mcp_coordinator() -> MCPCoordinator:
-    """获取全局 MCPCoordinator 单例 (P1-5).
+    """获取全局 MCPCoordinator 单例.
 
     复用全局 LLMClient 单例, 避免重复构造导致 step_costs 累计丢失.
     deep_research / research_conductor 通过 conduct_mcp_if_enabled 共享同一实例,

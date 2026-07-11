@@ -1,11 +1,11 @@
-"""查询意图分类器 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 已实施 P0/P1/P2).
+"""查询意图分类器.
 
 AGENTS.md 第 5 章: 节点纯函数, 无副作用.
 AGENTS.md 第 9 章: LLM 调用经 llm/ 的 LLMClient (LiteLLM), 禁厂商 SDK 直连.
 AGENTS.md 第 10 章: 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器).
 AGENTS.md 第 3 章: skills/ 不应依赖 rag/ (已解除 embeddings/qdrant 依赖).
 
-两层分类逻辑 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配, 改用 FAST_LLM + Redis 缓存):
+两层分类逻辑 (已移除原第二层 Embeddings+Qdrant 语义匹配, 改用 FAST_LLM + Redis 缓存):
 - 第一层(规则): 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
 - 第二层(LLM FAST 层): 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
   - 命中结果写入 Redis 缓存 (TTL 24h), 高频重复 query 零 LLM 调用
@@ -107,7 +107,7 @@ _COMMON_SHORT_PHRASES: frozenset[str] = frozenset(
     }
 )
 
-# 离题/闲聊正则模式 (P1-Future-07)
+# 离题/闲聊正则模式
 # 用于在规则层快速拦截高频闲聊句式, 命中即返回 OFF_TOPIC (零 LLM 成本)
 # 设计原则: 仅匹配明显与研究/分析无关的句式, 模糊语义留给 LLM 层
 _CHITCHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -166,7 +166,7 @@ class QueryIntent(StrEnum):
     OFF_TOPIC = "off_topic"  # 离题/闲聊 (问候/身份/娱乐/常识/私人问题) → 直接返回离题回复语
 
 
-# P1-8: llm_classify_fallback 字符串 → QueryIntent 映射 (字典查表取代 if-else)
+# llm_classify_fallback 字符串 → QueryIntent 映射 (字典查表取代 if-else)
 # 默认 OFF_TOPIC (业界标准: 走最轻路径); 仅 "research" 显式映射, 其他值兜底 OFF_TOPIC
 _FALLBACK_INTENT_MAP: dict[str, QueryIntent] = {
     "research": QueryIntent.RESEARCH,
@@ -182,15 +182,15 @@ class _RuleResult:
 
 
 class QueryIntentClassifier:
-    """查询意图分类器 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 已实施 P0/P1/P2).
+    """查询意图分类器.
 
-    两层分类 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配):
+    两层分类 (已移除原第二层 Embeddings+Qdrant 语义匹配):
     1. 规则层: 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
     2. LLM FAST 层: 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
-       - 命中结果写入 Redis 缓存 (TTL 24h, P1)
+       - 命中结果写入 Redis 缓存 (TTL 24h)
        - 失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径)
 
-    设计原则 (对标 FrugalGPT Cascade):
+    设计原则 (级联降级策略):
     - FAST_LLM 优先 (glm-4-flash, 免费层)
     - Redis 缓存高频 query (24h TTL, 零 LLM 调用)
     - 不依赖 Embeddings/Qdrant (符合 AGENTS.md 第 3 章 skills/ 不依赖 rag/ 边界)
@@ -200,7 +200,7 @@ class QueryIntentClassifier:
     _llm: LLMClient
     _redis: Any | None
     _redis_initialized: bool
-    # P1-4: singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复 LLM 调用)
+    # singleflight 互斥锁 (按 query hash 分锁, 防止缓存击穿并发重复 LLM 调用)
     _inflight_locks: dict[str, asyncio.Lock]
 
     def __init__(
@@ -212,11 +212,11 @@ class QueryIntentClassifier:
         self._llm = llm or get_llm_client()
         self._redis = None
         self._redis_initialized = False
-        # P1-4: singleflight 锁字典初始化
+        # singleflight 锁字典初始化
         self._inflight_locks = {}
 
     async def _get_redis(self) -> Any | None:
-        """P0-5: 惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
+        """惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
 
         Redis 不可用时降级为不缓存 (每次走 LLM), 不阻断主流程.
         遵循 AGENTS.md 第 7 章 Redis 约定: key 加 {agent_id} 前缀.
@@ -293,7 +293,7 @@ class QueryIntentClassifier:
         return None
 
     async def _llm_classify(self, query: str, has_report: bool) -> QueryIntent:
-        """第二层 LLM FAST 分类 (P2 强化 prompt + few-shot 例子).
+        """第二层 LLM FAST 分类 (强化 prompt + few-shot 例子).
 
         用 LLMTier.FAST (glm-4-flash, temperature=0.0) 分类 RESEARCH / CHAT / OFF_TOPIC.
         失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径).
@@ -311,7 +311,7 @@ class QueryIntentClassifier:
             else "注意: 用户当前会话无研究报告, 闲聊/问候/常识问题倾向判定为 off_topic."
         )
 
-        # P2 强化 prompt: 增加分类定义细节 + few-shot 例子 (覆盖复合意图/方言/多语言)
+        # 强化 prompt: 增加分类定义细节 + few-shot 例子 (覆盖复合意图/方言/多语言)
         system_prompt = (
             "你是查询意图分类器. 根据用户查询判断意图类别, 仅返回 JSON.\n\n"
             "类别定义:\n"
@@ -389,14 +389,14 @@ class QueryIntentClassifier:
         默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程).
         可通过 settings.llm_classify_fallback 配置为 "research" 覆盖.
 
-        P1-8: 字典查表取代 if-else (分支优化方案).
+        字典查表取代 if-else (分支优化方案).
         """
         return _FALLBACK_INTENT_MAP.get(self.settings.llm_classify_fallback, QueryIntent.OFF_TOPIC)
 
     async def _classify_with_cache(self, query: str, has_report: bool) -> tuple[QueryIntent, str]:
-        """带 Redis 缓存的 LLM 分类 (P1).
+        """带 Redis 缓存的 LLM 分类.
 
-        P1-4: singleflight 互斥锁防止缓存击穿 — 同一 query 并发请求只允许一个
+        singleflight 互斥锁防止缓存击穿 — 同一 query 并发请求只允许一个
         调用 LLM, 其他等待结果后从缓存读取 (避免并发重复 LLM 调用浪费成本).
 
         Returns:
@@ -417,7 +417,7 @@ class QueryIntentClassifier:
             except Exception as e:  # noqa: BLE001
                 logger.warning("QueryClassifier 缓存读取失败, 走 LLM: %s", e)
 
-        # P1-4: singleflight 互斥锁 — 缓存未命中时按 query hash 加锁
+        # singleflight 互斥锁 — 缓存未命中时按 query hash 加锁
         # 同一 query 并发只允许一个调用 LLM, 其他等待后从缓存读取
         lock = self._inflight_locks.get(cache_key)
         if lock is None:
@@ -454,7 +454,7 @@ class QueryIntentClassifier:
             return intent, source
 
     async def classify(self, query: str, has_report: bool) -> QueryIntent:
-        """分类查询意图 (P2 已移除原第二层 Embeddings+Qdrant 语义匹配).
+        """分类查询意图 (已移除原第二层 Embeddings+Qdrant 语义匹配).
 
         两层分类:
         1. 规则层 (短查询保护 + 闲聊正则) → SHORT_QUERY / OFF_TOPIC
@@ -486,7 +486,7 @@ class QueryIntentClassifier:
                 )
                 return rule_result.intent
 
-            # 第二层: LLM FAST 分类 (带 Redis 缓存, P1)
+            # 第二层: LLM FAST 分类 (带 Redis 缓存)
             intent, source = await self._classify_with_cache(query, has_report)
             span.update(
                 output={"intent": intent.value, "layer": "llm"},
@@ -511,10 +511,10 @@ def get_query_intent_classifier() -> QueryIntentClassifier:
 
 
 async def cleanup_legacy_chat_seeds() -> None:
-    """一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据 (P2 清理).
+    """一次性清理 Qdrant 上遗留的短查询/离题种子命名空间数据.
 
-    QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md 实施后, 第二层 Embeddings+Qdrant 语义匹配
-    已移除, 原种子数据 (short_query/off_topic namespace) 不再使用, 启动时清理一次避免残留.
+    第二层 Embeddings+Qdrant 语义匹配已移除, 原种子数据 (short_query/off_topic namespace)
+    不再使用, 启动时清理一次避免残留.
 
     幂等: 多次调用安全; Qdrant 不可用时仅告警不阻断启动.
     """

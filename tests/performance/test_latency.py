@@ -139,7 +139,7 @@ def test_agent_discovery_latency(agent_url: str, perf_thresholds: dict[str, floa
 def test_short_query_first_token_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证短查询流式首块延迟 < 3s (短查询保护不走 graph).
 
-    P0-Future-06: 短查询直接返回 reply, 不走任何 graph.
+    短查询直接返回 reply, 不走任何 graph.
     SSE 首块 = {"role": "assistant"}, 应在阈值内到达.
     """
     threshold_s = perf_thresholds["short_query_first_token_s"]
@@ -169,7 +169,7 @@ def test_short_query_first_token_latency(agent_url: str, perf_thresholds: dict[s
 def test_short_query_total_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证短查询总延迟 P95 < 10s (短查询保护不走 graph).
 
-    P0-Future-06: 短查询直接返回 reply, 不走任何 graph.
+    短查询直接返回 reply, 不走任何 graph.
     运行 5 次采样计算 P95 (5 次中 P95 ≈ 最大值).
     """
     threshold_s = perf_thresholds["short_query_total_p95_s"]

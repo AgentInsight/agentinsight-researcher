@@ -2,7 +2,7 @@
 
 AGENTS.md 第 13/14 章硬约束:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
-- /v1/feedback 仅用于人在回路审核反馈 (P0-Future-03)
+- /v1/feedback 仅用于人在回路审核反馈
 - 未启用 human_review_enabled 时前端不应调用, 但端点本身应可用
 
 执行方式 (宿主机, 容器栈已 healthy):

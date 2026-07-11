@@ -1,10 +1,9 @@
-"""全局反馈队列管理器 (P0-Future-03 Human-in-the-loop).
+"""全局反馈队列管理器 (Human-in-the-loop).
 
 用 dict[str, asyncio.Future] 按 session_id 索引, 异步协调 HumanAgent 等待与
 用户反馈提交. 这是异步协调器 (不是业务状态), 不违反 AGENTS.md 第 5 章
 "节点禁止全局可变状态" 约束 (节点状态走 State/Checkpoint, 此处仅协调 await).
 
-设计参考: backend/server/feedback_queue 模式:
 - HumanAgent 调用 wait_feedback() 阻塞等待 (asyncio.Future, 不阻塞线程)
 - /v1/feedback 端点或 WebSocket human_feedback 消息调用 put_feedback() 提交反馈
 """

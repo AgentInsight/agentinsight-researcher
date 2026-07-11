@@ -1,4 +1,4 @@
-"""单元测试: LLM API Key 解析器 (P1-3 DRY 收敛).
+"""单元测试: LLM API Key 解析器 (DRY 收敛).
 
 验证 src/common/llm_key_resolver.py:
 - resolve_api_key: 按 LiteLLM 路由前缀查对应厂商 API Key
@@ -69,7 +69,7 @@ def test_prefix_key_map_contains_zhipu_both_prefixes() -> None:
 def test_prefix_key_map_has_six_entries() -> None:
     """_PREFIX_KEY_MAP 应含 6 个前缀 (deepseek/openai/anthropic/zhipu/zhipuai/zai).
 
-    任务6 治本: 新增 zai/ (litellm 原生智谱 GLM 路由前缀).
+    新增 zai/ (litellm 原生智谱 GLM 路由前缀).
     """
     assert len(_PREFIX_KEY_MAP) == 6
 

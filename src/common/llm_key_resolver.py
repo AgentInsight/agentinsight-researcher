@@ -1,4 +1,4 @@
-"""LLM API Key 解析器 (P1-3 DRY 收敛).
+"""LLM API Key 解析器.
 
 AGENTS.md 第 3 章: 共享逻辑下沉到 common/, 不应重复实现.
 AGENTS.md 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM), 模型名以 LiteLLM 路由前缀声明.

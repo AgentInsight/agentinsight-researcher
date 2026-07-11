@@ -87,7 +87,7 @@ class TestInitDatabase:
         settings = Settings(_env_file=None)
         result = await init_database(settings)
         assert result is True
-        # 验证 SQL 被执行 (P2-3: SQL 按分号拆分逐条执行, 多条语句)
+        # 验证 SQL 被执行 (SQL 按分号拆分逐条执行, 多条语句)
         # 注: CREATE TABLE 语句因前随注释被分号拆分过滤, 改为检查 CREATE 关键字
         assert len(mock_conn.executed_sql) > 1
         assert any("CREATE" in s.upper() for s in mock_conn.executed_sql)
@@ -129,7 +129,7 @@ class TestInitDatabase:
         assert captured_dsn[1] == "postgresql://user:pass@host:5432/db"
 
     async def test_execute_exception_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """conn.execute 抛异常时仍返回 True (P2-3: 单条失败不阻断, 连接成功即 True)."""
+        """conn.execute 抛异常时仍返回 True (单条失败不阻断, 连接成功即 True)."""
 
         class _FailConn:
             async def execute(self, _sql: str) -> str:

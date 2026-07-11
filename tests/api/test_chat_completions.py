@@ -448,7 +448,7 @@ def test_chat_completions_report_type_detailed_report() -> None:
 def test_chat_completions_multi_agent_true() -> None:
     """验证 multi_agent=True 路由: 短查询 + multi_agent=True → 200.
 
-    AGENTS.md 第 5 章: multi_agent=True 走 multi_agent_graph (Supervisor 模式, P0-02).
+    AGENTS.md 第 5 章: multi_agent=True 走 multi_agent_graph (Supervisor 模式).
     短查询触发 short_query_reply (不走图), 但 multi_agent 字段应被接受不报错.
     完整 multi_agent 研究流程由 e2e 测试覆盖.
     """
@@ -524,7 +524,7 @@ def test_chat_completions_uploaded_files_context_load() -> None:
 def test_chat_completions_agent_role_override() -> None:
     """验证 agent_role 覆盖 (4 层机制 Config 层): 注入行业 persona → 200.
 
-    AGENTS.md 第 7 章: agent_role 设计参考 AGENT_ROLE 配置, 优先级高于 LLM 动态生成
+    AGENTS.md 第 7 章: agent_role AGENT_ROLE 配置, 优先级高于 LLM 动态生成
     (AgentCreator). 行业适配采用 4 层机制, 不使用行业分类器.
     短查询触发 short_query_reply, 但 agent_role 字段应被接受不报错.
     实际 agent_role 覆盖效果由 e2e 测试覆盖.

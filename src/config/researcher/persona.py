@@ -1,4 +1,4 @@
-"""闲聊 Persona 配置 (P1-Future-07).
+"""闲聊 Persona 配置.
 
 AGENTS.md 第 1/3 章: pydantic BaseModel 配置 SSOT, 业务代码禁止硬编码.
 闲聊响应的 persona (身份/语气/边界/签名) 集中在此定义, 由 Jinja2 模板渲染时注入.
