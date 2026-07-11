@@ -123,14 +123,24 @@ async def deep_research_node(
         from src.skills.researcher.deep_research import DeepResearcher
 
         researcher = DeepResearcher(settings)
-        result = await researcher.research(
-            state.get("query", ""),
-            breadth=state.get("deep_research_breadth", settings.deep_research_breadth),
-            depth=state.get("deep_research_depth", settings.deep_research_depth),
-            user_id=state.get("user_id"),
-            session_id=state.get("session_id"),
-            query_domains=state.get("query_domains"),
-        )
+        # 自适应深度: 开启时不传 breadth/depth, 让 research() 内部 _assess_complexity 评估
+        # (修复自适应深度机制缺陷: 原显式传参导致 breadth is None 永远不满足)
+        if settings.deep_research_adaptive:
+            result = await researcher.research(
+                state.get("query", ""),
+                user_id=state.get("user_id"),
+                session_id=state.get("session_id"),
+                query_domains=state.get("query_domains"),
+            )
+        else:
+            result = await researcher.research(
+                state.get("query", ""),
+                breadth=state.get("deep_research_breadth", settings.deep_research_breadth),
+                depth=state.get("deep_research_depth", settings.deep_research_depth),
+                user_id=state.get("user_id"),
+                session_id=state.get("session_id"),
+                query_domains=state.get("query_domains"),
+            )
         return {
             "sub_queries": [],  # DeepResearch 内部递归, 不走外层 sub_queries
             "contexts": [result["context"]] if result["context"] else [],

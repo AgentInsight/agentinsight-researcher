@@ -251,9 +251,7 @@ class Settings(BaseSettings):
     # 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
-    fastembed_model_path: str = (
-        "./packages/models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
-    )
+    fastembed_model_path: str = "./packages/models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度
     # ONNX Runtime 并行执行 (推理加速 2-4x)
@@ -327,10 +325,13 @@ class Settings(BaseSettings):
     max_iterations: int = 3  # Planner 拆解子查询数量 (非图迭代上限)
     graph_max_iterations: int = 10  # 图迭代硬上限 (守卫用)
     max_subtopics: int = 3
-    deep_research_breadth: int = 3
+    deep_research_breadth: int = 4  # 对标 GPTR (4+8=12 子查询, 功能 11)
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
-    deep_research_adaptive: bool = False  # 自适应深度开关 (默认关闭)
+    deep_research_adaptive: bool = True  # 自适应深度开关 (默认开启, 自适应深度机制)
+    deep_research_max_sub_queries: int = 28  # 递归树硬上限守卫 (depth=3 时 4+8+16=28)
+    deep_research_num_learnings: int = 3  # 每子查询提取 learnings 数量上限 (功能 6)
+    deep_research_reasoning_effort: str = "high"  # 规划/提取阶段推理强度 (功能 10)
     curate_sources: bool = True
 
     # ========== 上下文压缩与去重参数 ==========

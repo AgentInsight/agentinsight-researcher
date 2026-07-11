@@ -308,6 +308,7 @@ class LLMClient:
         temperature: float | None,
         max_tokens: int | None,
         stop: list[str] | None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """按指定 tier 执行单次非流式 LLM 调用 (不含 trace span, 由 achat 包裹).
 
@@ -328,6 +329,10 @@ class LLMClient:
         }
         if stop:
             kwargs["stop"] = stop
+        if reasoning_effort:
+            # reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts)
+            # 不支持 reasoning_effort 的模型由 LiteLLM 静默忽略
+            kwargs["reasoning_effort"] = reasoning_effort
         if api_key:
             kwargs["api_key"] = api_key
 
@@ -481,6 +486,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         stop: list[str] | None = None,
+        reasoning_effort: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
         span_name: str = "llm-chat",
@@ -496,6 +502,8 @@ class LLMClient:
               命中直接返回 (跳过 LLM 调用);
               仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
         放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
+        reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts),
+              None 时不添加该参数, 不支持该参数的模型由 LiteLLM 静默忽略.
         """
         # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
         initial_model = self._get_model(tier)
@@ -506,6 +514,8 @@ class LLMClient:
             "max_tokens": initial_token_limit,
             "timeout": self.settings.llm_timeout,
         }
+        if reasoning_effort:
+            model_params["reasoning_effort"] = reasoning_effort
 
         # LLM 响应缓存 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
         # (planner=0.2 / curator=0.2 / context-summarize=0.3 均可命中; >0.3 仍不缓存)
@@ -543,6 +553,7 @@ class LLMClient:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         stop=stop,
+                        reasoning_effort=reasoning_effort,
                     )
                     # 成功: 更新 span (含最终 tier 与全部尝试记录)
                     # cost_breakdown 由 _achat_with_tier 保证非 None, 兜底满足 mypy --strict
@@ -640,6 +651,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         stop: list[str] | None = None,
+        reasoning_effort: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
         span_name: str = "llm-chat-stream",
@@ -652,6 +664,8 @@ class LLMClient:
         step 标识业务步骤, 计入 step_costs 分布.
         流式连接建立失败时按 _FALLBACK_TIER 逐级降级;
         一旦开始 yield 内容后不降级 (已输出内容无法回滚).
+        reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts),
+              None 时不添加该参数, 不支持该参数的模型由 LiteLLM 静默忽略.
         """
         # span 用初始 tier 的 model/params
         initial_model = self._get_model(tier)
@@ -662,6 +676,8 @@ class LLMClient:
             "max_tokens": initial_token_limit,
             "stream": True,
         }
+        if reasoning_effort:
+            model_params["reasoning_effort"] = reasoning_effort
 
         # 流式 usage: litellm ≥1.6 在末块聚合时返回, 优先用真实 prompt_tokens/completion_tokens.
         # 退化路径: 字符数粗估 (//4 ≈ token 估算), 仅在 usage 缺失时使用.
@@ -703,6 +719,9 @@ class LLMClient:
                 }
                 if stop:
                     kwargs["stop"] = stop
+                if reasoning_effort:
+                    # reasoning_effort 透传 LiteLLM (功能 10)
+                    kwargs["reasoning_effort"] = reasoning_effort
                 if api_key:
                     kwargs["api_key"] = api_key
                 try:
