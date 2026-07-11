@@ -1,7 +1,7 @@
 """三级 JSON 容错解析工具.
 
 AGENTS.md 第 3 章: common/ 公用基础模块, 不得依赖 agents/ 或业务模块.
-对标 GPT Researcher 的多级 JSON 解析.
+设计参考: 同类项目的多级 JSON 解析.
 
 解析链:
 1. json.loads (标准解析)

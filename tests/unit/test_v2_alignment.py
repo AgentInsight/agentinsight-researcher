@@ -1,6 +1,6 @@
-"""单元测试: V2 对齐 GPTR 优化 (V2-P0/P1).
+"""单元测试: V2 优化对齐 (V2-P0/P1).
 
-验证 V2 优化的 7 项对齐 GPTR 改动:
+验证 V2 优化的 7 项改动:
 1. settings.py: 新增配置字段 (written_content_similarity_threshold / dashscope_api_key /
    embeddings_filter_chunk_size / detailed_section_word_min/max 等)
 2. prompts.py: writer_prompt MUST 具体观点+表格+[n]引用; curator_prompt 第 5 维 Quantitative Value;
@@ -31,7 +31,7 @@ class TestV2Settings:
     """V2 settings.py 新增配置字段验证."""
 
     def test_written_content_similarity_threshold_default(self) -> None:
-        """默认值 0.5 (对标 GPTR WrittenContentCompressor)."""
+        """默认值 0.5 (设计参考 WrittenContentCompressor)."""
         s = Settings()
         assert s.written_content_similarity_threshold == 0.5
 
@@ -43,14 +43,14 @@ class TestV2Settings:
         assert s.dashscope_api_key is None
 
     def test_embeddings_filter_chunk_size_default(self) -> None:
-        """对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000."""
+        """设计参考 RecursiveCharacterTextSplitter chunk_size=1000."""
         s = Settings()
         assert s.embeddings_filter_chunk_size == 1000
         assert s.embeddings_filter_chunk_overlap == 100
         assert s.embeddings_filter_top_k == 20
 
     def test_detailed_section_word_min_max(self) -> None:
-        """V2-P1: 章节字数 500-1000 → 800-1200 对齐 GPTR."""
+        """V2-P1: 章节字数 500-1000 → 800-1200 对齐业界实践."""
         s = Settings()
         assert s.detailed_section_word_min == 800
         assert s.detailed_section_word_max == 1200
@@ -136,7 +136,7 @@ class TestV2Prompts:
         assert isinstance(conc, str) and "Conclusion" in conc
 
     def test_section_prompt_word_count_800_1200(self) -> None:
-        """V2-P1: section_prompt 默认字数 800-1200 对齐 GPTR."""
+        """V2-P1: section_prompt 默认字数 800-1200 对齐业界实践."""
         family = DefaultPromptFamily()
         prompt = family.section_prompt("topic", "ctx", "refs", "role", "objective", "academic")
         assert "800" in prompt
@@ -256,7 +256,7 @@ class TestWrittenContentCompressorV2:
         assert compressor.threshold == 0.42
 
     def test_threshold_default_0_5(self) -> None:
-        """V2-P1: 默认阈值 0.5 (对标 GPTR)."""
+        """V2-P1: 默认阈值 0.5 (设计参考)."""
         from src.skills.researcher.context_manager import WrittenContentCompressor
 
         settings = Settings()
@@ -288,7 +288,7 @@ class TestWrittenContentCompressorV2:
 
 
 class TestAgentCreatorV2:
-    """V2-P1: AgentCreator tier/temperature 对齐 GPTR."""
+    """V2-P1: AgentCreator tier/temperature 对齐业界实践."""
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_smart_tier(self) -> None:

@@ -1,6 +1,6 @@
 """ResearcherState 定义.
 
-对标 GPT Researcher multi_agents/memory/research.py 的 ResearchState TypedDict.
+设计参考 multi_agents/memory/research.py 的 ResearchState TypedDict.
 AGENTS.md 第 5 章: State 必须为 TypedDict; 跨节点共享字段用 Annotated[T, reducer].
 """
 
@@ -17,7 +17,7 @@ class ResearcherState(TypedDict, total=False):
     """研究智能体状态.
 
     所有字段可选(total=False), 节点纯函数化只返回 update dict 由 reducer 合并.
-    对标 GPT Researcher ResearchState + AgentInsightService insight/state.py 模式.
+    设计参考 ResearchState + AgentInsightService insight/state.py 模式.
     AGENTS.md 第 5 章: 跨节点共享字段用 Annotated[T, reducer] (messages 用 add_messages).
     """
 
@@ -39,16 +39,16 @@ class ResearcherState(TypedDict, total=False):
     # ========== 查询意图 (P0-Future-05/06) ==========
     query_intent: str  # 查询意图: "research" | "chat" | "short_query"
 
-    # ========== 动态角色 (对标 GPTR researcher.role, AGENTS.md 第 5 章) ==========
-    # 行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
+    # ========== 动态角色 (设计参考 researcher.role, AGENTS.md 第 5 章) ==========
+    # 行业适配采用 4 层机制, 不再使用行业分类器:
     #   1. Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
     #   2. Config 层: settings.agent_role 静态注入 (优先级高于 LLM)
     #   3. Retriever 层: searchers/ 含 arxiv/pubmed/semantic_scholar 等专业数据源
     #   4. MCP 层: MCP_SERVERS 注册行业专用工具服务器
-    agent_role: str  # 动态生成的角色 persona (对标 GPTR researcher.role)
-    agent_role_server: str  # 角色简称 (对标 GPTR server, 如 financial_analyst)
+    agent_role: str  # 动态生成的角色 persona (设计参考 researcher.role)
+    agent_role_server: str  # 角色简称 (设计参考 server, 如 financial_analyst)
 
-    # ========== 研究流程 (对标 GPT Researcher) ==========
+    # ========== 研究流程 (设计参考) ==========
     messages: Annotated[list[BaseMessage], add_messages]  # 消息流 (P0-06: add_messages reducer)
     sub_queries: list[str]  # Planner 拆解的子查询
     contexts: list[str]  # 聚合的上下文 (来自 Researcher)

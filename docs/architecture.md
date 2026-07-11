@@ -8,7 +8,7 @@
 
 ## 1. 系统概览
 
-**agentinsight-researcher** 是一个以 LangGraph 为编排内核、MCP 为工具协议、AgentInsight SDK 为可观测底座的企业级 AI Agent 系统，对外暴露 OpenAI 兼容 API（SSE 流式）。项目定位为**中文优先的研究分析智能体**，对标 GPT Researcher。
+**agentinsight-researcher** 是一个以 LangGraph 为编排内核、MCP 为工具协议、AgentInsight SDK 为可观测底座的企业级 AI Agent 系统，对外暴露 OpenAI 兼容 API（SSE 流式）。项目定位为**中文优先的研究分析智能体**。
 
 ### 核心组件
 
@@ -74,9 +74,9 @@ src/
 │   └── edges.py            # 可复用条件边守卫工厂
 ├── agents/         # 具体 Agent 实现 (复用图)
 │   └── researcher/         # reviewer / reviser / fact_checker / chat_agent / human / supervisor
-├── skills/         # 技能定义 (对标 GPT Researcher Skills)
+├── skills/         # 技能定义
 │   └── researcher/
-│       ├── agent_creator.py     # 动态角色生成 (对标 GPTR choose_agent)
+│       ├── agent_creator.py     # 动态角色生成 (参考实现: choose_agent)
 │       ├── research_conductor.py # 规划 + 并行检索
 │       ├── deep_research.py     # 递归深度研究
 │       ├── source_curator.py    # 来源策展
@@ -382,7 +382,7 @@ flowchart TD
 
 ## Architecture Overview
 
-**agentinsight-researcher** is an enterprise-grade AI Agent system with LangGraph as the orchestration core, MCP as the tool protocol, and AgentInsight SDK as the observability backbone, exposing an OpenAI-compatible API (SSE streaming). It is a **Chinese-first research analysis agent** benchmarked against GPT Researcher.
+**agentinsight-researcher** is an enterprise-grade AI Agent system with LangGraph as the orchestration core, MCP as the tool protocol, and AgentInsight SDK as the observability backbone, exposing an OpenAI-compatible API (SSE streaming). It is a **Chinese-first research analysis agent**.
 
 ### Core Components
 

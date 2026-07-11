@@ -68,7 +68,7 @@
 | 测试文档 `tests/README.md` | ✅ | 极其详尽,7 层测试分层、执行命令、覆盖矩阵、MCP 测试清单 |
 | FAQ | ❌ | 仅 `examples/README.md` 有少量 FAQ;缺独立 `docs/faq.md` |
 | 项目截图 | ❌ | `docs/` 无 `assets/` 目录;README 无截图/GIF/视频 |
-| 对比文档 | ✅ | `docs/COMPARISON_WITH_GPT_RESEARCHER_V6.md` 等深度分析文档 |
+| 对比文档 | ✅ | `docs/` 含深度分析文档 |
 
 **改进建议**:
 1. **新增 `docs/deployment.md`**:整合三套构建模式(QA 离线/生产联网/生产离线)的完整部署指南,含端口规划、资源需求、故障排查、升级流程。当前部署信息分散在 README、AGENTS.md、构建脚本中,新用户难以快速上手。
@@ -264,16 +264,16 @@
 | 项目截图/GIF | ❌ | README 无截图,docs/ 无 assets/ 目录 |
 | 项目视频 | ❌ | 无 Demo 视频/GIF |
 | Social Preview | ❌ | 需在 GitHub 仓库 Settings 上传社交预览图(opengraph image) |
-| SEO 关键词 | ⚠️ | README 含 "对标 GPT Researcher",但缺 "GPT Researcher alternative" 等英文 SEO 关键词 |
+| SEO 关键词 | ⚠️ | README 缺 "Chinese-first AI research agent" / "LangGraph tutorial" 等英文 SEO 关键词 |
 
 **改进建议**:
 1. **在 README 顶部添加项目截图或 GIF**:截图是最有效的可发现性提升手段。建议添加:
    - 测试页面主界面截图(展示会话管理 + 流式渲染)
    - 研究报告生成过程的 GIF(展示流式输出 + 工具调用展示)
    - 多 Agent 协作流程图(可从 architecture.md 的 Mermaid 导出)
-2. **在 GitHub 仓库添加 Topics**:建议添加 `ai-agent` / `langgraph` / `rag` / `research-agent` / `mcp` / `fastapi` / `qdrant` / `openai-compatible` / `chinese` / `gpt-researcher` 等_topics,提升 GitHub 搜索可发现性。
+2. **在 GitHub 仓库添加 Topics**:建议添加 `ai-agent` / `langgraph` / `rag` / `research-agent` / `mcp` / `fastapi` / `qdrant` / `openai-compatible` / `chinese` 等 topics,提升 GitHub 搜索可发现性。
 3. **上传 Social Preview 图**:在仓库 Settings → Social preview 上传一张 1280x640 的项目预览图,分享到社交媒体时有预览图。
-4. **补充英文 SEO 关键词**:在 README English 段落补充 "GPT Researcher alternative" / "Chinese-first AI research agent" / "LangGraph tutorial" 等可搜索关键词。
+4. **补充英文 SEO 关键词**:在 README English 段落补充 "Chinese-first AI research agent" / "LangGraph tutorial" 等可搜索关键词。
 
 ---
 
@@ -283,7 +283,7 @@
 |--------|------|------|
 | MIT License | ✅ | 商业友好,与依赖兼容(LangGraph MIT / LiteLLM MIT / FastAPI MIT / Qdrant Apache 2.0 等) |
 | 商标声明 | ✅ | README 末尾有 "AgentInsight" 商标声明,规范 |
-| 第三方代码引用说明 | ❌ | 缺 `NOTICE` / `THIRD_PARTY_LICENSES.md`,未声明借鉴的 GPT Researcher 代码 |
+| 第三方代码引用说明 | ❌ | 缺 `NOTICE` / `THIRD_PARTY_LICENSES.md`,未声明参考实现的第三方代码 |
 | 数据隐私说明 | ❌ | SECURITY.md 提及 PII 保护,但缺独立隐私声明 |
 | CITATION.cff | ❌ | 缺学术引用文件 |
 | 许可证兼容性 | ⚠️ | 未显式声明依赖许可证兼容性审查;`curl_cffi` 是 LGPL,`onnxruntime` 是 MIT,需确认 |
@@ -304,7 +304,7 @@
    version: 0.1.0
    date-released: 2026-07-04
    ```
-2. **新增 `NOTICE` 或 `THIRD_PARTY_LICENSES.md`**:声明项目借鉴的 GPT Researcher 代码(README 已提及"对标 GPT Researcher",但 `docs/COMPARISON_WITH_GPT_RESEARCHER_V6.md` 显示有代码级借鉴),列出关键第三方依赖及其许可证。可用 `pip-licenses` 工具自动生成。
+2. **新增 `NOTICE` 或 `THIRD_PARTY_LICENSES.md`**:声明项目参考实现的第三方代码,列出关键第三方依赖及其许可证。可用 `pip-licenses` 工具自动生成。
 3. **新增 `docs/PRIVACY.md`**:独立的数据隐私声明,说明:
    - 收集哪些用户数据(会话内容/上传文件/使用日志)
    - 数据如何存储与加密(会话内容加密存储)
@@ -358,7 +358,7 @@
 
 ## 四、与同类开源项目对比
 
-| 维度 | 本项目 | GPT Researcher(对标) | 评价 |
+| 维度 | 本项目 | 同类开源项目(对标) | 评价 |
 |------|--------|---------------------|------|
 | 必备文件 | 全部双语 | 单语(英文) | ✅ 优于 |
 | AGENTS.md 规范 | 14 章详尽 | 无 | ✅ 优于 |
@@ -370,7 +370,7 @@
 | 项目截图 | 缺 | 有 | ❌ 待补齐 |
 | 在线 Demo | 有 | 有 | ✅ 相当 |
 
-**结论**:项目在工程规范、文档体系、CI/CD、安全策略上已**优于对标项目 GPT Researcher**;主要差距在社区建设( Roadmap / FAQ / 截图)与法律合规补充(CITATION / NOTICE)。
+**结论**:项目在工程规范、文档体系、CI/CD、安全策略上已**优于同类对标项目**;主要差距在社区建设( Roadmap / FAQ / 截图)与法律合规补充(CITATION / NOTICE)。
 
 ---
 

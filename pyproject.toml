@@ -1,12 +1,137 @@
 # agentinsight-researcher Python 项目配置
 # 严格遵循 AGENTS.md 第 1 章: Python ≥3.11
 
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agentinsight-researcher"
 version = "0.1.0"
-description = "中文优先的研究分析智能体, 对标 GPT Researcher, 基于 LangGraph + LiteLLM + Qdrant"
+description = "中文优先的研究分析智能体, 基于 LangGraph + LiteLLM + Qdrant"
 requires-python = ">=3.11"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "AgentInsight Team" },
+]
+keywords = [
+    "ai-agent",
+    "langgraph",
+    "rag",
+    "research-agent",
+    "mcp",
+    "fastapi",
+    "qdrant",
+    "chinese",
+    "openai-compatible",
+    "litellm",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # 编排内核 (AGENTS.md 第 5 章)
+    "langgraph>=1.2",
+    "langgraph-checkpoint>=4.1",
+    "langgraph-checkpoint-postgres>=2.0",
+    "langchain-core>=1.4",
+    "langchain-mcp-adapters>=0.1",
+    "langchain-protocol>=0.0.18",
+    # LLM 网关 (AGENTS.md 第 9 章)
+    "litellm>=1.6",
+    "openai>=2.43",
+    # MCP 工具协议
+    "mcp>=1.0",
+    # Web 框架
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.49",
+    "sse-starlette>=2.1",
+    "starlette>=0.40",
+    "python-multipart>=0.0.32",
+    "aiofiles>=25.1",
+    # 数据校验
+    "pydantic>=2.10",
+    "pydantic-settings>=2.14",
+    # 关系库 + 缓存
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "redis>=5.0",
+    "asyncpg>=0.30",
+    # 向量库
+    "qdrant-client>=1.18",
+    # FastEmbed 本地 Embeddings
+    "fastembed>=0.4",
+    "onnxruntime>=1.17",
+    # BM25 + 中文分词
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42.1",
+    # 可观测性
+    "agentinsight-sdk>=0.1.5",
+    "opentelemetry-sdk>=1.42",
+    "opentelemetry-exporter-otlp-proto-http>=1.42",
+    # 搜索引擎
+    "ddgs>=9.0",
+    "httpx>=0.28",
+    # 网页抓取
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "playwright>=1.49",
+    "PyMuPDF>=1.24",
+    "trafilatura>=1.10",
+    "markdownify>=0.14.1",
+    "curl_cffi>=0.7",
+    # 文档加载
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=0.6",
+    "markitdown>=0.0.1a2",
+    # 报告输出
+    "jinja2>=3.1",
+    "weasyprint>=62.0",
+    "mistune>=3.0",
+    # Token 优化
+    "tiktoken>=0.7",
+    # JSON 容错
+    "json-repair>=0.30",
+    # 工具库
+    "tenacity>=9.0",
+    "orjson>=3.10",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "cachetools>=5.5",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ragas>=0.2",
+    "deepeval>=2.0",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pip-tools>=7.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/AgentInsight/agentinsight-researcher"
+Repository = "https://github.com/AgentInsight/agentinsight-researcher"
+Documentation = "https://github.com/AgentInsight/agentinsight-researcher/tree/main/docs"
+"Bug Tracker" = "https://github.com/AgentInsight/agentinsight-researcher/issues"
+Changelog = "https://github.com/AgentInsight/agentinsight-researcher/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 
 [tool.ruff]
 target-version = "py312"
@@ -56,4 +181,19 @@ filterwarnings = [
     "ignore::UserWarning:agentinsight.api.core.pydantic_utilities",
     # jieba 依赖 pkg_resources (已被 setuptools 弃用, 等待 jieba 升级)
     "ignore::UserWarning:jieba._compat",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*", "*/test_*.py"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
 ]

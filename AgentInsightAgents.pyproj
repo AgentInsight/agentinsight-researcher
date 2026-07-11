@@ -32,6 +32,11 @@
     <Content Include=".env.template" />
     <Content Include=".gitignore" />
     <Content Include=".dockerignore" />
+    <Content Include=".pre-commit-config.yaml" />
+    <Content Include="CITATION.cff" />
+    <Content Include="NOTICE" />
+    <Content Include="THIRD_PARTY_LICENSES.md" />
+    <Content Include="CONTRIBUTORS.md" />
   </ItemGroup>
   <!-- Docker 编排与构建脚本 (联网模式入仓; QA/离线模式由 .gitignore 排除; SearXNG 镜像构建入仓) -->
   <ItemGroup>

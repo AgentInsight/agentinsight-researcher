@@ -1,7 +1,7 @@
 """单元测试: 报告 TOC 一致性优化 (V4-P1-04 优化 1-6).
 
 覆盖优化方案 temp/report_toc_content_mismatch_optimization.md 中的 6 个优化:
-1. TOC 后置生成 (只含有效子主题, 对标 GPTR)
+1. TOC 后置生成 (只含有效子主题, 设计参考)
 2. 每个子主题独立 sub_context (BM25 检索)
 3. 跨章节语义去重 (只丢弃相似 chunk, 保留差异部分)
 4. 失败章节在 TOC 中标记

@@ -1,10 +1,10 @@
 """ResearchConductor 研究总指挥.
 
-对标 GPT Researcher skills/researcher.py.
+设计参考 skills/researcher.py.
 AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬取).
 
 核心流程:
-1. plan_research: 按动态角色 persona 拆解子查询 (Planner, 对标 GPTR AGENT_ROLE)
+1. plan_research: 按动态角色 persona 拆解子查询 (Planner, 设计参考 AGENT_ROLE)
 2. asyncio.gather 并行 _process_sub_query (Researcher):
    - 搜索 (中文优先路由)
    - 抓取 (BrowserManager)
@@ -12,8 +12,8 @@ AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬
    - MCP (可选, fast/deep/disabled)
 3. 聚合上下文
 
-行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
-- agent_role 参数 (对标 GPTR AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+行业适配采用 4 层机制, 不再使用行业分类器:
+- agent_role 参数 (设计参考 AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
 
 P1-Future-04: planner prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
@@ -46,14 +46,14 @@ from src.skills.researcher.searchers import (
 
 logger = logging.getLogger(__name__)
 
-# 兜底角色 persona (对标 GPTR 默认 researcher role)
+# 兜底角色 persona (设计参考 默认 researcher role)
 _DEFAULT_AGENT_ROLE = (
     "你是一位资深研究分析专家, 擅长多领域综合研究, 研究重点是全面、客观地分析问题."
 )
 
 
 class ResearchConductor:
-    """研究总指挥 (对标 GPT Researcher ResearchConductor).
+    """研究总指挥 (设计参考 ResearchConductor).
 
     含 Planner (拆解子查询) + Researcher (并行搜索爬取) 职责.
     """
@@ -194,9 +194,9 @@ class ResearchConductor:
     ) -> list[str]:
         """Planner: 按动态角色 persona 拆解子查询.
 
-        对标 GPT Researcher generate_sub_queries.
+        设计参考 generate_sub_queries.
         用 strategic_llm (规划专用, 慢但精).
-        agent_role (对标 GPTR AGENT_ROLE) 注入角色 persona.
+        agent_role (设计参考 AGENT_ROLE) 注入角色 persona.
         """
         async with trace_chain(
             name="planner",
@@ -209,7 +209,7 @@ class ResearchConductor:
         ) as span:
             max_iterations = self.settings.max_iterations
 
-            # 对标 GPTR: agent_role (来自 LLM 动态生成或调用方注入) 作为角色 persona
+            # 设计参考: agent_role (来自 LLM 动态生成或调用方注入) 作为角色 persona
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
             # P1-Future-04: prompt 经 PromptFamily 策略注入
@@ -260,7 +260,7 @@ class ResearchConductor:
     ) -> dict[str, Any]:
         """完整研究流程: 规划 + 并行检索 + 抓取 + 压缩.
 
-        对标 GPT Researcher conduct_research + _get_context_by_web_search.
+        设计参考 conduct_research + _get_context_by_web_search.
         返回 {"contexts","sources","sub_queries","visited_urls"}.
 
         mode 路由 (P2-01):
@@ -360,7 +360,7 @@ class ResearchConductor:
                 private_data_task,
             )
 
-            # 追加原始 query (对标 GPT Researcher)
+            # 追加原始 query (设计参考)
             if query not in sub_queries:
                 sub_queries.append(query)
 
@@ -693,7 +693,7 @@ class ResearchConductor:
     ) -> dict[str, Any]:
         """处理单个子查询: 搜索 → 抓取 → 压缩.
 
-        对标 GPT Researcher _process_sub_query.
+        设计参考 _process_sub_query.
 
         任务2 内存优化: try/finally 确保 searcher httpx 客户端在搜索完成后立即释放,
         避免 httpx.AsyncClient 泄漏 (原主因: 每次调用新建 9 个 searcher 实例, 每个含

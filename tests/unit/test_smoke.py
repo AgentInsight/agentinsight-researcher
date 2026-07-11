@@ -267,7 +267,7 @@ def test_memory_db_initializer_importable() -> None:
 
 
 def test_skills_agent_creator_importable() -> None:
-    """验证 src.skills.researcher.agent_creator 可导入 (GPTR agent_creator)."""
+    """验证 src.skills.researcher.agent_creator 可导入."""
     from src.skills.researcher.agent_creator import AgentCreator
 
     assert AgentCreator is not None

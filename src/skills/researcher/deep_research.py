@@ -1,6 +1,6 @@
 """DeepResearch 递归深度研究器 (P0-01).
 
-对标 GPT Researcher deep_research.py.
+设计参考: deep_research.py.
 AGENTS.md 第 5 章: 节点为纯函数, 单一职责.
 通过 breadth×depth 递归树探索, 每层聚合上下文.
 """
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class DeepResearcher:
     """递归深度研究器 (breadth×depth 树探索).
 
-    对标 GPT Researcher deep_research.
+    设计参考: deep_research.
     每层: 1) 生成 breadth 个子查询 2) 并行检索 3) 聚合上下文 4) 递归下一层.
     """
 

@@ -1,14 +1,14 @@
 """Tavily Extract 抓取器 - 商用内容提取 API.
 
-对标 GPT Researcher scraper/tavily_extract/tavily_extract.py.
-GPTR 用 Tavily Extract API 作为内容抓取器, 输出已为 LLM 优化的纯文本
+设计参考 scraper/tavily_extract/tavily_extract.py.
+用 Tavily Extract API 作为内容抓取器, 输出已为 LLM 优化的纯文本
 (raw_content), 适用于反爬严格或 JS 渲染重的页面.
 
 实现差异:
-- AIR 统一走 httpx.AsyncClient (GPTR 用 httpx 同步).
+- AIR 统一走 httpx.AsyncClient (业界实践用 httpx 同步, 本项目改为异步).
 - API Key 从 settings.tavily_api_key 注入 (与 TavilySearcher 复用同一 Key).
 - 返回 AIR 统一 scrapers 规约: {"url","content","title","image_urls","content_type"}
-  (GPTR 原生返回 raw_content + url + images, 由本类映射到 AIR 字段).
+  (原生 API 返回 raw_content + url + images, 由本类映射到 AIR 字段).
 
 API 文档: https://docs.tavily.com/documentation/api-reference/endpoint/extract
 - POST https://api.tavily.com/extract

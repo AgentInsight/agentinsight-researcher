@@ -1,14 +1,14 @@
 """Reviser 报告修订 Agent (P0-Future-01).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-对标 GPT Researcher reviser 角色 + 章节级修订循环.
+设计参考: reviser 角色 + 章节级修订循环.
 
 Reviser 职责:
 - 根据 Reviewer 反馈修订报告, 返回新的 report_md
 - 用 LLMClient tier=SMART 调用 (适合长文本写作)
 - 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
 
-行业适配采用 GPTR 风格 4 层机制, agent_role 注入角色 persona.
+行业适配采用 4 层机制, agent_role 注入角色 persona.
 修订循环上限由 settings.max_revisions 控制 (默认 3, 见 multi_agent_builder 守卫).
 """
 
@@ -29,7 +29,7 @@ class Reviser:
     """报告修订 Agent (P0-Future-01).
 
     根据 Reviewer 反馈修订报告, 返回新的 report_md.
-    对标 GPT Researcher reviser 角色 + 章节级修订循环.
+    设计参考: reviser 角色 + 章节级修订循环.
     """
 
     settings: Settings

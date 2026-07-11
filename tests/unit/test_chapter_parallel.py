@@ -266,7 +266,7 @@ async def test_detailed_report_empty_contexts_returns_fallback(
     generator: ReportGenerator,
     mock_llm: MagicMock,
 ) -> None:
-    """空上下文 → 返回降级报告 (防幻觉守卫, 对标 GPTR writer.py:82-88)."""
+    """空上下文 → 返回降级报告 (防幻觉守卫, 设计参考: writer.py:82-88)."""
     result = await generator._generate_detailed_report(
         query="q",
         contexts=[],  # 空上下文

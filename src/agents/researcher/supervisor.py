@@ -1,7 +1,7 @@
 """Researcher Supervisor (P0-02 多 Agent 协作).
 
 AGENTS.md 第 5 章: 多 Agent 协作限 Supervisor 模式.
-对标 GPT Researcher multi_agents/agents/manager.py.
+设计参考: multi_agents/agents/manager.py.
 Supervisor 决策下一个执行的 Agent, 含 max_iterations 守卫.
 """
 

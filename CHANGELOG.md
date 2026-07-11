@@ -81,7 +81,7 @@
 
 **工具协议**
 - MCP 协议支持(fast / deep / disabled 三策略)
-- LLM 自动工具选择(对标 GPTR `MCPToolSelector`)
+- LLM 自动工具选择(对标业界实践 `MCPToolSelector`)
 - 多工具并发调用(信号量限流,默认并发 3)
 - TTL 缓存(key = md5(query + tool_name + tool_args))
 
@@ -228,7 +228,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **Tool Protocol**
 - MCP protocol support (fast / deep / disabled strategies)
-- LLM automatic tool selection (aligned with GPTR `MCPToolSelector`)
+- LLM automatic tool selection (aligned with industry practice `MCPToolSelector`)
 - Multi-tool concurrent invocation (semaphore rate limiting, default concurrency 3)
 - TTL cache (key = md5(query + tool_name + tool_args))
 

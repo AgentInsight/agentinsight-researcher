@@ -1,6 +1,6 @@
 """SerpApi 搜索 - 国外搜索引擎.
 
-P2-Future-04: 对标 GPT Researcher retrievers/serpapi/serpapi.py.
+P2-Future-04: 设计参考 retrievers/serpapi/serpapi.py.
 通过 SerpApi 代理进行搜索, 适用于全球场景.
 需 SERPAPI_KEY 环境变量 (query param 鉴权, 复用现有 serpapi_key).
 与 google_searcher.py 共用 serpapi_key, 但作为独立引擎注册 (name=serpapi).

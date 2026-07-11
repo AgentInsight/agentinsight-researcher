@@ -26,7 +26,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 |---|---|
 | Rerank 在本项目 RAG 流水线中的必要性 | Rerank 模型本身的算法优劣 |
 | Rerank 对精度/延迟/成本/部署的影响 | BM25 vs 向量检索的对比 |
-| 与 GPT Researcher 等同类项目的对标 | Embedding 模型选型 |
+| 与同类研究型项目的对标 | Embedding 模型选型 |
 | 是否应降级为可选 / 动态启用 | Qdrant / Postgres 选型 |
 | 容器编排与离线部署成本 | LangGraph 编排细节 |
 | 中文研究分析场景的特殊性 | API 兼容性 |
@@ -39,7 +39,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 | Rerank 失败时降级为 RRF 分数排序 | [src/rag/retriever.py#L259-L261](src/rag/retriever.py) |
 | Rerank 容器镜像与 Embeddings 共用 `tei-embedding:cpu-1.9`，模型权重独立 | [docker-compose.yml#L100-L125](docker-compose.yml) |
 | Rerank 服务 `start_period: 180s`（模型加载慢） | [docker-compose.yml#L123](docker-compose.yml) |
-| GPT Researcher **不使用 Rerank**，依赖 Tavily Search API + EmbeddingsFilter | 网络对标（见第 3 章） |
+| 同类项目 **不使用 Rerank**，依赖 Tavily Search API + EmbeddingsFilter | 网络对标（见第 3 章） |
 | Cross-Encoder Rerank 占检索延迟 60-80% | 业界生产系统实测（见第 3 章） |
 | BGE-Reranker-v2-m3 在中文场景准确率提升约 +15pp（68%→83%） | BGE 系列实测报告 |
 
@@ -61,7 +61,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 | 8 | **行业知识工程师** | 强烈支持保留 | 中文优先、GICS 68 行业长尾查询 |
 | 9 | **LLM 工程专家** | 中立偏保留 | 上下文质量、Token 浪费、幻觉抑制 |
 | 10 | **用户体验专家** | 质疑 | 首字延迟、流式渲染体验、超时失败率 |
-| 11 | **GPT Researcher 研究者** | 质疑 | 对标项目不使用 Rerank 也能跑 |
+| 11 | **同类项目研究者** | 质疑 | 同类项目不使用 Rerank 也能跑 |
 | 12 | **LangGraph 编排专家** | 中立 | 节点纯函数、状态可恢复、trace 完整性 |
 
 **角色多样性**：覆盖架构、检索、性能、部署、成本、安全、测试、领域知识、LLM、UX、对标、编排 12 个维度，避免单一视角偏差。
@@ -70,9 +70,9 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 
 ## 三、网络同类 Agent 实现对标
 
-### 3.1 GPT Researcher（assafelovic/gpt-researcher）
+### 3.1 同类研究型项目对标
 
-| 维度 | GPT Researcher 实现 | 本项目实现 |
+| 维度 | 同类项目实现 | 本项目实现 |
 |---|---|---|
 | **检索器** | Tavily Search API + DuckDuckGo 兜底 | BM25 + bge-base-zh-v1.5 + RRF |
 | **Rerank** | ❌ **不使用独立 Rerank 模型** | ✅ bge-reranker-v2-m3 强制调用 |
@@ -80,7 +80,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 | **Top-K** | 默认 5 篇 web 内容，直接送 LLM | Top-15 召回 → Rerank → Top-5 |
 | **理由** | Web 搜索 API 已经过排序，且 LLM 可处理噪声 | 本地知识库 + 用户上传文档，需 Cross-Encoder 精排 |
 
-**关键洞察**：GPT Researcher **不使用 Rerank 的根本原因是其数据源是商业搜索 API（已排序）**，而本项目数据源包含**用户上传的原始文档 + 本地知识库**，未经过商业搜索引擎排序，Cross-Encoder Rerank 价值更大。
+**关键洞察**：同类项目 **不使用 Rerank 的根本原因是其数据源是商业搜索 API（已排序）**，而本项目数据源包含**用户上传的原始文档 + 本地知识库**，未经过商业搜索引擎排序，Cross-Encoder Rerank 价值更大。
 
 ### 3.2 LangChain ContextualCompressionRetriever
 
@@ -162,9 +162,9 @@ LlamaIndex 的 `NodePostprocessor` 体系中 Rerank 也是**可选插件**。官
 
 > "SSE 流式场景下，首字延迟 > 2s 用户感知明显卡顿。研究分析智能体不是实时对话，但**多轮子查询累加延迟**仍会导致整体响应 10s+。建议 Rerank 仅在'深度研究'模式启用，'快速报告'模式跳过。"
 
-### 4.11 GPT Researcher 研究者（质疑）
+### 4.11 同类项目研究者（质疑）
 
-> "GPT Researcher 全球部署量数万+，**不使用 Rerank 也能产出高质量研究报告**。关键在于：
+> "同类项目全球部署量数万+，**不使用 Rerank 也能产出高质量研究报告**。关键在于：
 > 1. Tavily Search API 自带排序
 > 2. EmbeddingsFilter 二次过滤（相似度 0.35）
 > 3. LLM 自身的噪声容忍
@@ -191,13 +191,13 @@ LlamaIndex 的 `NodePostprocessor` 体系中 Rerank 也是**可选插件**。官
 
 **RAG 检索专家**："'Lost in the Middle'（Liu et al. 2023）已证明 LLM 对长上下文中部信息利用率低。**顺序确实影响**，但幅度不如检索精度本身。我承认这点上 Rerank 的边际收益有限。"
 
-### 5.2 GPT Researcher 研究者 ↔ 行业知识工程师
+### 5.2 同类项目研究者 ↔ 行业知识工程师
 
-**GPT Researcher 研究者**："GPT Researcher 不用 Rerank 也能跑，说明 Rerank 非必需。"
+**同类项目研究者**："同类项目不用 Rerank 也能跑，说明 Rerank 非必需。"
 
-**行业知识工程师**："GPT Researcher 数据源是**Tavily 商业搜索 API**，已经过搜索引擎排序。本项目数据源含**用户上传 PDF/DOCX 原始文档**，未经任何外部排序。两者数据源质量完全不同，不能简单类比。"
+**行业知识工程师**："同类项目数据源是**Tavily 商业搜索 API**，已经过搜索引擎排序。本项目数据源含**用户上传 PDF/DOCX 原始文档**，未经任何外部排序。两者数据源质量完全不同，不能简单类比。"
 
-**GPT Researcher 研究者**："但本项目也有 Web 搜索（博查/Tavily），那部分是否可以不用 Rerank？"
+**同类项目研究者**："但本项目也有 Web 搜索（博查/Tavily），那部分是否可以不用 Rerank？"
 
 **行业知识工程师**："同意。Web 搜索结果自带排序，Rerank 价值低；**Qdrant 本地检索 + 用户上传文档**才是 Rerank 的高价值场景。这是一个重要的折中点。"
 
@@ -225,10 +225,10 @@ LlamaIndex 的 `NodePostprocessor` 体系中 Rerank 也是**可选插件**。官
 
 | 分歧点 | 支持方 | 反对方 |
 |---|---|---|
-| Rerank 是否必需 | RAG 检索专家、行业知识工程师 | GPT Researcher 研究者、成本测算师 |
+| Rerank 是否必需 | RAG 检索专家、行业知识工程师 | 同类项目研究者、成本测算师 |
 | 性能延迟是否可接受 | 测试专家（需数据） | 性能工程师、UX 专家 |
 | 是否应作为硬约束 | 安全合规专家（保留容器） | 架构师、LangGraph 专家（应可配置） |
-| 数据源是否影响 Rerank 价值 | 行业知识工程师（用户文档场景价值高） | GPT Researcher 研究者（Web 搜索场景价值低） |
+| 数据源是否影响 Rerank 价值 | 行业知识工程师（用户文档场景价值高） | 同类项目研究者（Web 搜索场景价值低） |
 
 ---
 
@@ -360,7 +360,7 @@ def _should_rerank(self, namespaces: list[str]) -> bool:
 | 行业知识工程师 | ✅ | ❌（保持硬约束） | ✅ |
 | LLM 工程专家 | ✅ | ✅ | ✅ |
 | 用户体验专家 | ❌（全删） | ✅ | ✅ |
-| GPT Researcher 研究者 | ❌（全删） | ✅ | ✅ |
+| 同类项目研究者 | ❌（全删） | ✅ | ✅ |
 | LangGraph 编排专家 | ✅ | ✅ | ✅ |
 | **多数决议** | **保留（7/12）** | **降级（11/12）** | **补评测（12/12）** |
 
@@ -378,8 +378,6 @@ def _should_rerank(self, namespaces: list[str]) -> bool:
 
 ### 10.2 网络参考资料
 
-- GPT Researcher 开源项目结构与检索器实现：https://blog.csdn.net/gitblog_01185/article/details/141386137
-- GPT Researcher 多智能体协同机制：https://blog.csdn.net/sinat_28461591/article/details/147939982
 - LangChain 向量召回 + Rerank 完整方案：https://blog.csdn.net/cooldream2009/article/details/154359160
 - LangChain ContextualCompressionRetriever 解析：https://testerhome.com/topics/38295
 - RAG 检索策略深度解析（BM25→Embedding→Reranker）：https://cloud.tencent.com/developer/article/2536406

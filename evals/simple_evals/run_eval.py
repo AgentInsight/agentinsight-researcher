@@ -1,4 +1,4 @@
-"""SimpleQA 评测运行器 (对标 GPTR evals/simple_evals/run_eval.py).
+"""SimpleQA 评测运行器 (设计参考: evals/simple_evals/run_eval.py).
 
 从 CSV 加载问题集, 调用 SimpleQAEvaluator, 输出评测报告到 results/.
 用法:

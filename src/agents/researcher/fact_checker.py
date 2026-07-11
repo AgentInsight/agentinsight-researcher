@@ -1,7 +1,7 @@
 """FactChecker 事实核查 Agent (P0-Future-02).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-对标 GPT Researcher fact_checker + DeepEval 幻觉率门禁 (AGENTS.md 第 10 章).
+设计参考: fact_checker + DeepEval 幻觉率门禁 (AGENTS.md 第 10 章).
 
 FactChecker 职责:
 - 核查报告事实是否与上下文一致
@@ -31,7 +31,7 @@ class FactChecker:
     """事实核查 Agent (P0-Future-02).
 
     核查报告中的事实声明是否与上下文一致, 返回 accepted/issues.
-    对标 GPT Researcher fact_checker + DeepEval 幻觉率门禁.
+    设计参考: fact_checker + DeepEval 幻觉率门禁.
     """
 
     settings: Settings

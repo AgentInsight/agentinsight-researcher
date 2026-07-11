@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 启动时初始化业务数据 (AGENTS.md 第 6 章):
     # PostgreSQL 业务表 (原 Docker 构建时执行, 现改为 Agent 启动时触发, 幂等)
     # 失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
-    # 注: 行业适配采用 GPTR 风格 4 层机制 (Prompt/Config/Retriever/MCP), 不再 bootstrap GICS 行业知识库
+    # 注: 行业适配采用 4 层机制 (Prompt/Config/Retriever/MCP), 不再 bootstrap GICS 行业知识库
     from src.memory.db_initializer import init_database
 
     await init_database(settings)
@@ -181,7 +181,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="agentinsight-researcher",
-        description="中文优先的研究分析智能体, 对标 GPT Researcher",
+        description="中文优先的研究分析智能体",
         version="0.1.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.env == "dev" else None,

@@ -531,7 +531,7 @@
 
 ### 8.4 集成架构建议
 
-基于项目 `AGENTS.md` 第 7 章 GPTR 4 层机制 + 第 9 章 MCP 工具协议：
+基于项目 `AGENTS.md` 第 7 章 4 层行业适配机制 + 第 9 章 MCP 工具协议：
 
 ```
 src/skills/researcher/searchers/

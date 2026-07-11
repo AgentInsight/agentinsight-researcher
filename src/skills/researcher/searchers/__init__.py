@@ -5,7 +5,7 @@
 - 国外资料: Tavily + arxiv + Semantic Scholar
 - 混合: 双引擎并行
 
-对标 GPT Researcher retrievers/ 体系, 但统一走 httpx 异步.
+设计参考: retrievers/ 体系, 但统一走 httpx 异步.
 所有 retriever 共享同一规约: search(query, max_results) -> list[dict].
 返回 dict 字段: {"title", "url", "snippet", "source", "region"}.
 
@@ -302,7 +302,7 @@ def detect_region(query: str) -> SearchRegion:
     return SearchRegion.AUTO
 
 
-# ========== P1-1: 搜索引擎注册表 (对标 GPTR VALID_RETRIEVERS + 装饰器模式) ==========
+# ========== P1-1: 搜索引擎注册表 (设计参考: VALID_RETRIEVERS + 装饰器模式) ==========
 # @register_searcher 装饰器在类定义处声明元数据 (name/regions/require_key),
 # get_searchers() 遍历注册表自动按 region + require_key 过滤实例化.
 # 新增引擎只需在引擎类上加 @register_searcher 装饰器, 无需改 get_searchers.

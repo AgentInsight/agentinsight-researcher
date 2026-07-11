@@ -10,7 +10,7 @@
 - deduplicate_results 跨引擎 URL 去重
 
 AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Settings Key 字段).
-对标 GPTR VALID_RETRIEVERS + 装饰器模式.
+设计参考: VALID_RETRIEVERS + 装饰器模式.
 """
 
 from __future__ import annotations

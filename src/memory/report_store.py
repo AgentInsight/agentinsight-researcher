@@ -1,6 +1,6 @@
 """研究报告持久化存储 (P1-Future-09).
 
-对标 GPT Researcher backend/server/report_store.py.
+设计参考: backend/server/report_store.py.
 AGENTS.md 第 6/7 章硬约束:
 - 业务表含 agent_id + user_id 双列复合索引
 - 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复, 避免每次请求新建短连接)
@@ -31,7 +31,7 @@ _SELECT_COLUMNS = (
 class ReportStore:
     """报告持久化存储 (P1-Future-09).
 
-    对标 GPTR backend/server/report_store.py.
+    设计参考: backend/server/report_store.py.
     复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (P0-4 修复),
     每次 CRUD 操作通过 pool.acquire() 获取连接, 用完自动归还, 不再新建短连接.
     """
@@ -77,7 +77,7 @@ class ReportStore:
             report_md: Markdown 报告原文
             report_format: 输出格式 (markdown/html/pdf/docx/json)
             sources: 引用来源列表
-            agent_role: 角色 persona 简称 (可选, 对标 GPTR server)
+            agent_role: 角色 persona 简称 (可选, 设计参考: server 约定)
 
         Returns:
             report_id (UUID 字符串)

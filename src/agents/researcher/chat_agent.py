@@ -1,7 +1,7 @@
 """ChatAgent 对话式追问 Agent (P2-Future-03).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-对标 GPT Researcher chat_with_report / 对话式追问模式.
+设计参考: chat_with_report / 对话式追问模式.
 
 ChatAgent 职责:
 - 基于历史消息 + 已有报告上下文回答用户追问
@@ -36,7 +36,7 @@ class ChatAgent:
     """对话式追问 Agent (P2-Future-03).
 
     基于历史消息 + 已有报告上下文回答用户追问.
-    对标 GPT Researcher chat_with_report 对话模式.
+    设计参考: chat_with_report 对话模式.
 
     CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0: cascade 路由
     - 简单追问 (短查询/总结/复述) → FAST_LLM (glm-4-flash, 免费)

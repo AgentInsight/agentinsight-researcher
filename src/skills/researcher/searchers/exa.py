@@ -1,6 +1,6 @@
 """Exa 搜索 - 国外搜索引擎.
 
-P2-Future-04: 对标 GPT Researcher retrievers/exa/exa.py.
+P2-Future-04: 设计参考 retrievers/exa/exa.py.
 通过 Exa API 进行语义搜索, 适用于全球场景.
 需 EXA_API_KEY 环境变量 (Bearer token 鉴权).
 """

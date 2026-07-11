@@ -135,7 +135,7 @@ ruff format .
 ```
 feat(rag): 新增 EmbeddingsFilter 递归分块支持
 
-- 对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000
+- 设计参考: RecursiveCharacterTextSplitter chunk_size=1000
 - 修复 _merge_parts chunk_size 超限 bug
 - 新增 chunk_overlap 兜底逻辑
 
@@ -480,7 +480,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 feat(rag): add EmbeddingsFilter recursive chunking support
 
-- Aligned with GPTR RecursiveCharacterTextSplitter chunk_size=1000
+- Aligned with RecursiveCharacterTextSplitter chunk_size=1000
 - Fix _merge_parts chunk_size overflow bug
 - Add chunk_overlap fallback logic
 

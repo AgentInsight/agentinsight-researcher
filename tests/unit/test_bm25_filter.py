@@ -8,7 +8,7 @@
 5. 两层路由阈值: >=8K 走 BM25Filter (含 >50K 超长上下文, 全量覆盖)
 6. trace_retriever span 集成
 
-对标 test_v2_gptr_alignment.py::TestRecursiveSplit 测试模式.
+对标 test_v2_alignment.py::TestRecursiveSplit 测试模式.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Reviewer 报告评审 Agent (P0-Future-01, V4-P1-02 多维度评分).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-对标 GPT Researcher multi_agents/agents/reviewer.py + 章节级修订循环.
+设计参考: multi_agents/agents/reviewer.py + 章节级修订循环.
 
 Reviewer 职责:
 - 评审报告质量, 按 4 维度打分 (事实性/结构性/语言性/完整性)
@@ -10,7 +10,7 @@ Reviewer 职责:
 - 用 safe_json_parse 解析 LLM 返回的 JSON
 - 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
 
-行业适配采用 GPTR 风格 4 层机制, agent_role 注入角色 persona.
+行业适配采用 4 层机制, agent_role 注入角色 persona.
 
 V4-P1-02: 单维度 pass/revise 升级为多维度评分:
   - factual (事实性): 报告内容是否基于检索上下文, 有无幻觉
@@ -64,7 +64,7 @@ class Reviewer:
     """报告评审 Agent (P0-Future-01, V4-P1-02 多维度评分).
 
     用 smart_llm 按 4 维度评审报告质量, 返回 accept/revise 决策与反馈.
-    对标 GPT Researcher reviewer 角色 + 章节级修订循环入口.
+    设计参考: reviewer 角色 + 章节级修订循环入口.
     """
 
     settings: Settings

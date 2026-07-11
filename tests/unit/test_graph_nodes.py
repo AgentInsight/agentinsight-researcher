@@ -105,7 +105,7 @@ async def test_agent_creator_node_uses_preset_role_from_state(
     """测试 state 中已注入 agent_role 时, 优先传递给 create_agent.
 
     AgentCreator.create_agent 内部 agent_role 非空时直接返回该值作为 agent_role_prompt
-    (对标 GPTR AGENT_ROLE 配置优先级).
+    (设计参考: AGENT_ROLE 配置优先级).
     """
     mock_creator = MagicMock()
     # 模拟 AgentCreator 收到 preset_role 后回传该值

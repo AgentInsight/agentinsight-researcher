@@ -1,9 +1,9 @@
 """MCP Coordinator MCP 协调器.
 
-对标 GPT Researcher mcp/ 模块.
+设计参考 mcp/ 模块.
 AGENTS.md 用户需求 9: 支持用户配置 MCP 作为数据源.
 
-三策略 (对标 GPT Researcher):
+三策略 (设计参考):
 - fast (默认): 仅对原始查询运行一次, 缓存复用
 - deep: 每子查询都运行
 - disabled: 完全跳过
@@ -69,7 +69,7 @@ async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, An
     """从 postgres 获取用户的启用 MCP 配置 (任务7).
 
     AGENTS.md 第 7 章: 数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
-    Agent 初始化时调用, 合并到 MCP_SERVERS (对标 GPT Researcher 动态工具注册).
+    Agent 初始化时调用, 合并到 MCP_SERVERS (设计参考 动态工具注册).
 
     Args:
         user_id: 用户 ID (从请求上下文注入).
@@ -150,7 +150,7 @@ async def conduct_mcp_if_enabled(
 class MCPCoordinator:
     """MCP 协调器.
 
-    对标 GPT Researcher MCPResearchSkill.
+    设计参考 MCPResearchSkill.
     管理用户配置的 MCP Server 作为数据源.
     """
 
@@ -213,7 +213,7 @@ class MCPCoordinator:
         """MCP 研究 (三策略).
 
         返回 MCP 检索到的上下文列表.
-        对标 GPT Researcher conduct_research_with_tools.
+        设计参考 conduct_research_with_tools.
         """
         strat = strategy or self.settings.mcp_strategy
         if strat == "disabled":
@@ -265,13 +265,13 @@ class MCPCoordinator:
     ) -> list[str]:
         """执行 MCP 工具调用.
 
-        对标 GPT Researcher MCPClientManager + MCPToolSelector.
+        设计参考 MCPClientManager + MCPToolSelector.
         支持两种传输模式 (对标 MCP 协议):
         - stdio (本地模式): 通过 command/args/env 启动本地进程, 经 stdin/stdout 通信
         - sse / streamable_http (远程模式): 通过 server_url 连接远程 HTTP 服务器
         """
         try:
-            # 转换配置格式 (对标 GPT Researcher convert_configs_to_langchain_format)
+            # 转换配置格式 (设计参考 convert_configs_to_langchain_format)
             # 根据数据库 transport_type 字段构建配置 (不再从 URL 推断)
             server_configs = {}
             for cfg in mcp_configs:
@@ -330,7 +330,7 @@ class MCPCoordinator:
                 logger.warning("MCP 未返回任何工具")
                 return []
 
-            # LLM 智能选工具 + 生成参数 (对标 GPT Researcher MCPToolSelector)
+            # LLM 智能选工具 + 生成参数 (设计参考 MCPToolSelector)
             max_tools = self.settings.mcp_max_tools
             selected = await self._select_tool_with_llm(
                 query,
@@ -435,7 +435,7 @@ class MCPCoordinator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[tuple[Any, dict[str, Any]]]:
-        """LLM 智能选工具 + 生成参数 (对标 GPT Researcher MCPToolSelector).
+        """LLM 智能选工具 + 生成参数 (设计参考 MCPToolSelector).
 
         返回 [(tool, tool_args), ...], 最多 max_tools 个.
         LLM 不可用或失败时降级到关键词匹配 (_select_tools).
@@ -552,7 +552,7 @@ class MCPCoordinator:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[Any]:
-        """LLM 智能选工具 (对标 GPT Researcher MCPToolSelector).
+        """LLM 智能选工具 (设计参考 MCPToolSelector).
 
         阶段 4 完整实现, 此处用简单匹配.
         """

@@ -1,4 +1,4 @@
-"""幻觉评测器 (对标 GPTR evals/hallucination_eval/evaluate.py).
+"""幻觉评测器 (设计参考: evals/hallucination_eval/evaluate.py).
 
 用 LLM 检查报告中每个声明是否有来源支持, 计算幻觉率.
 评测维度:

@@ -1,0 +1,56 @@
+# Security Scan Workflow (AGENTS.md 第 11 章安全合规红线配套)
+# 安全扫描工作流 (配套 AGENTS.md 第 11 章安全合规红线)
+#
+# 包含三类扫描 / Three scans included:
+#   1. gitleaks   - 密钥泄露扫描 / Secret scanning
+#   2. pip-audit  - 依赖漏洞扫描 / Dependency vulnerability scan
+#   3. Trivy      - 容器镜像扫描 / Container image scan
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # 每周一 06:00 UTC / Every Monday 06:00 UTC
+
+jobs:
+  gitleaks:
+    name: Secret Scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pip-audit:
+    name: Dependency Vulnerability Scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Scan dependencies
+        run: pip-audit -r requirements.txt --strict
+
+  trivy:
+    name: Container Image Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t agentinsight-researcher:scan .
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: agentinsight-researcher:scan
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH

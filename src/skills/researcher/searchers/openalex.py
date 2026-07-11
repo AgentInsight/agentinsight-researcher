@@ -1,6 +1,6 @@
 """OpenAlex 学术搜索 - 开放学术数据库.
 
-P2-Future-04: 对标 GPT Researcher retrievers/openalex/openalex.py.
+P2-Future-04: 设计参考 retrievers/openalex/openalex.py.
 OpenAlex 是开放学术文献数据库, 适用于学术场景.
 无需 API Key, 可选配置 OPENALEX_EMAIL 进入 polite pool (更高配额).
 """
@@ -69,7 +69,7 @@ class OpenAlexSearcher(BaseSearcher):
         """OpenAlex 学术搜索 (GET, 无需 Key).
 
         返回 [{"title","url","snippet","source","region"}].
-        snippet 含摘要 + 作者 + 发表日期 + DOI (对标 GPTR openalex).
+        snippet 含摘要 + 作者 + 发表日期 + DOI.
         """
         async with trace_tool(
             name="openalex-search",

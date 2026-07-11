@@ -1,12 +1,12 @@
 """Playwright 抓取器 - JS 渲染页面.
 
-对标 GPT Researcher scraper/browser/browser.py (但用 Playwright 替代 Selenium).
+设计参考 scraper/browser/browser.py (但用 Playwright 替代 Selenium).
 适用于 JS 渲染的 SPA 页面.
 
 P0-6: 全局 _PlaywrightPool 单例复用 browser, 每次 scrape 仅创建新 page,
 避免每个 URL 启动新 chromium 进程 (1-3s 开销).
 
-v3 借鉴 GPTR NoDriverScraper (P2-05):
+v3 优化 (P2-05):
 - 浏览器池化: max_browsers=5 + 负载均衡 (min processing_count), 支持高并发
 - 域名级限流: Semaphore(1) per domain + 随机延迟, 避免单域名被封
 - 图片评分: get_relevant_images() 按尺寸/class 评分排序
@@ -64,7 +64,7 @@ async def _build_launch_kwargs(settings: Settings) -> dict[str, Any]:
 
 
 def _get_domain(url: str) -> str:
-    """从 URL 提取二级域名 (对标 GPTR NoDriverScraper.get_domain).
+    """从 URL 提取二级域名 (设计参考 NoDriverScraper.get_domain).
 
     示例: https://www.example.com/path → example.com
     用于域名级限流 (同域名请求串行化, 避免被封).
@@ -77,7 +77,7 @@ def _get_domain(url: str) -> str:
 
 
 class _PooledBrowser:
-    """池化浏览器包装 (借鉴 GPTR NoDriverScraper.Browser).
+    """池化浏览器包装 (设计参考: NoDriverScraper.Browser).
 
     封装 Playwright browser 实例 + 负载计数 + 域名级 Semaphore.
     - processing_count: 当前并发处理数, 用于负载均衡 (min 选择)
@@ -123,9 +123,9 @@ class _PooledBrowser:
 
 
 class _PlaywrightPool:
-    """全局 Playwright 浏览器池 (单例, P0-6 修复 + P2-05 借鉴 GPTR 池化).
+    """全局 Playwright 浏览器池 (单例, P0-6 修复 + P2-05 池化优化).
 
-    v3 借鉴 GPTR NoDriverScraper:
+    v3 优化:
     - max_browsers=5: 池上限, 超过则复用负载最低的
     - browser_load_threshold=8: 单 browser 并发阈值, 超过则新建
     - 负载均衡: get_browser 选 min(processing_count)
@@ -139,7 +139,7 @@ class _PlaywrightPool:
 
     _instance: ClassVar[_PlaywrightPool | None] = None
     _lock: ClassVar[asyncio.Lock | None] = None
-    # v3: 池化 (借鉴 GPTR max_browsers=5)
+    # v3: 池化 (max_browsers=5)
     _pooled_browsers: ClassVar[set[_PooledBrowser]] = set()
     _max_browsers: ClassVar[int] = 5
     _browser_load_threshold: ClassVar[int] = 8
@@ -164,7 +164,7 @@ class _PlaywrightPool:
     async def acquire(
         cls, url: str, settings: Settings | None = None
     ) -> tuple[Any, asyncio.Semaphore | None, _PooledBrowser]:
-        """获取 browser + 域名 Semaphore + 池包装 (v3 新增, 借鉴 GPTR).
+        """获取 browser + 域名 Semaphore + 池包装 (v3 新增).
 
         调用方需在 finally 中调用 release(pooled).
         返回 (browser, domain_semaphore, pooled_browser).
@@ -194,7 +194,7 @@ class _PlaywrightPool:
         if not self._pooled_browsers:
             return await self._create_pooled_browser(settings)
 
-        # 负载均衡: 选 processing_count 最低的 (借鉴 GPTR min key)
+        # 负载均衡: 选 processing_count 最低的 (min key)
         browser = min(self._pooled_browsers, key=lambda b: b.processing_count)
 
         # 所有 browser 都超阈值且池未满: 新建
@@ -233,7 +233,7 @@ class _PlaywrightPool:
 
     @classmethod
     async def release(cls, pooled: _PooledBrowser) -> None:
-        """释放 browser 槽位 (v3 新增, 借鉴 GPTR release_browser).
+        """释放 browser 槽位 (v3 新增, 设计参考: release_browser).
 
         processing_count 归零时不关闭 (保留池化复用);
         仅 shutdown 时统一关闭.
@@ -277,7 +277,7 @@ class PlaywrightScraper(BaseScraper):
     比 BeautifulSoup 重, 仅在配置 SCRAPER=playwright 时启用.
     镜像内需预装 chromium.
 
-    v3 借鉴 GPTR (P2-05):
+    v3 优化 (P2-05):
     - 浏览器池化: acquire/release 语义, 负载均衡
     - 域名限流: acquire 返回 domain_semaphore, async with 加锁
     - 图片评分: 调用 utils.get_relevant_images_from_html 评分排序
@@ -335,7 +335,7 @@ class PlaywrightScraper(BaseScraper):
                         raise
                     own_browser = True
 
-                # v3: 域名级限流 (借鉴 GPTR, 同域名串行化 + 随机延迟)
+                # v3: 域名级限流 (同域名串行化 + 随机延迟)
                 async def _do_scrape() -> dict[str, Any]:
                     nonlocal context, page
                     # v2: BrowserContext 隔离, context.close 一次性释放 page+storage
@@ -358,7 +358,7 @@ class PlaywrightScraper(BaseScraper):
                     content = await page.inner_text("body")
                     title = await page.title()
 
-                    # v3: 提取页面 HTML 用于图片评分 (借鉴 GPTR get_relevant_images)
+                    # v3: 提取页面 HTML 用于图片评分 (get_relevant_images)
                     html_content = await page.content()
                     # 图片评分排序 (按尺寸/class 评分, 取 Top-4)
                     image_urls = get_relevant_images_from_html(html_content, self.url, top_k=4)
@@ -372,7 +372,7 @@ class PlaywrightScraper(BaseScraper):
                     }
 
                 if domain_sem is not None:
-                    # v3: 域名 Semaphore 加锁 (借鉴 GPTR, 被锁时随机延迟)
+                    # v3: 域名 Semaphore 加锁 (被锁时随机延迟)
                     was_locked = domain_sem.locked()
                     async with domain_sem:
                         if was_locked:

@@ -84,7 +84,7 @@ class TrafilaturaScraper(BaseScraper):
             except Exception:
                 pass
 
-            # v3 借鉴 GPTR: 按尺寸/class 评分排序, 取 Top-4
+            # v3: 按尺寸/class 评分排序, 取 Top-4
             # trafilatura.extractors.extract_images 仅返回 URL 列表无尺寸信息,
             # 改用 get_relevant_images_from_html 从 HTML 评分排序.
             from src.skills.researcher.scrapers.utils import (

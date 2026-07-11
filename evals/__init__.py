@@ -3,7 +3,7 @@
 RAGAS: faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7
 DeepEval: 任务完成率 ≥0.9 / 工具调用正确率 ≥0.95 / 幻觉率 ≤0.1
 
-P2-Future-05: SimpleQA + Hallucination 评测套件 (对标 GPTR evals/).
+P2-Future-05: SimpleQA + Hallucination 评测套件 (设计参考: evals/).
 评测器通过 HTTP API 调用 researcher (不直接 import src/), LLM 评测复用项目 LLMClient.
 """
 

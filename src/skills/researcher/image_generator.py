@@ -1,6 +1,6 @@
 """图像生成器 (P2-06 报告配图).
 
-对标 GPT Researcher skills/image_generator.py (用 gemini 生成报告配图).
+设计参考 skills/image_generator.py (用 gemini 生成报告配图).
 本项目改用 deepseek-v4-flash (用户明确要求, 非 gemini).
 
 AGENTS.md 第 9 章: 全部 LLM/图像调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连.
@@ -24,7 +24,7 @@ from src.observability.tracing import trace_chain
 
 logger = logging.getLogger(__name__)
 
-# P2-04: 图像生成 prompt 增强 (对标 GPTR plan_and_generate_images)
+# P2-04: 图像生成 prompt 增强 (设计参考 plan_and_generate_images)
 # 风格预设: 报告配图按主题选择风格
 _IMAGE_STYLE_PRESETS: dict[str, dict[str, str]] = {
     "technology": {
@@ -92,9 +92,9 @@ def _enhance_prompt(
     *,
     aspect_ratio: str = "16:9",
 ) -> dict[str, str]:
-    """增强图像生成 prompt (P2-04, 对标 GPTR plan_and_generate_images).
+    """增强图像生成 prompt (P2-04, 设计参考 plan_and_generate_images).
 
-    GPTR 多步生成: 计划 → 生成 → 评估 → 重试.
+    业界实践多步生成: 计划 → 生成 → 评估 → 重试.
     AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词).
 
     Args:
@@ -123,7 +123,7 @@ def _enhance_prompt(
 class ImageGenerator:
     """图像生成器 (报告配图).
 
-    对标 GPT Researcher skills/image_generator.py.
+    设计参考 skills/image_generator.py.
     用户明确要求: 使用 deepseek-v4-flash 模型 (非 gemini).
 
     AGENTS.md 第 9 章: 通过 LiteLLM aimage_generation 调用, 禁厂商 SDK 直连.
@@ -147,7 +147,7 @@ class ImageGenerator:
 
         通过 LiteLLM aimage_generation 调用 deepseek-v4-flash 生成图像.
         P2-04: 调用前用 _enhance_prompt 增强 prompt (主题风格 + negative prompt + 质量词),
-        对标 GPTR plan_and_generate_images (AIR 简化为单步增强).
+        设计参考 plan_and_generate_images (AIR 简化为单步增强).
 
         返回 dict 含:
         - url: 图像 URL (若 API 返回 URL, 否则 None)
@@ -178,8 +178,8 @@ class ImageGenerator:
             session_id=session_id,
         ) as span:
             try:
-                # P2-04: prompt 增强 (对标 GPTR plan_and_generate_images)
-                # GPTR 多步生成: 计划 → 生成 → 评估 → 重试
+                # P2-04: prompt 增强 (设计参考 plan_and_generate_images)
+                # 业界实践多步生成: 计划 → 生成 → 评估 → 重试
                 # AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词)
                 enhanced = _enhance_prompt(prompt, topic)
                 prompt = enhanced["prompt"]

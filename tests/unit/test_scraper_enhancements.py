@@ -1,6 +1,6 @@
-"""单元测试: GPTR 借鉴点 (P2-05) - 池化 + 域名限流 + 图片评分.
+"""单元测试: 抓取器增强 (P2-05) - 池化 + 域名限流 + 图片评分.
 
-验证 3 项 GPTR 借鉴实现:
+验证 3 项抓取器增强实现:
 1. 图片评分 (scrapers/utils.py): parse_dimension / _score_image /
    get_relevant_images_from_soup / get_relevant_images_from_html
 2. 域名级限流 (scrapers/__init__.py DomainRateLimiter):
@@ -60,7 +60,7 @@ class TestParseDimension:
 
 
 class TestScoreImage:
-    """_score_image 单图评分 (对标 GPTR 评分规则)."""
+    """_score_image 单图评分 (设计参考: 评分规则)."""
 
     def _make_img(self, **attrs: object) -> MagicMock:
         img = MagicMock()
@@ -221,7 +221,7 @@ class TestGetRelevantImagesFromHtml:
 
 
 class TestDomainRateLimiter:
-    """DomainRateLimiter 域名级限流 (借鉴 GPTR NoDriverScraper)."""
+    """DomainRateLimiter 域名级限流 (设计参考: NoDriverScraper)."""
 
     def test_get_domain_basic(self) -> None:
         from src.skills.researcher.scrapers import DomainRateLimiter
@@ -351,7 +351,7 @@ def _make_mock_pooled_browser(processing_count: int = 0) -> MagicMock:
 
 
 class TestPlaywrightPoolLoadBalancing:
-    """_PlaywrightPool 池化负载均衡 (借鉴 GPTR NoDriverScraper)."""
+    """_PlaywrightPool 池化负载均衡 (设计参考: NoDriverScraper)."""
 
     @pytest.mark.asyncio
     async def test_first_browser_created(self, reset_pool: None) -> None:
@@ -556,7 +556,7 @@ class TestPlaywrightPoolShutdown:
 
 
 class TestGetDomainHelper:
-    """playwright_scraper._get_domain 域名提取 (对标 GPTR)."""
+    """playwright_scraper._get_domain 域名提取."""
 
     def test_basic(self) -> None:
         from src.skills.researcher.scrapers.playwright_scraper import _get_domain

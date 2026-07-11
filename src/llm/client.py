@@ -6,7 +6,7 @@ AGENTS.md 第 9 章硬约束:
 - 模型名以 LiteLLM 路由前缀声明 (如 deepseek/deepseek-chat), 由配置注入, 禁止硬编码
 - 流式统一 achat_stream; 同步 chat 仅用于非交互式批处理
 
-GPT Researcher 三级 LLM 模式 (用户需求 10 Token 优化):
+三级 LLM 模式 (用户需求 10 Token 优化):
 - FAST_LLM: 快速任务 (摘要)
 - SMART_LLM: 复杂推理 (报告写作, 支持 2k+ 字长响应)
 - STRATEGIC_LLM: 规划 (agent 选择, 慢但精)
@@ -94,7 +94,7 @@ LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
 
 
 class LLMTier(StrEnum):
-    """LLM 三级分层 (GPT Researcher 模式)."""
+    """LLM 三级分层."""
 
     FAST = "fast"  # 快速任务 (摘要)
     SMART = "smart"  # 复杂推理 (报告写作)

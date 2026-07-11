@@ -321,7 +321,7 @@ async def test_mcp_multi_server_concurrent(
     """多 MCP Server 并发调用: 创建多个配置 → 并发测试 → 验证独立结果.
 
     AGENTS.md 第 9 章: MCP_SERVERS 注册行业专用工具服务器, mcp_coordinator.py
-    让 LLM 自动选工具 (对标 GPTR MCPToolSelector).
+    让 LLM 自动选工具 (设计参考: MCPToolSelector).
 
     流程:
     1. 并发创建 3 个 MCP 配置 (2 个 sse + 1 个 stdio)

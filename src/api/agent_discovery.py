@@ -31,7 +31,7 @@ async def agent_discovery() -> JSONResponse:
     discovery: dict[str, Any] = {
         "name": settings.agent_name,
         "version": _AGENT_VERSION,
-        "description": "中文优先的研究分析智能体, 对标 GPT Researcher",
+        "description": "中文优先的研究分析智能体",
         "services": [
             {
                 "name": "research",

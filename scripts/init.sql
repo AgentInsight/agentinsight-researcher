@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     query TEXT NOT NULL,                       -- 原始研究请求
     report_type VARCHAR(32) NOT NULL DEFAULT 'basic_report',
     report_format VARCHAR(16) NOT NULL DEFAULT 'markdown',
-    agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona (对标 GPTR agent_role)
-    agent_role_server VARCHAR(64),             -- 角色简称 (对标 GPTR server, 如 financial_analyst)
+    agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona (设计参考: agent_role)
+    agent_role_server VARCHAR(64),             -- 角色简称 (设计参考: server 约定, 如 financial_analyst)
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/running/completed/failed
     total_cost_usd NUMERIC(12,6) DEFAULT 0,
     total_tokens BIGINT DEFAULT 0,
@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_research_sessions_session ON research_sessions(se
 CREATE INDEX IF NOT EXISTS idx_research_sessions_expires ON research_sessions(expires_at);
 
 -- ========== 业务表: 研究报告存储 (P1-Future-09) ==========
--- 对标 GPTR backend/server/report_store.py
+-- 设计参考: backend/server/report_store.py
 -- report_id UUID 主键, 支持 save/get/list/delete 四类操作
 CREATE TABLE IF NOT EXISTS research_reports (
     report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

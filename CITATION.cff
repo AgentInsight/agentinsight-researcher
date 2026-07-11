@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: agentinsight-researcher
+type: software
+authors:
+  - given-names: AgentInsight
+    family-names: Team
+repository-code: https://github.com/AgentInsight/agentinsight-researcher
+license: MIT
+version: 0.1.0
+date-released: 2026-07-04
+keywords:
+  - ai-agent
+  - langgraph
+  - rag
+  - research-agent
+  - mcp
+  - fastapi
+  - qdrant
+  - chinese

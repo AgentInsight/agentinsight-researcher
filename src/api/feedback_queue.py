@@ -4,7 +4,7 @@
 用户反馈提交. 这是异步协调器 (不是业务状态), 不违反 AGENTS.md 第 5 章
 "节点禁止全局可变状态" 约束 (节点状态走 State/Checkpoint, 此处仅协调 await).
 
-对标 GPTR backend/server/feedback_queue 模式:
+设计参考: backend/server/feedback_queue 模式:
 - HumanAgent 调用 wait_feedback() 阻塞等待 (asyncio.Future, 不阻塞线程)
 - /v1/feedback 端点或 WebSocket human_feedback 消息调用 put_feedback() 提交反馈
 """

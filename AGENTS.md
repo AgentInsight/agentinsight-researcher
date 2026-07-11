@@ -144,7 +144,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 **启动时数据初始化（核心约定，优先选择）**：
 - Agent 容器启动时（`server.py` lifespan）应执行 PostgreSQL 业务表初始化，失败不阻断启动（仅告警，`depends_on: service_healthy` 已保证依赖就绪）：
   - **PostgreSQL 业务表初始化**：`src/memory/db_initializer.py` 的 `init_database()` 读取 `scripts/init.sql` 并执行；所有 DDL 使用 `CREATE TABLE/INDEX IF NOT EXISTS`，天然幂等，支持重复启动；表结构变更需追加 `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS ...`（PostgreSQL 9.6+）；触发器/函数使用 `CREATE OR REPLACE FUNCTION` + `CREATE OR REPLACE TRIGGER`（PostgreSQL 14+,项目要求 ≥17 满足）保证幂等。不推荐在 Docker 构建时通过 `Dockerfile.postgres` 内嵌 `init.sql` 执行 DDL，统一由 Agent 启动时触发。
-- 行业适配采用 GPTR 风格 4 层机制（见第 5 章），不再 bootstrap GICS 行业知识库。
+- 行业适配采用 4 层行业适配机制（见第 5 章），不再 bootstrap GICS 行业知识库。
 
 ## 7. 数据隔离与检索核心规则
 
@@ -172,12 +172,12 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 **上下文压缩 Embeddings（核心约定，优先选择）**：上下文压缩（WrittenContentCompressor 跨子主题去重 + ContextManager 精排）使用本地 FastEmbed（bge-small-zh-v1.5 ONNX INT8，512 维），不依赖远程 TEI 服务，解决 TEI CPU 部署性能瓶颈。Qdrant 索引仍使用远程 TEI（bge-base-zh-v1.5，768 维）。FastEmbed 客户端封装在 `rag/fastembed_client.py`，懒加载 + 线程安全 + LRU 缓存 + 降级到远程 TEI。
 
-**行业适配 GPTR 4 层机制（核心约定，优先选择，对标 GPT Researcher）**：
+**行业适配 4 层机制（核心约定，优先选择）**：
 行业适配刻意不引入 `IndustrySkill`，用 4 层隐形机制替代，不推荐业务代码 if-else 行业分支：
-1. **Prompt 层**：`src/skills/researcher/agent_creator.py` 的 `AgentCreator.AUTO_AGENT_INSTRUCTIONS` 给 LLM few-shot 例子，让 LLM 运行时自主生成行业 persona（对标 GPTR `auto_agent_instructions()` + `choose_agent()`），无 if-else 行业分支。
-2. **Config 层**：`Settings.agent_role` / `ChatRequest.agent_role` 可注入任意行业 persona 字符串（对标 GPTR `AGENT_ROLE` 配置），优先级高于 LLM 自动生成。
-3. **Retriever 层**：`src/skills/researcher/searchers/` 下含 `arxiv`/`pubmed`/`semantic_scholar` 等专业数据源（对标 GPTR 20 个 retriever），可按区域路由组合。
-4. **MCP 层**：`MCP_SERVERS` 注册行业专用工具服务器，`mcp_coordinator.py` 让 LLM 自动选工具（对标 GPTR `MCPToolSelector`）。
+1. **Prompt 层**：`src/skills/researcher/agent_creator.py` 的 `AgentCreator.AUTO_AGENT_INSTRUCTIONS` 给 LLM few-shot 例子，让 LLM 运行时自主生成行业 persona（对标业界实践 `auto_agent_instructions()` + `choose_agent()`），无 if-else 行业分支。
+2. **Config 层**：`Settings.agent_role` / `ChatRequest.agent_role` 可注入任意行业 persona 字符串（对标业界实践 `AGENT_ROLE` 配置），优先级高于 LLM 自动生成。
+3. **Retriever 层**：`src/skills/researcher/searchers/` 下含 `arxiv`/`pubmed`/`semantic_scholar` 等专业数据源（对标业界实践多 retriever 组合），可按区域路由组合。
+4. **MCP 层**：`MCP_SERVERS` 注册行业专用工具服务器，`mcp_coordinator.py` 让 LLM 自动选工具（对标业界实践 `MCPToolSelector`）。
 
 不推荐：新增 `IndustryClassifier` / `industry_prompts/*.yaml` / `knowledge_bootstrap.py` 等基于行业分类器的实现；节点内 `if industry == "xxx"` 分支；硬编码行业 prompt 字典。如确需分类器方案，应说明理由并等待用户确认。
 

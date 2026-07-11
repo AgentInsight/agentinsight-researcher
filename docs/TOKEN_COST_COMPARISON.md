@@ -1,8 +1,8 @@
-# GPTR vs AIR Token 消耗及成本对比报告
+# AIR Token 消耗及成本对比报告
 
 > **生成时间**: 2026-07-04
 > **AIR 项目**: `agentinsight-researcher`
-> **GPTR 项目**: 本机未检出到 GPTR 源码,GPTR 数据基于 AIR 已有对比文档 `docs/COMPARISON_WITH_GPT_RESEARCHER_V6.md` + GPTR 公开仓库(v0.14.x)知识
+> **同类项目**: 数据基于 AIR 已有对比文档 + 同类项目公开仓库知识
 > **价格基准**: 2026 年 7 月公开定价(用户给定 + LiteLLM 价格表 `src/llm/client.py:40-83`)
 > **AGENTS.md 合规**: 仅做分析与文档输出,未修改任何源代码
 
@@ -10,7 +10,7 @@
 
 ## 摘要(关键发现)
 
-| 维度 | AIR(默认配置) | GPTR(默认 GPT-4o) | AIR 节省比例 |
+| 维度 | AIR(默认配置) | 同类项目(默认 GPT-4o) | AIR 节省比例 |
 |------|--------------|-------------------|------------|
 | basic_report 单次成本 | **≈ ¥0.029** | **≈ ¥0.51** | **94.3%** |
 | detailed_report 单次成本 | **≈ ¥0.16** | **≈ ¥1.85** | **91.4%** |
@@ -21,10 +21,10 @@
 | detailed_report 总 Token | ≈ 134K | ≈ 191K | 29.8% |
 
 **核心结论**:
-1. **AIR 单次研究成本仅为 GPTR 的 6–9%**,主要源自三级 LLM 分层(FAST=glm-4-flash 免费/极便宜,SMART=deepseek-v4-flash 国产低价)与短查询/离题零成本保护。
-2. AIR 的 LLM 调用次数比 GPTR **少 14–21%**,因为 ContextManager 小文档快速路径(`compression_threshold=8000`)跳过摘要,GPTR 每个子查询都触发 `ContextCompressor`。
-3. AIR 多 Agent 图(含 fact_checker + reviewer + reviser)比 GPTR 多了质量门禁节点,但因使用 SMART 层(deepseek-v4-flash)而非 GPTR 的 GPT-4o,总成本仍低一个数量级。
-4. GPTR 若改用 GPT-4o-mini 全栈,成本可降至与 AIR 同档,但报告质量显著下降;AIR 通过 deepseek-v4-pro 处理规划任务,质量与成本兼顾。
+1. **AIR 单次研究成本仅为同类项目的 6–9%**,主要源自三级 LLM 分层(FAST=glm-4-flash 免费/极便宜,SMART=deepseek-v4-flash 国产低价)与短查询/离题零成本保护。
+2. AIR 的 LLM 调用次数比同类项目 **少 14–21%**,因为 ContextManager 小文档快速路径(`compression_threshold=8000`)跳过摘要,同类项目每个子查询都触发 `ContextCompressor`。
+3. AIR 多 Agent 图(含 fact_checker + reviewer + reviser)比同类项目多了质量门禁节点,但因使用 SMART 层(deepseek-v4-flash)而非同类项目的 GPT-4o,总成本仍低一个数量级。
+4. 同类项目若改用 GPT-4o-mini 全栈,成本可降至与 AIR 同档,但报告质量显著下降;AIR 通过 deepseek-v4-pro 处理规划任务,质量与成本兼顾。
 
 ---
 
@@ -45,7 +45,7 @@ smart_token_limit: int = 6000
 strategic_token_limit: int = 4000
 ```
 
-**分层语义**(对标 GPTR FAST/SMART/STRATEGIC):
+**分层语义**(设计参考: FAST/SMART/STRATEGIC):
 | 层级 | 模型 | 用途 | 调用点数量 | 单价(¥/1K) |
 |------|------|------|----------|------------|
 | FAST | zhipuai/glm-4-flash | 摘要/分类/JSON 解析/Mermaid 图表 | 8 | 输入 0.0001 / 输出 0.0001 |
@@ -54,9 +54,9 @@ strategic_token_limit: int = 4000
 
 **降级链**(P1-Future-05,`src/llm/client.py:129-133`):STRATEGIC 失败 → SMART → FAST,流式已开始 yield 后不降级。
 
-### 1.2 GPTR LLM 架构(基于公开知识)
+### 1.2 同类项目 LLM 架构(基于公开知识)
 
-GPTR 通过 `gpt_researcher/llm_provider/generic/base.py` 的 `GenericLLMProvider` 分发,依赖 16 个 `langchain_*` 包,默认配置(`config/variables/default.py`):
+同类项目通过 `GenericLLMProvider` 分发,依赖 16 个 `langchain_*` 包,默认配置:
 
 | 层级 | 默认模型 | 用途 | 单价($/1K) |
 |------|---------|------|-----------|
@@ -65,17 +65,17 @@ GPTR 通过 `gpt_researcher/llm_provider/generic/base.py` 的 `GenericLLMProvide
 | strategic_llm | gpt-4o / o1-preview | 复杂规划(可选) | 输入 $0.0025 / 输出 $0.01 |
 
 **关键差异**:
-1. **GPTR 默认全栈 GPT-4o 系列**,AIR 默认全栈国产模型(DeepSeek + 智谱)
-2. **GPTR 无降级链**,AIR 有 STRATEGIC→SMART→FAST 三级降级
-3. **GPTR 无 Token 预算分配器**,AIR 有 `TokenBudgetAllocator`(`src/llm/token_budget.py`)按节点比例分配(planner 10% / researcher 20% / writer 50% / reviewer 10% / reviser 10%)
-4. **GPTR 无短查询/离题零成本保护**,AIR 通过 `QueryIntentClassifier`(`src/skills/researcher/query_classifier.py`)三层分类器(规则→Embeddings→LLM)拦截闲聊,零 LLM 成本
+1. **同类项目默认全栈 GPT-4o 系列**,AIR 默认全栈国产模型(DeepSeek + 智谱)
+2. **同类项目无降级链**,AIR 有 STRATEGIC→SMART→FAST 三级降级
+3. **同类项目无 Token 预算分配器**,AIR 有 `TokenBudgetAllocator`(`src/llm/token_budget.py`)按节点比例分配(planner 10% / researcher 20% / writer 50% / reviewer 10% / reviser 10%)
+4. **同类项目无短查询/离题零成本保护**,AIR 通过 `QueryIntentClassifier`(`src/skills/researcher/query_classifier.py`)三层分类器(规则→Embeddings→LLM)拦截闲聊,零 LLM 成本
 
 ### 1.3 各 Skill 使用的 LLMTier 完整对照表
 
-| Skill / 节点 | 文件 | AIR Tier | GPTR 对应 | 备注 |
+| Skill / 节点 | 文件 | AIR Tier | 同类项目对应 | 备注 |
 |---|---|---|---|---|
 | QueryIntentClassifier | `query_classifier.py:887` | FAST | (无) | AIR 独有,三层分类,大多数命中规则/语义层不调 LLM |
-| AgentCreator | `agent_creator.py:162` | SMART | smart_llm (gpt-4o) | V2-P1: FAST→SMART 对齐 GPTR |
+| AgentCreator | `agent_creator.py:162` | SMART | smart_llm (gpt-4o) | V2-P1: FAST→SMART 对齐同类项目 |
 | ResearchConductor.plan_research | `research_conductor.py:114` | STRATEGIC | smart_llm | 子查询拆解 |
 | ResearchConductor._conduct_summary | `research_conductor.py:325` | FAST | (无) | summary 模式专用 |
 | ResearchConductor._generate_subtopics | `research_conductor.py:424` | STRATEGIC | smart_llm | subtopics 模式 |
@@ -192,9 +192,9 @@ revision → visualizer → publisher → END
 | 9 | Visualizer | FAST | 1 |
 | **合计** | | | **11** | SMART=5 / STRATEGIC=2 / FAST=4 |
 
-### 2.5 GPTR basic_report 调用链(基于公开知识)
+### 2.5 同类项目 basic_report 调用链(基于公开知识)
 
-**GPTR 默认配置**:
+**同类项目默认配置**:
 - `max_sub_queries = 4`
 - `smart_llm = "gpt-4o"`, `fast_llm = "gpt-4o-mini"`
 - `curate_sources = False`(默认关闭)
@@ -208,7 +208,7 @@ revision → visualizer → publisher → END
 | 4 | generate_report | gpt-4o (smart) | 1 |
 | **合计** | | | **7** | smart=3 / fast=4 |
 
-### 2.6 GPTR detailed_report 调用链
+### 2.6 同类项目 detailed_report 调用链
 
 | 步骤 | Skill | 模型 | 调用次数 |
 |------|-------|------|---------|
@@ -225,17 +225,17 @@ revision → visualizer → publisher → END
 | 7 | write_conclusion | gpt-4o | 1 |
 | **合计** | | | **26** | smart=10 / fast=16 |
 
-注:GPTR detailed_report 还有"嵌套 researcher"调用,若计入嵌套子查询则总调用数约 29 次。
+注:同类项目 detailed_report 还有"嵌套 researcher"调用,若计入嵌套子查询则总调用数约 29 次。
 
 ### 2.7 LLM 调用次数对比表
 
-| 报告类型 | AIR 调用次数 | GPTR 调用次数 | 差异 | AIR 节省 |
+| 报告类型 | AIR 调用次数 | 同类项目调用次数 | 差异 | AIR 节省 |
 |---------|------------|--------------|------|---------|
 | basic_report(单 Agent) | 6 | 7 | -1 | 14.3% |
 | detailed_report(单 Agent) | 23 | 26-29 | -3~-6 | 11.5–20.7% |
-| deep_research(breadth=3, depth=2) | 9 | ~15(GPTR 类似递归) | -6 | 40.0% |
-| 多 Agent 图(basic + reviewer 1 轮) | 11 | (GPTR 无对等) | — | — |
-| summary 模式 | 4 | (GPTR 无) | — | — |
+| deep_research(breadth=3, depth=2) | 9 | ~15(同类项目类似递归) | -6 | 40.0% |
+| 多 Agent 图(basic + reviewer 1 轮) | 11 | (同类项目无对等) | — | — |
+| summary 模式 | 4 | (同类项目无) | — | — |
 
 ---
 
@@ -244,9 +244,9 @@ revision → visualizer → publisher → END
 ### 3.1 估算方法
 
 - **AIR prompt 字符→Token**:中文为主,按 1 字符 ≈ 0.6 token 估算(DeepSeek/智谱 BPE 分词)
-- **GPTR prompt 字符→Token**:英文为主,按 1 字符 ≈ 0.25 token 估算(GPT-4o BPE 分词)
+- **同类项目 prompt 字符→Token**:英文为主,按 1 字符 ≈ 0.25 token 估算(GPT-4o BPE 分词)
 - **max_tokens 上限**:AIR 按 `settings.py` 配置(fast=3000 / smart=6000 / strategic=4000),实际输出通常低于上限
-- **上下文截断**:AIR `max_context_words = 25000`(约 60K 字符 ≈ 36K token),GPTR 类似
+- **上下文截断**:AIR `max_context_words = 25000`(约 60K 字符 ≈ 36K token),同类项目类似
 
 ### 3.2 AIR 各调用点 Token 估算
 
@@ -310,7 +310,7 @@ revision → visualizer → publisher → END
 | ReportGenerator basic | SMART | 1 | 10000 | 3000 | 13000 |
 | **合计** | | **9** | **28900** | **7400** | **36300** |
 
-### 3.6 GPTR basic_report Token 总量(估算)
+### 3.6 同类项目 basic_report Token 总量(估算)
 
 | 步骤 | 模型 | 调用次数 | prompt_tokens | completion_tokens | 小计 token |
 |------|------|---------|---------------|-------------------|----------|
@@ -320,7 +320,7 @@ revision → visualizer → publisher → END
 | generate_report | gpt-4o | 1 | 8000 | 2500 | 10500 |
 | **合计** | | **7** | **19400** | **5400** | **24800** |
 
-### 3.7 GPTR detailed_report Token 总量(估算)
+### 3.7 同类项目 detailed_report Token 总量(估算)
 
 | 步骤 | 模型 | 调用次数 | prompt_tokens | completion_tokens | 小计 token |
 |------|------|---------|---------------|-------------------|----------|
@@ -337,7 +337,7 @@ revision → visualizer → publisher → END
 
 ### 3.8 Token 消耗对比表
 
-| 报告类型 | AIR 总 Token | GPTR 总 Token | 差异 | 备注 |
+| 报告类型 | AIR 总 Token | 同类项目总 Token | 差异 | 备注 |
 |---------|------------|--------------|------|------|
 | basic_report | 27,100 | 24,800 | +2,300 | AIR 多出 QueryIntentClassifier 等 |
 | detailed_report | 87,000 | 83,950 | +3,050 | AIR 子主题嵌套更深 |
@@ -359,17 +359,17 @@ revision → visualizer → publisher → END
 | deepseek-v4-flash (SMART) | 0.001 | 0.002 | DeepSeek 公开定价 |
 | deepseek-v4-pro (STRATEGIC) | 0.002 | 0.008 | DeepSeek 公开定价 |
 
-**GPTR 模型(用户给定美元价格,2026 年 7 月,按 1 USD = ¥7.2 换算)**:
+**同类项目模型(用户给定美元价格,2026 年 7 月,按 1 USD = ¥7.2 换算)**:
 
 | 模型 | 输入($/1K) | 输出($/1K) | 输入(¥/1K) | 输出(¥/1K) |
 |------|-----------|-----------|------------|------------|
 | gpt-4o-mini (fast) | 0.00015 | 0.0006 | 0.00108 | 0.00432 |
 | gpt-4o (smart) | 0.0025 | 0.01 | 0.018 | 0.072 |
 
-**价格差异倍数(AIR vs GPTR)**:
-- 输入价:GPTR gpt-4o 是 AIR deepseek-v4-flash 的 **18 倍**,是 deepseek-v4-pro 的 **9 倍**
-- 输出价:GPTR gpt-4o 是 AIR deepseek-v4-flash 的 **36 倍**,是 deepseek-v4-pro 的 **9 倍**
-- FAST 层:GPTR gpt-4o-mini 是 AIR glm-4-flash 的 **10.8 倍(输入)/ 43.2 倍(输出)**
+**价格差异倍数(AIR vs 同类项目)**:
+- 输入价:同类项目 gpt-4o 是 AIR deepseek-v4-flash 的 **18 倍**,是 deepseek-v4-pro 的 **9 倍**
+- 输出价:同类项目 gpt-4o 是 AIR deepseek-v4-flash 的 **36 倍**,是 deepseek-v4-pro 的 **9 倍**
+- FAST 层:同类项目 gpt-4o-mini 是 AIR glm-4-flash 的 **10.8 倍(输入)/ 43.2 倍(输出)**
 
 ### 4.2 成本计算公式
 
@@ -440,7 +440,7 @@ revision → visualizer → publisher → END
 
 **汇率换算**:≈ $0.011
 
-### 4.7 GPTR basic_report 成本
+### 4.7 同类项目 basic_report 成本
 
 | 步骤 | 模型 | prompt_tokens | completion_tokens | 成本($) | 成本(¥) |
 |------|------|---------------|-------------------|---------|---------|
@@ -450,7 +450,7 @@ revision → visualizer → publisher → END
 | generate_report | gpt-4o | 8000 | 2500 | 0.02 + 0.025 = 0.045 | 0.324 |
 | **合计** | | **19400** | **5400** | **≈ $0.056** | **≈ ¥0.41** |
 
-### 4.8 GPTR detailed_report 成本
+### 4.8 同类项目 detailed_report 成本
 
 | 步骤 | 模型 | prompt_tokens | completion_tokens | 成本($) | 成本(¥) |
 |------|------|---------------|-------------------|---------|---------|
@@ -467,7 +467,7 @@ revision → visualizer → publisher → END
 
 ### 4.9 成本对比总表
 
-| 报告类型 | AIR 成本(¥) | AIR 成本($) | GPTR 成本(¥) | GPTR 成本($) | AIR/GPTR 比例 | AIR 节省 |
+| 报告类型 | AIR 成本(¥) | AIR 成本($) | 同类项目成本(¥) | 同类项目成本($) | AIR/同类比例 | AIR 节省 |
 |---------|------------|------------|--------------|--------------|-------------|---------|
 | basic_report(单 Agent) | 0.024 | 0.0033 | 0.41 | 0.056 | **5.9%** | **94.1%** |
 | detailed_report(单 Agent) | 0.072 | 0.010 | 1.09 | 0.151 | **6.6%** | **93.4%** |
@@ -480,7 +480,7 @@ revision → visualizer → publisher → END
 
 ### 5.1 LLM 调用次数对比表(按报告类型)
 
-| 报告类型 | AIR FAST | AIR SMART | AIR STRATEGIC | AIR 合计 | GPTR fast | GPTR smart | GPTR 合计 |
+| 报告类型 | AIR FAST | AIR SMART | AIR STRATEGIC | AIR 合计 | 同类 fast | 同类 smart | 同类 合计 |
 |---------|---------|----------|--------------|---------|----------|-----------|---------|
 | basic_report | 3 | 2 | 1 | **6** | 4 | 3 | **7** |
 | detailed_report | 12 | 6 | 5 | **23** | 16 | 10 | **26** |
@@ -490,7 +490,7 @@ revision → visualizer → publisher → END
 
 ### 5.2 Token 消耗对比表(按报告类型)
 
-| 报告类型 | AIR prompt | AIR completion | AIR 合计 | GPTR prompt | GPTR completion | GPTR 合计 | AIR/GPTR |
+| 报告类型 | AIR prompt | AIR completion | AIR 合计 | 同类 prompt | 同类 completion | 同类 合计 | AIR/同类 |
 |---------|----------|---------------|---------|------------|----------------|---------|----------|
 | basic_report | 21,300 | 5,800 | **27,100** | 19,400 | 5,400 | **24,800** | 109.3% |
 | detailed_report | 70,700 | 16,300 | **87,000** | 67,200 | 16,750 | **83,950** | 103.6% |
@@ -498,7 +498,7 @@ revision → visualizer → publisher → END
 
 ### 5.3 成本对比表(按报告类型,人民币和美元)
 
-| 报告类型 | AIR(¥) | AIR($) | GPTR(¥) | GPTR($) | AIR/GPTR | 节省金额(¥) |
+| 报告类型 | AIR(¥) | AIR($) | 同类(¥) | 同类($) | AIR/同类 | 节省金额(¥) |
 |---------|--------|--------|---------|---------|----------|------------|
 | basic_report | 0.024 | 0.0033 | 0.41 | 0.056 | 5.9% | 0.386 |
 | detailed_report | 0.072 | 0.010 | 1.09 | 0.151 | 6.6% | 1.018 |
@@ -512,7 +512,7 @@ revision → visualizer → publisher → END
 - **中等**(3):多维度分析(如"对比 React 和 Vue 的优缺点")
 - **复杂**(4-5):综合性深度研究(如"分析 2026 年 AI Agent 行业趋势")
 
-| 查询复杂度 | 报告类型 | AIR 成本(¥) | GPTR 成本(¥) | AIR/GPTR |
+| 查询复杂度 | 报告类型 | AIR 成本(¥) | 同类成本(¥) | AIR/同类 |
 |-----------|---------|------------|--------------|----------|
 | 简单(1-2) | basic_report | 0.024 | 0.41 | 5.9% |
 | 简单(1-2) + 短查询拦截 | (零 LLM) | 0 | (无保护) | 0% |
@@ -528,8 +528,8 @@ revision → visualizer → publisher → END
 | glm-4-flash | 智谱 | 0.0001 | 0.0001 | AIR FAST | **0.14%** |
 | deepseek-v4-flash | DeepSeek | 0.001 | 0.002 | AIR SMART | **2.78%** |
 | deepseek-v4-pro | DeepSeek | 0.002 | 0.008 | AIR STRATEGIC | **11.1%** |
-| gpt-4o-mini | OpenAI | 0.00108 | 0.00432 | GPTR fast | **6.0%** |
-| gpt-4o | OpenAI | 0.018 | 0.072 | GPTR smart/strategic | **100%(基准)** |
+| gpt-4o-mini | OpenAI | 0.00108 | 0.00432 | 同类项目 fast | **6.0%** |
+| gpt-4o | OpenAI | 0.018 | 0.072 | 同类项目 smart/strategic | **100%(基准)** |
 
 ### 5.6 AIR 成本优势分解表
 
@@ -555,7 +555,7 @@ revision → visualizer → publisher → END
    - FAST(glm-4-flash)处理摘要/分类/Mermaid,单价仅 ¥0.0001/1K
    - SMART(deepseek-v4-flash)处理报告写作,单价 ¥0.001-0.002/1K
    - STRATEGIC(deepseek-v4-pro)处理规划/事实核查,单价 ¥0.002-0.008/1K
-   - **对比 GPTR 全栈 GPT-4o(¥0.018-0.072/1K),成本降低 9-36 倍**
+   - **对比同类项目全栈 GPT-4o(¥0.018-0.072/1K),成本降低 9-36 倍**
 
 2. **多层零成本拦截**:
    - `QueryIntentClassifier` 三层分类(规则→Embeddings→LLM),90%+ 短查询/闲聊在前两层拦截,零 LLM 成本
@@ -597,9 +597,9 @@ revision → visualizer → publisher → END
 3. **批量 Embeddings**:已实现 `embed_and_index`(`src/rag/embeddings.py`),进一步用批量降本
 4. **流式响应早停**:用户取消时及时中断 LLM 调用,避免浪费 completion tokens
 
-### 6.3 GPTR 可借鉴的优化点
+### 6.3 同类项目可借鉴的优化点
 
-若 GPTR 用户希望降低成本,可参考 AIR 的以下实践:
+若同类项目用户希望降低成本,可参考 AIR 的以下实践:
 
 1. **三级 LLM 分层**:将 `smart_llm` 改为 `gpt-4o-mini`,仅规划任务用 `gpt-4o`
    - 预计节省:**60-70%**
@@ -626,26 +626,26 @@ revision → visualizer → publisher → END
 
 ### 7.1 核心结论
 
-1. **AIR 单次研究成本仅为 GPTR 的 3-7%**,主要源自:
+1. **AIR 单次研究成本仅为同类项目的 3-7%**,主要源自:
    - 三级 LLM 分层(FAST=glm-4-flash / SMART=deepseek-v4-flash / STRATEGIC=deepseek-v4-pro)
    - 国产模型定价仅为 GPT-4o 的 1-11%
    - 多层零成本拦截(短查询/离题/小文档/缓存)
 
-2. **AIR LLM 调用次数比 GPTR 少 14-21%**,因为:
+2. **AIR LLM 调用次数比同类项目少 14-21%**,因为:
    - ContextManager 小文档快速路径跳过摘要
    - Reviewer 评分缓存避免重复评审
    - `agent_role` 配置注入跳过 AgentCreator
 
-3. **AIR Token 消耗与 GPTR 相当**(略高 3-9%),但因模型单价差异巨大,总成本仍低一个数量级
+3. **AIR Token 消耗与同类项目相当**(略高 3-9%),但因模型单价差异巨大,总成本仍低一个数量级
 
-4. **AIR 多 Agent 图(含 Reviewer/Reviser/FactChecker)质量门禁**比 GPTR 多 4-5 个节点,但因使用 SMART 层(deepseek-v4-flash),总成本仍仅为 GPTR basic_report 的 19%
+4. **AIR 多 Agent 图(含 Reviewer/Reviser/FactChecker)质量门禁**比同类项目多 4-5 个节点,但因使用 SMART 层(deepseek-v4-flash),总成本仍仅为同类项目 basic_report 的 19%
 
 ### 7.2 适用场景建议
 
 | 场景 | 推荐方案 | 理由 |
 |------|---------|------|
 | 中文研究 / 国内部署 | **AIR** | 国产模型 + 中文优先 + 成本极低 |
-| 英文研究 / 全球部署 | GPTR(可换 gpt-4o-mini 降本) | GPT-4o 英文质量更优 |
+| 英文研究 / 全球部署 | 同类项目(可换 gpt-4o-mini 降本) | GPT-4o 英文质量更优 |
 | 高频调用 / 成本敏感 | **AIR** | 单次 ¥0.024-0.079 |
 | 高质量报告 / 学术研究 | **AIR 多 Agent 图** | Reviewer/Reviser/FactChecker 质量门禁 |
 | 离题闲聊多 / 用户教育水平参差 | **AIR** | 三层分类器零成本拦截闲聊 |
@@ -653,10 +653,10 @@ revision → visualizer → publisher → END
 
 ### 7.3 风险与限制
 
-1. **GPTR 数据基于公开知识**:本机未检出到 GPTR 源码,GPTR 调用链与 Token 估算基于 AIR 已有对比文档 `docs/COMPARISON_WITH_GPT_RESEARCHER_V6.md` + GPTR 公开仓库(v0.14.x)知识,实际数据可能因 GPTR 版本/配置差异而不同。
+1. **同类项目数据基于公开知识**:本机未检出到同类项目源码,同类项目调用链与 Token 估算基于 AIR 已有对比文档与同类项目公开仓库知识,实际数据可能因同类项目版本/配置差异而不同。
 2. **Token 估算为平均值**:实际 Token 数受查询复杂度/上下文长度/prompt 模板影响,可能有 ±20% 波动。
 3. **模型价格可能变动**:本报告基于 2026 年 7 月公开定价,如价格调整需重新计算。
-4. **GPTR 可换模型降本**:GPTR 若全栈切换到 gpt-4o-mini,成本可降至与 AIR 同档,但报告质量显著下降。
+4. **同类项目可换模型降本**:同类项目若全栈切换到 gpt-4o-mini,成本可降至与 AIR 同档,但报告质量显著下降。
 
 ---
 
@@ -743,4 +743,4 @@ revision → visualizer → publisher → END
 
 **报告生成完毕**
 
-> 本报告所有数据基于 AIR 项目源码(`agentinsight-researcher`)实际分析,GPTR 数据基于 AIR 已有对比文档与公开知识估算。如需精确验证,建议在同等查询条件下运行两个项目并采集 `LLMClient.get_session_cost()` 真实成本数据。
+> 本报告所有数据基于 AIR 项目源码(`agentinsight-researcher`)实际分析,同类项目数据基于 AIR 已有对比文档与公开知识估算。如需精确验证,建议在同等查询条件下运行两个项目并采集 `LLMClient.get_session_cost()` 真实成本数据。

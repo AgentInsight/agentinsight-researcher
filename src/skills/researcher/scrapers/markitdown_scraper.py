@@ -1,6 +1,6 @@
 """MarkItDown 文档抓取器 (P2-03).
 
-对标 GPT Researcher MarkItDown 集成.
+设计参考: MarkItDown 集成.
 支持 DOCX/PPTX/XLSX 等 Office 文档转 Markdown.
 """
 

@@ -1,7 +1,7 @@
 """多 Agent 图构建器 (P0-02 + P0-Future-01/02 + P2-Future-01 + P1-03 + P0-Future-03).
 
 AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数, 显式条件边.
-对标 GPT Researcher multi_agents/main.py + GPTR orchestrator 线性+条件边模式.
+设计参考 multi_agents/main.py + orchestrator 线性+条件边模式.
 
 P0-Future-01/02 重构: 由 Supervisor 循环模式改为线性+条件边模式.
 原因: reviewer/fact_checker 的 accept|revise 条件边与 Supervisor "回到 supervisor" 循环冲突.

@@ -1,6 +1,6 @@
 """文档加载模块 (P1-Future-07).
 
-对标 GPT Researcher document/ 模块 (5 文件 249 行).
+设计参考 document/ 模块 (5 文件 249 行).
 统一封装多种数据源 (URL/本地文件/Azure Blob) 的文档加载, 返回 list[Document].
 
 设计要点:
@@ -68,7 +68,7 @@ class Document:
 class DocumentLoader(ABC):
     """文档加载器基类.
 
-    对标 GPT Researcher document/loader.py 基类.
+    设计参考 document/loader.py 基类.
     所有 loader 共享 load(source) -> list[Document] 规约.
     """
 
@@ -91,7 +91,7 @@ class DocumentLoader(ABC):
 class OnlineDocumentLoader(DocumentLoader):
     """从 URL 加载文档 (复用现有 scrapers).
 
-    对标 GPT Researcher document/online.py + langchain WebBaseLoader.
+    设计参考 document/online.py + langchain WebBaseLoader.
     走 src.skills.researcher.scrapers.scrape_with_fallback 降级链.
     """
 
@@ -135,7 +135,7 @@ class OnlineDocumentLoader(DocumentLoader):
 class LocalDocumentLoader(DocumentLoader):
     """从本地文件路径加载文档.
 
-    对标 GPT Researcher document/file.py + langchain TextLoader 系列.
+    设计参考 document/file.py + langchain TextLoader 系列.
     按扩展名路由:
     - .pdf       → PyMuPDF (fitz)
     - .docx      → python-docx
@@ -297,7 +297,7 @@ class LocalDocumentLoader(DocumentLoader):
 class AzureBlobLoader(DocumentLoader):
     """从 Azure Blob Storage 加载文档 (可选, 需 azure-storage-blob).
 
-    对标 GPT Researcher document/azure.py.
+    设计参考 document/azure.py.
     支持 source 形态:
     - azure://container/blob
     - https://<account>.blob.core.windows.net/<container>/<blob>
@@ -379,7 +379,7 @@ def get_document_loader(
 ) -> DocumentLoader:
     """根据 source 形态自动选择 DocumentLoader.
 
-    对标 GPT Researcher document/loader.py 的工厂路由逻辑.
+    设计参考 document/loader.py 的工厂路由逻辑.
     - source 以 http://|https:// 开头 → OnlineDocumentLoader
     - source 以 azure:// 或 Azure Blob URL 形式 → AzureBlobLoader
     - source 以本地路径存在 (或非 URL) → LocalDocumentLoader

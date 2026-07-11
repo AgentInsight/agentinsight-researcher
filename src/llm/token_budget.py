@@ -1,10 +1,10 @@
 """Token 预算分配器与成本归因 (P1-02).
 
-对标 GPTR add_costs() 按步骤归因成本的设计, 升级为:
+设计参考 add_costs() 按步骤归因成本的设计, 升级为:
 - 并发安全 (asyncio.Lock)
 - 节点级预算上限 (BudgetExceededError)
 - 模型级成本拆分 (LLM + Embedding)
-- US 区域倍率 (对标 GPTR 1.1x)
+- US 区域倍率 (设计参考 1.1x)
 
 AGENTS.md 第 5 章: max_iterations 为硬上限, 由节点计数器 + 条件边强制.
 P1-02 在此基础上增加 token 预算硬上限, 避免单节点超支导致整体失败.
@@ -35,14 +35,14 @@ class BudgetExceededError(Exception):
 
 @dataclass
 class StepCost:
-    """单步骤成本记录 (对标 GPTR step_costs 字典的 value)."""
+    """单步骤成本记录 (设计参考 step_costs 字典的 value)."""
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     call_count: int = 0
     cost_usd: float = 0.0
-    # 模型级拆分 (升级点: GPTR 无)
+    # 模型级拆分 (升级点: 同类项目无)
     model_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def add(
@@ -81,10 +81,10 @@ class TokenBudgetAllocator:
     - reviewer: 10%
     - reviser: 10%
 
-    对标 GPTR add_costs() 的分步归因, 升级为预算上限管控.
+    设计参考 add_costs() 的分步归因, 升级为预算上限管控.
     """
 
-    # 节点预算比例 (对标 GPTR step_costs 的步骤定义, 升级为比例分配)
+    # 节点预算比例 (设计参考 step_costs 的步骤定义, 升级为比例分配)
     NODE_RATIOS: dict[str, float] = {
         "planner": 0.10,
         "researcher": 0.20,
@@ -95,7 +95,7 @@ class TokenBudgetAllocator:
         "_default": 0.05,
     }
 
-    # US 区域倍率 (对标 GPTR costs.py 的 1.1x)
+    # US 区域倍率 (设计参考 costs.py 的 1.1x)
     US_REGION_MULTIPLIER: float = 1.1
 
     def __init__(self, total_budget: int) -> None:
@@ -106,7 +106,7 @@ class TokenBudgetAllocator:
         """
         self.total_budget = total_budget
         self._lock = asyncio.Lock()
-        # 步骤成本归因 (对标 GPTR step_costs, 升级为 StepCost 对象)
+        # 步骤成本归因 (设计参考 step_costs, 升级为 StepCost 对象)
         self._step_costs: dict[str, StepCost] = {}
         # 节点预算上限 (按比例分配)
         self._node_budgets: dict[str, int] = {
@@ -137,7 +137,7 @@ class TokenBudgetAllocator:
         cost_usd: float = 0.0,
         check_budget: bool = True,
     ) -> None:
-        """累加一次调用的成本到指定节点 (对标 GPTR add_costs).
+        """累加一次调用的成本到指定节点 (设计参考 add_costs).
 
         AGENTS.md 第 10 章: 成本归因通过 trace span 自动传播, 不需手动传递.
 
@@ -176,7 +176,7 @@ class TokenBudgetAllocator:
                     raise BudgetExceededError(node, used, budget)
 
     async def get_step_costs(self) -> dict[str, dict[str, Any]]:
-        """返回所有步骤的成本快照 (对标 GPTR step_costs 属性).
+        """返回所有步骤的成本快照 (设计参考 step_costs 属性).
 
         Returns:
             {node: {prompt_tokens, completion_tokens, total_tokens, call_count,
@@ -196,7 +196,7 @@ class TokenBudgetAllocator:
             }
 
     async def get_total_cost(self) -> dict[str, Any]:
-        """返回总成本汇总 (对标 GPTR get_total_cost)."""
+        """返回总成本汇总 (设计参考 get_total_cost)."""
         async with self._lock:
             total_prompt = sum(sc.prompt_tokens for sc in self._step_costs.values())
             total_completion = sum(sc.completion_tokens for sc in self._step_costs.values())

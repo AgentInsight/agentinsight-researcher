@@ -1,7 +1,7 @@
 """DuckDuckGo 搜索 - 国内兜底 (无需 API Key).
 
 用户需求 5: 国内资料搜索兜底方案, 无需 Key.
-对标 GPT Researcher retrievers/duckduckgo/duckduckgo.py.
+设计参考: retrievers/duckduckgo/duckduckgo.py.
 """
 
 from __future__ import annotations

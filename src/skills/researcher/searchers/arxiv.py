@@ -1,7 +1,7 @@
 """Arxiv 学术搜索 - 国外学术论文.
 
 用户需求 5: 国外资料搜索, 学术论文专用.
-对标 GPT Researcher retrievers/arxiv/arxiv.py.
+设计参考: retrievers/arxiv/arxiv.py.
 无需 API Key.
 
 v1.1 改造: 移除 arxiv 库依赖, 改用 httpx 直接调用 arxiv API (与其他搜索器一致).

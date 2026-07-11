@@ -1,4 +1,4 @@
-"""递归文本分块工具 (对标 GPTR RecursiveCharacterTextSplitter).
+"""递归文本分块工具 (设计参考: RecursiveCharacterTextSplitter).
 
 历史背景: 本模块原为 `EmbeddingsFilter` 类 (V2-P1), 通过远程 TEI bge-base-zh-v1.5
 做相似度过滤. V4-P3 改用 BM25Filter (本地 jieba+BM25Okapi) 替代主路由,
@@ -20,7 +20,7 @@ from typing import cast
 logger = logging.getLogger(__name__)
 
 
-# 递归分隔符 (对标 GPTR RecursiveCharacterTextSplitter 默认 separators)
+# 递归分隔符 (设计参考: RecursiveCharacterTextSplitter 默认 separators)
 # 优先按段落分, 段落过大时按行分, 再按空格分, 最后按字符分.
 _RECURSIVE_SEPARATORS: list[str] = ["\n\n", "\n", " ", ""]
 

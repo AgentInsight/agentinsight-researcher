@@ -259,9 +259,9 @@ class ChatCompletionRequest(BaseModel):
     agent_role: str | None = Field(
         None,
         description=(
-            "对标 GPTR AGENT_ROLE 配置: 用户可注入行业 persona 字符串, "
+            "设计参考 AGENT_ROLE 配置: 用户可注入行业 persona 字符串, "
             "优先级高于 LLM 动态生成 (AgentCreator). "
-            "行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器."
+            "行业适配采用 4 层机制, 不再使用行业分类器."
         ),
     )
     query_domains: list[str] | None = Field(
@@ -290,7 +290,7 @@ class ChatCompletionResponse(BaseModel):
     choices: list[dict[str, Any]]
     # P1-04: usage 含 cost_usd (float), 放宽为 dict[str, Any] 兼容真实成本
     usage: dict[str, Any]
-    # P0-01: 显式返回 sources 结构化列表 (对标 GPTR add_references)
+    # P0-01: 显式返回 sources 结构化列表 (设计参考 add_references)
     # 含 title/url/snippet/score 字段, 测试页面与下游消费者可直接渲染
     sources: list[dict[str, Any]] = []
     # 报告输出格式 (markdown/html/pdf/docx/json), 客户端据此选择渲染/下载策略
@@ -546,7 +546,7 @@ async def chat_completions(
         "tone": tone,
         "uploaded_files_context": uploaded_files_context,
         "messages": [],
-        # 对标 GPTR: agent_role (来自 ChatRequest 或 settings) 优先级高于 LLM 动态生成
+        # 设计参考: agent_role (来自 ChatRequest 或 settings) 优先级高于 LLM 动态生成
         "agent_role": request.agent_role or settings.agent_role or "",
         "agent_role_server": "",
         # P1-Future-02: 域名过滤白名单

@@ -1,6 +1,11 @@
 # agentinsight-researcher
 
 > **中文优先的研究分析智能体** | **Chinese-first research analysis agent**
+>
+> An open-source AI research agent built with LangGraph + LiteLLM + Qdrant.
+> Provides OpenAI-compatible API with SSE streaming, MCP tool protocol,
+> hybrid retrieval (BM25 + Vector + Rerank), and multi-agent collaboration.
+> A Chinese-first alternative for automated research and report generation.
 
 [![CI](https://github.com/AgentInsight/agentinsight-researcher/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentInsight/agentinsight-researcher/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/AgentInsight/agentinsight-researcher/branch/main/graph/badge.svg)](https://codecov.io/gh/AgentInsight/agentinsight-researcher)
@@ -251,7 +256,7 @@ GET /.well-known/agent-discovery.json
 {
   "name": "agentinsight-researcher",
   "version": "0.1.0",
-  "description": "中文优先的研究分析智能体, 对标 GPT Researcher",
+  "description": "中文优先的研究分析智能体",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI 兼容研究端点 (流式 SSE + 非流式)"},
     {"name": "files", "path": "/v1/files", "method": "POST", "description": "文件上传端点 (作为研究数据源)"},
@@ -1298,7 +1303,7 @@ No auth.
 {
   "name": "agentinsight-researcher",
   "version": "0.1.0",
-  "description": "Chinese-first research analysis agent, benchmarked against GPT Researcher",
+  "description": "Chinese-first research analysis agent",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI-compatible research endpoint (streaming SSE + non-streaming)"},
     {"name": "files", "path": "/v1/files", "method": "POST", "description": "File upload endpoint (research data source)"},

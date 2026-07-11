@@ -1,11 +1,11 @@
-"""scraper 公共工具函数 (对标 GPTR scraper/utils.py).
+"""scraper 公共工具函数 (设计参考 scraper/utils.py).
 
-P2-05 借鉴 GPTR:
+P2-05:
 - get_relevant_images_from_soup: 从 BeautifulSoup 提取图片并评分排序
 - get_relevant_images_from_html: 从 HTML 字符串提取图片并评分排序
 - parse_dimension: 解析尺寸值 (支持 px 后缀)
 
-评分规则 (对标 GPTR):
+评分规则 (设计参考):
 - class 含 header/featured/hero/thumbnail/main/content → 4 分 (最高)
 - width>=2000 且 height>=1000 → 3 分 (大图)
 - width>=1600 或 height>=800 → 2 分
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_dimension(value: str | None) -> int | None:
-    """解析尺寸值, 支持 px 后缀 (对标 GPTR parse_dimension).
+    """解析尺寸值, 支持 px 后缀 (设计参考 parse_dimension).
 
     Args:
         value: 尺寸字符串, 如 "800", "800px", "409.12"
@@ -45,7 +45,7 @@ def parse_dimension(value: str | None) -> int | None:
 
 
 def _score_image(img: Any) -> int | None:
-    """为单个 img 标签评分 (对标 GPTR get_relevant_images 评分逻辑).
+    """为单个 img 标签评分 (设计参考 get_relevant_images 评分逻辑).
 
     Returns:
         0-4 分, 或 None (跳过小图).
@@ -85,7 +85,7 @@ def _score_image(img: Any) -> int | None:
 
 
 def get_relevant_images_from_soup(soup: Any, url: str, top_k: int = 4) -> list[str]:
-    """从 BeautifulSoup 对象提取相关图片并评分排序 (对标 GPTR get_relevant_images).
+    """从 BeautifulSoup 对象提取相关图片并评分排序 (设计参考 get_relevant_images).
 
     Args:
         soup: BeautifulSoup 对象

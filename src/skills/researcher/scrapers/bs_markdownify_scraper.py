@@ -102,7 +102,7 @@ class BSMarkdownifyScraper(BaseScraper):
             while "\n\n\n" in markdown:
                 markdown = markdown.replace("\n\n\n", "\n\n")
 
-            # 提取图片 (v3 借鉴 GPTR: 按尺寸/class 评分排序, 取 Top-4)
+            # 提取图片 (v3: 按尺寸/class 评分排序, 取 Top-4)
             from src.skills.researcher.scrapers.utils import (
                 get_relevant_images_from_soup,
             )

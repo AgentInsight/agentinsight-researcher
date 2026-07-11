@@ -1,6 +1,6 @@
 """Publisher 发布器.
 
-对标 GPT Researcher multi_agents/agents/publisher.py.
+设计参考: multi_agents/agents/publisher.py.
 AGENTS.md 用户需求 6: 输出报告格式需支持 Markdown/HTML/PDF, 默认 Markdown.
 """
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class Publisher:
     """报告发布器.
 
-    对标 GPT Researcher Publisher.
+    设计参考: Publisher 模式.
     支持 Markdown (默认) / HTML / PDF / DOCX / JSON / LaTeX / EPUB 输出
     (P1-05 扩展 docx + json; P2-01 扩展 latex + epub + 多格式同时导出).
     """

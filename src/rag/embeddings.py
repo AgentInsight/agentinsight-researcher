@@ -94,7 +94,7 @@ class EmbeddingsCircuitBreaker:
     - HALF_OPEN (半开): 失败计数 ≥ threshold 但已过恢复时间, 允许单次试探请求
 
     线程安全: 仅在 asyncio 单线程事件循环中使用, 无需加锁.
-    对标 GPTR 无 (GPTR 用 SaaS embedding, 不需要熔断器); 主项目因 TEI 自部署必须补.
+    设计参考: 同类项目用 SaaS embedding 不需要熔断器; 主项目因 TEI 自部署必须补.
     """
 
     def __init__(

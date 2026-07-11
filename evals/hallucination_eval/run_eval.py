@@ -1,4 +1,4 @@
-"""幻觉评测运行器 (对标 GPTR evals/hallucination_eval/run_eval.py).
+"""幻觉评测运行器 (设计参考: evals/hallucination_eval/run_eval.py).
 
 从 JSONL 加载查询集, 对每个查询:
   调用 researcher → 获取报告+来源 → 调用 HallucinationEvaluator → 输出汇总报告.

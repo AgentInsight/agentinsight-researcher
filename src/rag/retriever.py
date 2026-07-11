@@ -252,7 +252,7 @@ class HybridRetriever:
                     bm25_weight=self.settings.bm25_weight,
                 )
 
-                # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 对标 GPTR context 去重)
+                # P1-02: 按内容 hash 去重 (相同内容不同来源的文档, 设计参考 context 去重)
                 fused = self._deduplicate_by_content_hash(fused)
 
                 # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
@@ -369,7 +369,7 @@ class HybridRetriever:
         return [{**docs[content], "score": score} for content, score in ranked]
 
     def _deduplicate_by_content_hash(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """按内容 hash 去重 (对标 GPTR context 去重).
+        """按内容 hash 去重 (设计参考 context 去重).
 
         P1-02: RRF 融合后调用, 去除相同内容不同来源的重复文档.
         """

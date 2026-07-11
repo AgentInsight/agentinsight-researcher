@@ -1,9 +1,9 @@
 """WebSocket 双向实时通信 (P2-Future-02).
 
-对标 GPTR backend/server/websocket_manager.py.
+设计参考 backend/server/websocket_manager.py.
 AGENTS.md 第 14 章: 新增 /v1/ws/{session_id} 为允许调用的端点 (人在回路审核请求通道).
 
-WebSocket 消息类型 (对标 GPTR 8 类):
+WebSocket 消息类型 (设计参考 8 类):
     1. logs: 日志信息
     2. content: 内容块 (报告正文流式)
     3. node_progress: 节点进度
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["websocket"])
 
-# ========== WebSocket 消息类型常量 (对标 GPTR 8 类) ==========
+# ========== WebSocket 消息类型常量 (设计参考 8 类) ==========
 
 WS_MSG_LOGS = "logs"
 WS_MSG_CONTENT = "content"
@@ -115,7 +115,7 @@ async def _verify_token(token: str, settings: Settings) -> bool:
 class WebSocketManager:
     """按 session_id 索引的 WebSocket 连接管理器.
 
-    对标 GPTR backend/server/websocket_manager.py WebSocketManager.
+    设计参考 backend/server/websocket_manager.py WebSocketManager.
     """
 
     _instance: ClassVar[WebSocketManager | None] = None

@@ -101,9 +101,9 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="agent_role",
         default=None,
         help=(
-            "对标 GPTR AGENT_ROLE 配置: 注入行业 persona 字符串, "
+            "设计参考 AGENT_ROLE 配置: 注入行业 persona 字符串, "
             "优先级高于 LLM 动态生成 (AgentCreator). "
-            "行业适配采用 GPTR 4 层机制, 不再使用行业分类器."
+            "行业适配采用 4 层机制, 不再使用行业分类器."
         ),
     )
     parser.add_argument(
@@ -148,7 +148,7 @@ def _build_initial_state(
         "report_format": report_format,
         "tone": tone,
         "total_words": total_words,
-        # 对标 GPTR: agent_role (来自 --agent-role 或 settings) 优先级高于 LLM 动态生成
+        # 设计参考: agent_role (来自 --agent-role 或 settings) 优先级高于 LLM 动态生成
         "agent_role": agent_role or settings.agent_role or "",
         "agent_role_server": "",
         # P1-Future-02: 域名过滤白名单

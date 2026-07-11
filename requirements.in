@@ -63,7 +63,7 @@ opentelemetry-exporter-otlp-proto-http>=1.42
 ddgs>=9.0  # 无需 Key 兜底 (duckduckgo_search v8+ 已重命名为 ddgs)
 httpx>=0.28  # 博查/Tavily/Exa/秘塔/CrossRef/GDELT/HackerNews/GitHub/Arxiv 通用 HTTP
 
-# === 网页抓取 (GPT Researcher 模式, 用户需求 12) ===
+# === 网页抓取 (用户需求 12) ===
 beautifulsoup4>=4.12
 lxml>=5.0
 playwright>=1.49  # JS 渲染抓取(可选, 镜像内安装 chromium)
@@ -84,10 +84,10 @@ jinja2>=3.1  # HTML 模板
 weasyprint>=62.0  # PDF 输出(纯 Python, 中文支持好)
 mistune>=3.0  # Markdown 解析
 
-# === Token 优化 (用户需求 10, GPT Researcher 模式) ===
+# === Token 优化 (用户需求 10) ===
 tiktoken>=0.7  # Token 计数
 
-# === JSON 容错 (GPT Researcher 模式) ===
+# === JSON 容错 ===
 json-repair>=0.30
 
 # === 工具库 ===

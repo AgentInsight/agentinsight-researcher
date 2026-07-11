@@ -35,7 +35,7 @@ class PromptFamily(ABC):
 
         Args:
             query: 用户研究查询
-            agent_role: 角色 persona (对标 GPTR AGENT_ROLE)
+            agent_role: 角色 persona (设计参考 AGENT_ROLE)
             max_iterations: 子查询数量上限
 
         Returns:
@@ -179,7 +179,7 @@ class PromptFamily(ABC):
 
     @abstractmethod
     def get_tone_prompt(self, tone: str) -> str:
-        """获取 Tone 语气提示词片段 (对标 GPTR 17 种 Tone).
+        """获取 Tone 语气提示词片段 (设计参考 17 种 Tone).
 
         Args:
             tone: 语气标识 (objective/analytical/formal/informative/
@@ -189,7 +189,7 @@ class PromptFamily(ABC):
             Tone 提示词片段, 附加到主 prompt 末尾
         """
 
-    # ========== V2-P1: detailed_report 专用 prompt (对标 GPTR detailed_report.py) ==========
+    # ========== V2-P1: detailed_report 专用 prompt (设计参考 detailed_report.py) ==========
     # 旧版 4 个 prompt 内联在 ReportGenerator, V2 提取到 PromptFamily 统一管理.
 
     @abstractmethod
@@ -200,7 +200,7 @@ class PromptFamily(ABC):
         role_persona: str,
         max_subtopics: int = 5,
     ) -> str:
-        """detailed_report 子主题拆解 prompt (对标 GPTR generate_subtopics).
+        """detailed_report 子主题拆解 prompt (设计参考 generate_subtopics).
 
         Args:
             query: 主研究问题
@@ -225,7 +225,7 @@ class PromptFamily(ABC):
         word_min: int = 300,
         word_max: int = 500,
     ) -> str:
-        """detailed_report 引言 prompt (对标 GPTR write_introduction).
+        """detailed_report 引言 prompt (设计参考 write_introduction).
 
         Args:
             query: 主研究问题
@@ -254,7 +254,7 @@ class PromptFamily(ABC):
         word_min: int = 800,
         word_max: int = 1200,
     ) -> str:
-        """detailed_report 子主题章节 prompt (对标 GPTR write_section).
+        """detailed_report 子主题章节 prompt (设计参考 write_section).
 
         Args:
             topic: 子主题名称
@@ -281,7 +281,7 @@ class PromptFamily(ABC):
         word_min: int = 300,
         word_max: int = 500,
     ) -> str:
-        """detailed_report 结论 prompt (对标 GPTR write_conclusion).
+        """detailed_report 结论 prompt (设计参考 write_conclusion).
 
         Args:
             query: 主研究问题
@@ -323,7 +323,7 @@ class DefaultPromptFamily(PromptFamily):
         ),
     }
 
-    # Tone 描述 (对标 GPTR 17 种 Tone, 精选 8 种适合中文研究场景)
+    # Tone 描述 (设计参考 17 种 Tone, 精选 8 种适合中文研究场景)
     _TONE_DESCRIPTIONS: dict[str, str] = {
         "objective": "客观中立，基于事实陈述，不带个人观点",
         "analytical": "分析性强，深入剖析因果关系和数据背后的含义",
@@ -336,7 +336,7 @@ class DefaultPromptFamily(PromptFamily):
     }
 
     def get_tone_prompt(self, tone: str) -> str:
-        """获取 Tone 提示词片段 (对标 GPTR 17 种 Tone, 精选 8 种).
+        """获取 Tone 提示词片段 (设计参考 17 种 Tone, 精选 8 种).
 
         未注册 tone 降级为 objective, 保证健壮性.
         """
@@ -378,10 +378,10 @@ class DefaultPromptFamily(PromptFamily):
     ) -> str:
         # V4-P2-01: 注入报告风格预设描述, 未注册风格降级为 academic
         style_desc = self._STYLE_PROMPTS.get(report_style, self._STYLE_PROMPTS["academic"])
-        # V2-P1: 对标 GPTR writer_prompt 精细之处 (skills/writer.py:report_prompt)
+        # V2-P1: 设计参考 writer_prompt 精细之处 (skills/writer.py:report_prompt)
         # - MUST 含具体观点 (非泛泛描述)
         # - MUST markdown 表格呈现对比数据
-        # - MUST 编号引用 [n] 对应 reference list (对标 GPTR in-text citation)
+        # - MUST 编号引用 [n] 对应 reference list (设计参考 in-text citation)
         # - MUST 至少 {word_limit} 字 (硬下限)
         # - 来源可信度优先级 (官方 > 学术 > 行业 > 自媒体)
         return f"""{agent_role}
@@ -429,8 +429,8 @@ class DefaultPromptFamily(PromptFamily):
         agent_role: str,
         max_results: int,
     ) -> str:
-        # V2-P1: 对标 GPTR SourceCurator (skills/curator.py)
-        # - 强调 "Quantitative Value" (GPTR 出现 5 次)
+        # V2-P1: 设计参考 SourceCurator (skills/curator.py)
+        # - 强调 "Quantitative Value" (业界实践出现 5 次)
         # - 5 维评估 (Relevance/Credibility/Currency/Objectivity/Quantitative Value)
         # - "Err on the side of inclusion" (宁多勿少)
         # P2: prompt 精简 (trace 4ad14970 优化), 仅输出 index+score, 不输出 reason
@@ -438,7 +438,7 @@ class DefaultPromptFamily(PromptFamily):
 
 你的任务是: 评估以下搜索来源的相关性与可信度, 选出最值得引用的 {max_results} 条.
 
-【5 维评估标准】(对标 GPTR SourceCurator):
+【5 维评估标准】(设计参考 SourceCurator):
 1. **相关性 (Relevance)**: 与研究问题的相关程度 (0-10 分)
 2. **可信度 (Credibility)**: 来源权威性 (官方机构 > 学术期刊 > 行业媒体 > 自媒体)
 3. **时效性 (Currency)**: 信息新鲜度 (优先近 12 个月数据)
@@ -573,7 +573,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 
 请回答用户追问:"""
 
-    # ========== V2-P1: detailed_report 专用 prompt 实现 (对标 GPTR detailed_report.py) ==========
+    # ========== V2-P1: detailed_report 专用 prompt 实现 (设计参考 detailed_report.py) ==========
 
     def subtopics_prompt(
         self,
@@ -582,8 +582,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         role_persona: str,
         max_subtopics: int = 5,
     ) -> str:
-        # 对标 GPTR generate_subtopics (detailed_report.py)
-        # 用 STRATEGIC LLM 拆解子主题, temperature=0.25 (GPTR)
+        # 设计参考 generate_subtopics (detailed_report.py)
+        # 用 STRATEGIC LLM 拆解子主题, temperature=0.25 (业界实践)
         return f"""{role_persona}
 
 请基于以下研究问题与初始上下文, 拆解为 3-{max_subtopics} 个用于分章节深入研究的子主题.
@@ -614,8 +614,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_min: int = 300,
         word_max: int = 500,
     ) -> str:
-        # 对标 GPTR write_introduction (detailed_report.py)
-        # 用 SMART LLM 写引言, temperature=0.25 (GPTR)
+        # 设计参考 write_introduction (detailed_report.py)
+        # 用 SMART LLM 写引言, temperature=0.25 (业界实践)
         return f"""{role_persona}
 
 请基于以下上下文, 为「{query}」研究报告撰写引言部分.
@@ -649,9 +649,9 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_min: int = 800,
         word_max: int = 1200,
     ) -> str:
-        # 对标 GPTR write_section (detailed_report.py)
-        # 用 SMART LLM 写章节, temperature=0.35 (GPTR)
-        # V2-P1: 章节字数 500-1000 → 800-1200 对齐 GPTR
+        # 设计参考 write_section (detailed_report.py)
+        # 用 SMART LLM 写章节, temperature=0.35 (业界实践)
+        # V2-P1: 章节字数 500-1000 → 800-1200 对齐业界实践
         return f"""{role_persona}
 
 请基于以下子主题上下文, 撰写「{topic}」章节内容.
@@ -695,8 +695,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_min: int = 300,
         word_max: int = 500,
     ) -> str:
-        # 对标 GPTR write_conclusion (detailed_report.py)
-        # 用 SMART LLM 写结论, temperature=0.25 (GPTR)
+        # 设计参考 write_conclusion (detailed_report.py)
+        # 用 SMART LLM 写结论, temperature=0.25 (业界实践)
         return f"""{role_persona}
 
 请基于以下已写章节内容, 为「{query}」研究报告撰写结论部分.
@@ -718,7 +718,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 class EnglishPromptFamily(PromptFamily):
     """英文实现."""
 
-    # Tone descriptions (adapted from GPTR 17 Tones, 8 selected for research scenarios)
+    # Tone descriptions (adapted from industry practice 17 Tones, 8 selected for research scenarios)
     _TONE_DESCRIPTIONS: dict[str, str] = {
         "objective": "objective and neutral, fact-based, free of personal opinion",
         "analytical": "analytical, in-depth examination of causality and meaning behind data",
@@ -731,7 +731,7 @@ class EnglishPromptFamily(PromptFamily):
     }
 
     def get_tone_prompt(self, tone: str) -> str:
-        """Get Tone prompt fragment (adapted from GPTR 17 Tones, 8 selected).
+        """Get Tone prompt fragment (adapted from industry practice 17 Tones, 8 selected).
 
         Unregistered tones fall back to objective for robustness.
         """
@@ -779,7 +779,7 @@ Return a JSON array of {max_iterations} sub-queries:"""
             "news": "News style: inverted pyramid, 5W1H, objective reporting",
         }
         style_desc = style_map.get(report_style, style_map["academic"])
-        # V2-P1: align with GPTR writer_prompt (specific points + table + [n] citation)
+        # V2-P1: align with industry practice writer_prompt (specific points + table + [n] citation)
         return f"""{agent_role}
 
 Please write a research report on "{query}" based on the retrieved context below.
@@ -817,13 +817,13 @@ Generate the complete research report (Markdown format):"""
         agent_role: str,
         max_results: int,
     ) -> str:
-        # V2-P1: align with GPTR SourceCurator (5 dimensions + Quantitative Value)
+        # V2-P1: align with industry practice SourceCurator (5 dimensions + Quantitative Value)
         # P2: prompt 精简 (trace 4ad14970 优化), 仅输出 index+score, 不输出 reason
         return f"""{agent_role}
 
 Your task is: evaluate the relevance and credibility of the following search sources, and select the top {max_results} most worthy of citation.
 
-【5-dimension evaluation criteria】 (aligned with GPTR SourceCurator):
+【5-dimension evaluation criteria】 (aligned with industry practice SourceCurator):
 1. **Relevance**: how related to the research question (0-10)
 2. **Credibility**: source authority (official > academic journals > industry media > blogs)
 3. **Currency**: information freshness (prioritize last 12 months)

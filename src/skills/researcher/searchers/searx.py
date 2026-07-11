@@ -1,6 +1,6 @@
 """SearXNG 搜索 - 自托管元搜索引擎.
 
-P2-Future-04: 对标 GPT Researcher retrievers/searx/searx.py.
+P2-Future-04: 设计参考 retrievers/searx/searx.py.
 通过自托管 SearXNG 实例进行搜索, 适用于全球场景.
 无需 API Key, 需配置 SEARX_URL 环境变量 (默认 http://searxng:8099, 容器内访问).
 

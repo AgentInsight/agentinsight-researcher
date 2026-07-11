@@ -1,0 +1,27 @@
+agentinsight-researcher
+Copyright (c) 2026 AgentInsight Team
+
+Licensed under the MIT License.
+
+This product includes software and design inspirations from the following
+open-source projects:
+
+- LangGraph (MIT) - State machine orchestration
+- LiteLLM (MIT) - Unified LLM gateway
+- FastAPI (MIT) - Async web framework
+- Pydantic (MIT) - Data validation
+- Qdrant (Apache 2.0) - Vector database
+- rank-bm25 (MIT) - BM25 implementation
+- Trafilatura (Apache 2.0) - Web scraping
+- Playwright (Apache 2.0) - Browser automation
+
+All third-party dependencies are listed in requirements.txt with version
+pins. See THIRD_PARTY_LICENSES.md for the full license inventory.
+
+License compatibility summary:
+- Most dependencies use permissive licenses (MIT / Apache-2.0 / BSD).
+- psycopg / psycopg-pool (LGPL-3.0-or-later): used as system libraries,
+  do not impose copyleft on the project.
+- PyMuPDF (AGPL-3.0-or-later): network copyleft license, used for PDF
+  parsing only. Review your distribution model before deploying as a
+  network service.

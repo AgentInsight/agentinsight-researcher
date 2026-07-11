@@ -1,14 +1,14 @@
 """Custom 搜索引擎 - 企业私有端点 (无 API Key).
 
-对标 GPT Researcher retrievers/custom/custom.py.
-GPTR 通过 `custom_retriever_endpoint` + `custom_retriever_arg` 配置接入企业
+设计参考 retrievers/custom/custom.py.
+通过 `custom_retriever_endpoint` + `custom_retriever_arg` 配置接入企业
 自建检索服务, 实现一次接入复用 20+ retriever 之外的私有数据源.
 
 实现差异:
-- GPTR 用环境变量直接读取 (避免侵入 settings.py, 用户无需改配置类).
+- 用环境变量直接读取 (避免侵入 settings.py, 用户无需改配置类).
 - 用 httpx.AsyncClient 异步调用 (AIR 统一约定, 禁 requests 同步).
 - 返回 AIR 统一规约: [{"title","url","snippet","source","region"}]
-  (GPTR 原生返回 title/href/body, 由本类映射到 AIR 字段).
+  (兼容外部端点 title/href/body 字段, 由本类映射到 AIR 字段).
 
 环境变量:
 - CUSTOM_RETRIEVER_ENDPOINT: 私有检索端点 URL (POST JSON).
@@ -82,7 +82,7 @@ class CustomSearcher(BaseSearcher):
                 data = response.json()
 
                 results: list[dict[str, Any]] = []
-                # 兼容 GPTR (title/href/body) 与 AIR (title/url/snippet) 两种字段命名
+                # 兼容外部端点 (title/href/body) 与 AIR (title/url/snippet) 两种字段命名
                 for item in data.get("results", [])[:max_results]:
                     title = item.get("title", "")
                     url = item.get("url") or item.get("href") or ""

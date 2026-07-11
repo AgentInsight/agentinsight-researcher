@@ -1,6 +1,6 @@
 """BeautifulSoup 抓取器 - 默认主力.
 
-对标 GPT Researcher scraper/beautiful_soup/beautiful_soup.py.
+设计参考: scraper/beautiful_soup/beautiful_soup.py.
 轻量, 速度快, 适用于大多数静态网页.
 """
 
@@ -68,7 +68,7 @@ class BeautifulSoupScraper(BaseScraper):
                 # 提取正文
                 content = soup.get_text(separator="\n", strip=True)
 
-                # 提取图片 (对标 GPT Researcher get_relevant_images)
+                # 提取图片 (设计参考: get_relevant_images)
                 image_urls: list[str] = []
                 for img in soup.find_all("img", limit=20):
                     src = img.get("src") or img.get("data-src")

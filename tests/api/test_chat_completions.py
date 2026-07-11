@@ -522,10 +522,10 @@ def test_chat_completions_uploaded_files_context_load() -> None:
 
 @pytest.mark.api
 def test_chat_completions_agent_role_override() -> None:
-    """验证 agent_role 覆盖 (GPTR Config 层): 注入行业 persona → 200.
+    """验证 agent_role 覆盖 (4 层机制 Config 层): 注入行业 persona → 200.
 
-    AGENTS.md 第 7 章: agent_role 对标 GPTR AGENT_ROLE 配置, 优先级高于 LLM 动态生成
-    (AgentCreator). 行业适配采用 GPTR 风格 4 层机制, 不使用行业分类器.
+    AGENTS.md 第 7 章: agent_role 设计参考 AGENT_ROLE 配置, 优先级高于 LLM 动态生成
+    (AgentCreator). 行业适配采用 4 层机制, 不使用行业分类器.
     短查询触发 short_query_reply, 但 agent_role 字段应被接受不报错.
     实际 agent_role 覆盖效果由 e2e 测试覆盖.
     """

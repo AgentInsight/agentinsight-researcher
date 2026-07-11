@@ -44,11 +44,11 @@ async def build_researcher_graph(
     """构建研究智能体 LangGraph 图.
 
     AGENTS.md 第 5 章: StateGraph + PostgresSaver.
-    图结构 (对标 GPT Researcher Skills 流水线, 行业适配采用 GPTR 4 层机制):
+    图结构 (设计参考 Skills 流水线, 行业适配采用 4 层机制):
 
         START
           ↓
-        agent_creator  (AgentCreator LLM 动态角色生成, 对标 GPTR choose_agent)
+        agent_creator  (AgentCreator LLM 动态角色生成, 设计参考 choose_agent)
           ↓ (P0-01 条件边: research_mode == "deep")
           ├──────────────────────┐
           ↓ (deep)               ↓ (其他)

@@ -1,13 +1,13 @@
 """SourceCurator 来源策展师.
 
-对标 GPT Researcher skills/curator.py.
+设计参考 skills/curator.py.
 AGENTS.md 用户需求 3: Reviewer (质量审查).
 
 用 LLM 评估来源可信度与相关性, 过滤低质量来源.
 cfg.CURATE_SOURCES=True 时启用 (默认 False).
 
-行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
-- agent_role 参数 (对标 GPTR AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
+行业适配采用 4 层机制, 不再使用行业分类器:
+- agent_role 参数 (设计参考: AGENT_ROLE) 注入角色 persona, 由 LLM 动态生成或调用方注入
 
 P1-Future-04: curator prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 """
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class SourceCurator:
     """来源策展师 (Reviewer 职责).
 
-    对标 GPT Researcher SourceCurator.
+    设计参考 SourceCurator.
     用 smart_llm 评估来源可信度与相关性.
 
     P2-02: 新增域名可信度字典 + _score_credibility 方法,
@@ -40,7 +40,7 @@ class SourceCurator:
     _llm: LLMClient
     _prompt_family: PromptFamily
 
-    # P2-02: 权威域名可信度字典 (对标 GPTR curate_sources)
+    # P2-02: 权威域名可信度字典 (设计参考: curate_sources)
     _DOMAIN_CREDIBILITY: dict[str, float] = {
         # 学术
         "arxiv.org": 0.95,
@@ -75,12 +75,12 @@ class SourceCurator:
     def _score_credibility(self, source: dict[str, Any]) -> float:
         """计算来源可信度 (0-1, P2-02 + V2-P1).
 
-        V2-P1 优化 (对标 GPTR SourceCurator Quantitative Value):
+        V2-P1 优化 (设计参考: SourceCurator Quantitative Value):
         - 旧版: 含统计数据仅 +0.03 微弱加分
         - V2: 将 Quantitative Value 提升为独立维度, 含统计指标 (百分比/金额/CAGR) 显著加分 (+0.10)
 
         综合域名权威性 + 内容长度 + 数据丰富度 (Quantitative Value).
-        对标 GPTR curate_sources 域名可信度评估.
+        设计参考: curate_sources 域名可信度评估.
 
         Args:
             source: 来源 dict, 含 url/content/body/snippet 等字段
@@ -101,8 +101,8 @@ class SourceCurator:
         elif len(content) < 200:
             score -= 0.10
 
-        # V2-P1: Quantitative Value 评估 (对标 GPTR SourceCurator 第 5 维)
-        # GPTR 强调 "Quantitative Value" 5 次, 含统计数据的来源优先级显著高于纯文字描述.
+        # V2-P1: Quantitative Value 评估 (设计参考: SourceCurator 第 5 维)
+        # 业界实践强调 "Quantitative Value" 5 次, 含统计数据的来源优先级显著高于纯文字描述.
         quant_score = self._score_quantitative_value(content)
         score += quant_score
 
@@ -110,10 +110,10 @@ class SourceCurator:
 
     @staticmethod
     def _score_quantitative_value(content: str) -> float:
-        """评估内容的数据丰富度 (V2-P1, 对标 GPTR Quantitative Value).
+        """评估内容的数据丰富度 (V2-P1, 设计参考: Quantitative Value).
 
-        GPTR SourceCurator 的第 5 维评估标准, 含具体数字/百分比/金额/统计指标
-        的来源优先级显著高于纯文字描述. GPTR prompt 中 "Quantitative Value" 出现 5 次.
+        SourceCurator 的第 5 维评估标准, 含具体数字/百分比/金额/统计指标
+        的来源优先级显著高于纯文字描述. prompt 中 "Quantitative Value" 出现 5 次.
 
         Args:
             content: 来源内容文本
@@ -162,9 +162,9 @@ class SourceCurator:
     ) -> list[dict[str, Any]]:
         """策展来源 (Reviewer 职责).
 
-        对标 GPT Researcher curate_sources.
+        设计参考 curate_sources.
         用 smart_llm (temperature=0.2) 评估来源.
-        agent_role (对标 GPTR AGENT_ROLE): 角色 persona 字符串,
+        agent_role (设计参考: AGENT_ROLE): 角色 persona 字符串,
         由 AgentCreator LLM 动态生成或调用方注入.
         """
         if not sources:
@@ -176,7 +176,7 @@ class SourceCurator:
             user_id=user_id,
             session_id=session_id,
         ) as span:
-            # 对标 GPTR: agent_role 作为角色 persona
+            # agent_role 作为角色 persona
             role_persona = agent_role or "你是一位资深研究分析专家, 擅长多领域综合研究."
 
             # P1-6: LLM 前用 credibility 预过滤, 减少输入 token (30 条 → 最多 20 条)

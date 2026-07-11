@@ -1,13 +1,13 @@
 """LangGraph 节点定义 (完整实现).
 
-对标 GPT Researcher skills/ 流水线.
+设计参考 skills/ 流水线.
 AGENTS.md 第 5 章硬约束:
 - 节点为纯函数 async def node(state: State) -> dict, 单一职责无副作用
 - 节点禁止原地修改入参 State, 必须返回 delta dict 由 reducer 合并
 - 节点内禁止直连厂商 LLM SDK, 统一走 llm/ 网关 (LiteLLM)
 - 每个节点必须包裹在 AgentInsight trace span 内 (AGENTS.md 第 10 章)
 
-流水线 (对标 GPT Researcher Skills, 行业适配采用 GPTR 4 层机制):
+流水线 (设计参考 Skills, 行业适配采用 4 层机制):
     agent_creator → research_conductor → source_curator → report_generator → publisher
 """
 
@@ -36,10 +36,10 @@ async def agent_creator_node(
     *,
     settings: Settings,
 ) -> dict[str, Any]:
-    """AgentCreator 动态角色生成节点 (对标 GPTR choose_agent).
+    """AgentCreator 动态角色生成节点 (设计参考: choose_agent).
 
-    GPTR 4 层隐形机制 (Prompt 层):
-    1. settings.agent_role 配置注入 (优先级最高, 对标 GPTR AGENT_ROLE)
+    4 层隐形机制 (Prompt 层):
+    1. settings.agent_role 配置注入 (优先级最高, 设计参考: AGENT_ROLE)
     2. 否则 LLM 根据 query 语义动态生成行业 persona
     """
     async with trace_chain(
@@ -72,7 +72,7 @@ async def research_conductor_node(
 ) -> dict[str, Any]:
     """ResearchConductor 研究总指挥节点.
 
-    对标 GPT Researcher skills/researcher.py:
+    设计参考 skills/researcher.py:
     1. plan_research: 按动态角色 persona 拆解子查询
     2. asyncio.gather 并行 _process_sub_query:
        - 搜索 (中文优先路由)
@@ -113,7 +113,7 @@ async def deep_research_node(
 ) -> dict[str, Any]:
     """DeepResearch 递归深度研究节点 (P0-01).
 
-    对标 GPT Researcher deep_research.
+    设计参考 deep_research.
     通过 breadth×depth 递归树探索, 每层聚合上下文.
     agent_creator 条件边: research_mode == "deep" 时路由到此节点.
     """
@@ -149,7 +149,7 @@ async def source_curator_node(
 ) -> dict[str, Any]:
     """SourceCurator 来源策展节点 (可选).
 
-    对标 GPT Researcher skills/curator.py:
+    设计参考 skills/curator.py:
     LLM 评估来源可信度与相关性 (Reviewer 职责).
     cfg.CURATE_SOURCES=True 时启用.
     """
@@ -185,7 +185,7 @@ async def report_generator_node(
 ) -> dict[str, Any]:
     """ReportGenerator 报告生成节点.
 
-    对标 GPT Researcher skills/writer.py:
+    设计参考 skills/writer.py:
     按动态角色 persona 合成长报告 (Writer 职责).
     P2-06: image_generation_enabled=True 时报告含配图 (deepseek-v4-flash).
     """
@@ -230,7 +230,7 @@ async def report_generator_node(
 
         # P1-04: 回写 LLM 成本到 State (打通 LLMClient → State 最后一公里)
         # P0-3: 读取 per-session allocator, 避免全局污染数据
-        # 对标 GPTR add_costs() 让 final_state 含 costs 字段, 供 routes.py usage 读取.
+        # 设计参考: add_costs() 让 final_state 含 costs 字段, 供 routes.py usage 读取.
         try:
             from src.llm.token_budget import get_token_budget_allocator
 
@@ -266,7 +266,7 @@ async def publisher_node(
 ) -> dict[str, Any]:
     """Publisher 发布节点.
 
-    对标 GPT Researcher multi_agents/agents/publisher.py:
+    设计参考 multi_agents/agents/publisher.py:
     Markdown/HTML/PDF 输出, 引用规范化.
 
     P2-7: 节点保持纯函数无副作用, 仅生成 report_md/report_formats/file_path 等到 state,

@@ -1,4 +1,4 @@
-"""幻觉评测 (对标 GPTR evals/hallucination_eval/).
+"""幻觉评测 (设计参考: evals/hallucination_eval/).
 
 评测维度: 事实性 (声明是否有来源支持)、一致性 (报告与来源是否矛盾).
 用 LLM 检查报告中每个声明是否有来源支持, 计算幻觉率.

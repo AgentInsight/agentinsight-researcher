@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ========== LLM 网关 (AGENTS.md 第 9 章, LiteLLM) ==========
-    # 三级 LLM 分层 (对标 GPTR FAST/SMART/STRATEGIC):
+    # 三级 LLM 分层 (设计参考: FAST/SMART/STRATEGIC):
     # - FAST: 快速任务 (摘要/分类/JSON 解析)
     # - SMART: 复杂推理 (报告写作/章节生成/来源策展)
     # - STRATEGIC: 规划 (子主题拆解/agent 角色)
@@ -282,7 +282,7 @@ class Settings(BaseSettings):
     serper_api_key: str | None = None  # Serper.dev Google Search (全球)
     pubmed_email: str = ""  # PubMed NCBI 建议邮箱 (无需 Key)
     semantic_scholar_api_key: str | None = None  # Semantic Scholar Graph API (可选 Key)
-    # 新增 5 个搜索引擎 (P2-Future-04, 对标 GPTR retrievers/)
+    # 新增 5 个搜索引擎 (P2-Future-04, 参考实现 retrievers/)
     exa_api_key: str | None = None  # Exa 搜索 (全球, Bearer token)
     # v1.1 新增: 秘塔 AI 搜索 (国内 AI 搜索主力, freemium)
     metaso_api_key: str | None = None  # 秘塔 AI 搜索 API Key (访问 https://metaso.cn/api 获取)
@@ -303,7 +303,7 @@ class Settings(BaseSettings):
     custom_retriever_endpoint: str | None = None  # 自定义检索端点 URL, 留空则不启用
     custom_retriever_arg: str = "query"  # 自定义检索端点的查询参数名 (默认 query)
 
-    # ========== 抓取 (GPT Researcher 模式) ==========
+    # ========== 抓取 ==========
     # Agent 并发抓取数据的数量 (控制同时抓取多少个 URL, 影响内存/CPU/带宽)
     # 环境变量 MAX_SCRAPER_WORKERS 注入; deep_research.py / research_conductor.py 读取
     max_scraper_workers: int = 5
@@ -323,7 +323,7 @@ class Settings(BaseSettings):
     firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.dev"
 
-    # ========== Token 优化 (GPT Researcher 模式) ==========
+    # ========== Token 优化 ==========
     similarity_threshold: float = 0.35
     compression_threshold: int = 8000
     context_sliding_window: int = 5  # 滑动窗口大小: 保留最近 N 条原文 (V4-P1-04)
@@ -337,23 +337,23 @@ class Settings(BaseSettings):
     deep_research_adaptive: bool = False  # 自适应深度开关 (V4-P2-02, 默认关闭)
     curate_sources: bool = True
 
-    # ========== V2 对齐 GPTR 优化 (V2-P0/P1) ==========
-    # WrittenContentCompressor 跨子主题去重阈值 (对标 GPTR WrittenContentCompressor threshold=0.5)
+    # ========== V2 优化 (V2-P0/P1) ==========
+    # WrittenContentCompressor 跨子主题去重阈值 (设计参考: WrittenContentCompressor threshold=0.5)
     # 旧版硬编码 0.5, V2 走 settings 配置 (V2-P1).
     # V4-P3: 去重改用 FastEmbed (bge-small-zh-v1.5, 512维), 阈值可能需重新校准.
     written_content_similarity_threshold: float = 0.5
-    # 递归分块参数 (对标 GPTR RecursiveCharacterTextSplitter chunk_size=1000)
+    # 递归分块参数 (chunk_size=1000 是 RecursiveCharacterTextSplitter 默认值)
     # V4-P3: 旧 EmbeddingsFilter 类已删除, 参数供 BM25Filter/WrittenContentCompressor 复用 recursive_split.
     embeddings_filter_chunk_size: int = 1000
     embeddings_filter_chunk_overlap: int = 100
-    # 精排返回 Top-K (对标 GPTR EmbeddingsFilter k=20)
+    # 精排返回 Top-K (设计参考: EmbeddingsFilter k=20)
     # V4-P3: 供 ContextManager._embeddings_rerank (FastEmbed 精排) 使用.
     embeddings_filter_top_k: int = 20
-    # detailed_report 章节字数下限/上限 (对标 GPTR 800-1200, V2-P1)
-    # 旧版 500-1000, V2 提升到 800-1200 对齐 GPTR.
+    # detailed_report 章节字数下限/上限 (V2-P1, 800-1200)
+    # 旧版 500-1000, V2 提升到 800-1200.
     detailed_section_word_min: int = 800
     detailed_section_word_max: int = 1200
-    # detailed_report 引言/结论字数 (对标 GPTR 300-500, 保持)
+    # detailed_report 引言/结论字数 (300-500, 保持)
     detailed_intro_word_min: int = 300
     detailed_intro_word_max: int = 500
 
@@ -461,7 +461,7 @@ class Settings(BaseSettings):
     # P2-05: 报告语言 (zh|en|ja|ko|fr), 默认 zh; report_generator._get_language_instruction 读取
     report_language: str = "zh"
     # P1-02: 引用格式风格 (APA/MLA/Chicago/GB7714), 默认 APA.
-    # 在 report_generator._format_sources 中读取, 代码层实现真实格式化 (优于 GPTR 仅 LLM 生成).
+    # 在 report_generator._format_sources 中读取, 代码层实现真实格式化 (优于纯 LLM 生成).
     report_format_style: Literal["APA", "MLA", "Chicago", "GB7714"] = "APA"
     # V4-P2-01: 报告风格预设, 支持 academic/business/casual/news 4 种风格
     report_style: Literal["academic", "business", "casual", "news"] = "academic"
@@ -509,10 +509,10 @@ class Settings(BaseSettings):
     # 由 src/skills/researcher/prompts.py 的 get_prompt_family() 路由.
     prompt_family: Literal["default", "english"] = "default"
 
-    # ========== 行业适配 GPTR 4 层机制 (对标 GPT Researcher) ==========
-    # 对标 GPTR AGENT_ROLE 配置 (config/variables/default.py:23):
+    # ========== 行业适配 4 层机制 ==========
+    # 设计参考: AGENT_ROLE 配置 (config/variables/default.py:23):
     # 用户可注入行业 persona 字符串, 优先级高于 LLM 动态生成 (agent_creator.py).
-    # 行业适配采用 GPTR 风格 4 层机制, 不再使用行业分类器:
+    # 行业适配采用 4 层机制, 不再使用行业分类器:
     #   1. Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
     #   2. Config 层: 本字段 (agent_role) 静态注入角色 persona
     #   3. Retriever 层: searchers/ 含 arxiv/pubmed/semantic_scholar 等专业数据源

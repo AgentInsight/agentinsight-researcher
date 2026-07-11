@@ -1,6 +1,6 @@
 """ContextManager 上下文管理者.
 
-对标 GPT Researcher skills/context_manager.py + context/compression.py.
+设计参考 skills/context_manager.py + context/compression.py.
 AGENTS.md 用户需求 10: Token 优化核心.
 
 核心优化:
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class ContextManager:
     """上下文管理者 (Token 优化核心).
 
-    对标 GPT Researcher ContextManager + ContextCompressor.
+    设计参考 ContextManager + ContextCompressor.
     """
 
     settings: Settings
@@ -183,7 +183,7 @@ class ContextManager:
     ) -> str:
         """获取与查询相似的内容 (压缩 + 过滤).
 
-        对标 GPT Researcher ContextCompressor.async_get_context.
+        设计参考 ContextCompressor.async_get_context.
         关键优化: 小文档快速路径, 跳过 embedding 计算.
 
         两层路由架构:
@@ -317,7 +317,7 @@ class ContextManager:
         keep_flags = self._written_compressor.check_and_update_batch(all_chunks_list, all_embs)
         deduped = [c for c, keep in zip(compressed, keep_flags, strict=False) if keep]
 
-        # Word Limit 截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)
+        # Word Limit 截断 (设计参考 MAX_CONTEXT_WORDS)
         context = self._truncate_by_words(deduped, self.settings.max_context_words)
         span.update(output={"context_len": len(context), "fast_path": False, "layer": layer})
         return context
@@ -608,7 +608,7 @@ class ContextManager:
 
     @staticmethod
     def _truncate_by_words(texts: list[str], max_words: int) -> str:
-        """按词数截断 (对标 GPT Researcher MAX_CONTEXT_WORDS)."""
+        """按词数截断 (设计参考 MAX_CONTEXT_WORDS)."""
         result: list[str] = []
         word_count = 0
         for text in texts:
@@ -628,7 +628,7 @@ class SlidingWindowCompressor:
     """滑动窗口 + LLM 摘要压缩器 (AGENTS.md 第 6 章 P1-01).
 
     策略: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
-    对标 GPT Researcher 上下文压缩, 但增强 LLM 摘要能力.
+    设计参考 上下文压缩, 但增强 LLM 摘要能力.
     """
 
     settings: Settings
@@ -700,13 +700,13 @@ class SlidingWindowCompressor:
 
 
 class WrittenContentCompressor:
-    """已写入内容去重器 (P1-02, 对标 GPT Researcher WrittenContentCompressor).
+    """已写入内容去重器 (P1-02, 设计参考 WrittenContentCompressor).
 
-    V2-P1 优化 (对标 GPTR):
+    V2-P1 优化 (设计参考):
     - 阈值走 settings.written_content_similarity_threshold (旧版硬编码 0.5)
     - chunk 级去重 (旧版整篇 content 比对, V2 切成 chunks 后逐 chunk 比对,
-      与 GPTR WrittenContentCompressor 对齐)
-    - 多查询并集去重 (对标 GPTR current_subtopic + draft_section_titles 并集)
+      与业界实践 WrittenContentCompressor 对齐)
+    - 多查询并集去重 (设计参考 current_subtopic + draft_section_titles 并集)
 
     用 FastEmbed (本地 bge-small-zh-v1.5, 512维) 对已写入内容做相似度去重,
     避免重复内容进入上下文. 不依赖远程 TEI 服务 (TEI 仅用于私有数据 Qdrant 索引).
@@ -884,7 +884,7 @@ class WrittenContentCompressor:
     ) -> tuple[bool, str]:
         """V4-P1-04 优化 3: 跨章节语义去重 (只丢弃相似 chunk, 保留差异部分).
 
-        对标 GPTR 串行去重: GPTR 串行处理子主题, 每个参考已写章节避免重复;
+        设计参考 串行去重: 串行处理子主题, 每个参考已写章节避免重复;
         本项目并行处理, 旧版"任意 chunk 相似即整篇丢弃"过于激进,
         导致子主题间有部分相似内容时整篇被丢弃 (TOC 有标题但正文无内容).
 
@@ -1062,7 +1062,7 @@ class WrittenContentCompressor:
 
         V2-P1: chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
         相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
-        与 GPTR WrittenContentCompressor 对齐.
+        与业界实践 WrittenContentCompressor 对齐.
 
         P4 修复: 内部拆分为 compute_embedding (锁外 I/O) + check_and_update
         (锁内 numpy 比对). 单调用方可直接用此方法; 并行场景应分别调用两步

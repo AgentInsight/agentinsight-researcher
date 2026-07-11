@@ -24,6 +24,11 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
@@ -44,6 +49,11 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
     healthcheck:
       test: ["CMD-SHELL", "redis-cli $${REDIS_AUTH:+-a \"$$REDIS_AUTH\"} ping"]
       interval: 3s
@@ -65,6 +75,11 @@ services:
       - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
@@ -95,6 +110,11 @@ services:
     volumes:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - embeddings_models:/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
     healthcheck:
       # 任务2 修复: TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截
       # 改用 CMD-SHELL + curl 绝对路径, 绕过 ENTRYPOINT 拦截
@@ -210,6 +230,11 @@ services:
       searxng:
         condition: service_healthy
       # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
       interval: 30s

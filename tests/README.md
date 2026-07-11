@@ -119,8 +119,8 @@ tests/
 │   ├── test_research_conductor.py          # ResearchConductor 主流程
 │   ├── test_deep_research.py               # 深度研究
 │   ├── test_v4p3_integration.py            # 集成: V4-P3 三层路由 (mock 化)
-│   ├── test_v2_gptr_alignment.py           # V2 对齐 GPTR 7 项优化
-│   ├── test_gptr_borrow.py                 # GPTR 借鉴: 池化/域名限流/图片评分
+│   ├── test_v2_alignment.py                # V2 对齐优化 7 项
+│   ├── test_scraper_enhancements.py        # 抓取器增强: 池化/域名限流/图片评分
 │   ├── test_phase4.py                      # Phase 4 (文件上传+动态角色+静态页)
 │   ├── test_context_compression.py         # 上下文压缩
 │   ├── test_fast_fail.py                   # 快速失败

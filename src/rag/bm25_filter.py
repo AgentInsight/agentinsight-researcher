@@ -1,6 +1,6 @@
 """BM25Filter 关键词过滤器 (V4-P3 L2 方案, 替代旧 EmbeddingsFilter 中段路由).
 
-对标 GPTR EmbeddingsFilter 的轻量替代方案, 针对本项目 TEI CPU 部署的性能瓶颈:
+设计参考: EmbeddingsFilter 的轻量替代方案, 针对本项目 TEI CPU 部署的性能瓶颈:
 - 旧 EmbeddingsFilter (已删除): 258 chunks × TEI 推理 = ~43 分钟 (Trace aac742d8 实测)
 - BM25Filter: 258 chunks × 本地 jieba+BM25 = ~2 秒 (1000× 加速)
 
