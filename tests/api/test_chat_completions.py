@@ -196,7 +196,7 @@ def test_with_bearer_token() -> None:
     """验证带 Bearer JWT Token: Authorization: Bearer test-token → 200 (不报错).
 
     AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
-    调用失败 (test-token 非合法 JWT) 按无 token 处理并降级 DEFAULT_USER_ID.
+    调用失败 (test-token 非合法 JWT) 按无 token 处理并降级 IP-based UserId.
     中间件超时 5s, 总超时 60s 应足够.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -206,7 +206,7 @@ def test_with_bearer_token() -> None:
             headers={"Authorization": "Bearer test-token-invalid"},
         )
     assert r.status_code == 200, (
-        f"带 token 请求应返回 200 (降级 DEFAULT_USER_ID), 实际: {r.status_code} {r.text}"
+        f"带 token 请求应返回 200 (降级 IP-based UserId), 实际: {r.status_code} {r.text}"
     )
     data = r.json()
     assert data["object"] == "chat.completion"
@@ -214,9 +214,9 @@ def test_with_bearer_token() -> None:
 
 @pytest.mark.api
 def test_without_token() -> None:
-    """验证不带 Bearer Token: 无 Authorization 头 → 200 (降级 DEFAULT_USER_ID).
+    """验证不带 Bearer Token: 无 Authorization 头 → 200 (降级 IP-based UserId).
 
-    AGENTS.md 第 8 章: token 不存在时使用 DEFAULT_USER_ID.
+    AGENTS.md 第 8 章: token 不存在时使用 IP-based UserId.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -224,7 +224,7 @@ def test_without_token() -> None:
             json=_chat_payload("你好", stream=False),
         )
     assert r.status_code == 200, (
-        f"无 token 请求应返回 200 (降级 DEFAULT_USER_ID), 实际: {r.status_code} {r.text}"
+        f"无 token 请求应返回 200 (降级 IP-based UserId), 实际: {r.status_code} {r.text}"
     )
     data = r.json()
     assert data["object"] == "chat.completion"

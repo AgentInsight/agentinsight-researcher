@@ -21,6 +21,7 @@
 | 关系库 | PostgreSQL ≥16 | Checkpointer+业务元数据，分布式共享 | MySQL（不推荐，分布式弱） |
 | 缓存 | Redis ≥8.0 | 热点缓存+限流+短期会话 | Memcached（不推荐，无持久化） |
 | Embeddings | bge-base-zh-v1.5 | 中文最强开源嵌入，本地零成本 | OpenAI embedding（不推荐，数据出境） |
+| 上下文压缩 Embeddings | FastEmbed (bge-small-zh-v1.5 ONNX INT8) | 本地零成本、CPU 友好、512 维 | 远程 TEI 用于压缩（不推荐，CPU 瓶颈） |
 | Rerank | bge-reranker-v2-m3 | 中文 Rerank SOTA，本地部署 | Cohere Rerank（不推荐，闭源收费） |
 | BM25 | rank-bm25+jieba | 中文分词+IDF，混合检索必备 | 字符 2-gram（降级兜底，非首选） |
 | Web 框架 | FastAPI+Uvicorn ≥0.115 | 异步原生、OpenAPI 自动、SSE 流式 | Flask/Django（不推荐，异步弱/过重） |
@@ -58,18 +59,19 @@ src/
 ├── graph/         # LangGraph 图定义（state/nodes/edges/builder）
 ├── agents/        # 具体 Agent 实现（复用图）
 │   └── <agent_name>/  # 子智能体专属代码（如有子智能体，按名称建子目录）
-├── common/        # 公用基础模块（不应依赖 agents/ 或业务模块）
+├── ag2/           # AG2 多 Agent 编排模块（可选，默认禁用；AGENTS.md 第 4 章不推荐 AutoGen，此模块仅作为实验性对照）
+├── common/        # 公用基础模块（不应依赖 agents/ 或业务模块；含 redis_client/exceptions 等）
 ├── config/        # 配置文件（全局 Settings + 子智能体专属配置）
 │   ├── settings.py    # 全局 pydantic-settings Settings SSOT
 │   └── <agent_name>/  # 子智能体专属配置（如有子智能体，按名称建子目录）
 ├── skills/        # 技能定义
 │   └── <agent_name>/  # 子智能体专属技能（如有子智能体，按名称建子目录）
 ├── tools/         # MCP Server 封装（registry 待多 Agent 落地后引入）
-├── rag/           # 自研 RAG 层（retriever/reranker/embeddings/bm25）
+├── rag/           # 自研 RAG 层（retriever/reranker/embeddings/bm25/fastembed_client）
 ├── llm/           # LiteLLM 网关封装
-├── memory/        # Postgres Checkpointer 配置
+├── memory/        # Postgres Checkpointer 配置（checkpointer/db_initializer/report_store）
 ├── observability/ # AgentInsight SDK 封装（tracing.py，6 类 trace_xxx）
-└── api/           # FastAPI 路由 + middleware
+└── api/           # FastAPI 路由 + middleware（routes/middleware/websocket/mcp_routes/agent_discovery/ip_user_resolver）
 ```
 
 **架构边界（核心约定，优先选择）**：
@@ -168,6 +170,8 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 **RAG 流水线**：检索应混合 BM25 + 向量（bge-base-zh-v1.5），默认 `vector_weight=0.7 / bm25_weight=0.3`。重排序默认不启用；当 `rerank_enabled=True` 时，重排序经 `bge-reranker-v2-m3`，Top-K 召回后 rerank，不推荐直接用向量分数作最终排序。`score_threshold` 默认 0.3，低于阈值丢弃（仅当 rerank 启用时生效，RRF 融合分数不应用此阈值）。Embedding 调用统一走 `rag/embeddings.py`，不推荐业务代码直连 API。Qdrant 不可用时降级内存检索仅限 `ENV=dev`；生产应告警并失败转移。Embeddings/Rerank TEI 服务通过环境变量 `API_KEY` 开启鉴权，客户端（`rag/embeddings.py`/`rag/retriever.py`）应通过 `embeddings_api_key`/`rerank_api_key` 配置传递 `Authorization: Bearer <key>` 请求头；API Key 仅在 `.env`/`.env.qa` 配置，不推荐硬编码。
 
+**上下文压缩 Embeddings（核心约定，优先选择）**：上下文压缩（WrittenContentCompressor 跨子主题去重 + ContextManager 精排）使用本地 FastEmbed（bge-small-zh-v1.5 ONNX INT8，512 维），不依赖远程 TEI 服务，解决 TEI CPU 部署性能瓶颈。Qdrant 索引仍使用远程 TEI（bge-base-zh-v1.5，768 维）。FastEmbed 客户端封装在 `rag/fastembed_client.py`，懒加载 + 线程安全 + LRU 缓存 + 降级到远程 TEI。
+
 **行业适配 GPTR 4 层机制（核心约定，优先选择，对标 GPT Researcher）**：
 行业适配刻意不引入 `IndustrySkill`，用 4 层隐形机制替代，不推荐业务代码 if-else 行业分支：
 1. **Prompt 层**：`src/skills/researcher/agent_creator.py` 的 `AgentCreator.AUTO_AGENT_INSTRUCTIONS` 给 LLM few-shot 例子，让 LLM 运行时自主生成行业 persona（对标 GPTR `auto_agent_instructions()` + `choose_agent()`），无 if-else 行业分支。
@@ -180,14 +184,22 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 ## 8. 用户身份解析规则
 
 **Bearer JWT Token 处理（核心约定，优先选择）**：
-- Agent 接受请求头 `Authorization: Bearer <jwt_token>`；token 可选，不存在时走匿名用户路径。
+- Agent 接受请求头 `Authorization: Bearer <jwt_token>`；token 可选，不存在时走 IP-based 用户身份解析路径。
 - token 存在时：应同步调用 `GET https://agentinsight.goldebridge.com/api/user`（携带原 `Authorization` 头）获取 `user_id`；调用失败按无 token 处理并告警。
-- token 不存在或调用失败时：使用环境变量 `DEFAULT_USER_ID` 作为 `user_id`；`DEFAULT_USER_ID` 应在 `.env` 配置，不推荐硬编码（硬编码属第 11 章硬约束）。
+- token 不存在或调用失败时（`self_host=True`）：通过 `src/api/ip_user_resolver.py` 基于客户端 IP 生成确定性 `user_id`（IP-based 解析）；`self_host=False` 时返回 401 错误。
 - 解析得到的 `user_id` 应注入请求上下文，供后续节点、会话、数据持久化使用（见第 6/7 章）。
+
+**IP-based 用户身份解析（核心约定，优先选择）**：
+- 当请求不含 `Authorization: Bearer <jwt_token>` 头时，Agent 可通过客户端 IP 地址解析用户身份（适用于内网部署/无 JWT 网关场景）。
+- IP 解析通过 `src/api/ip_user_resolver.py` 实现，将客户端 IP 映射到 `user_id`。
+- IP 白名单与映射配置存储在 PostgreSQL 业务表，按 `agent_id` 隔离。
+- 优先级：Bearer JWT Token > IP-based 解析（`self_host=True` 时为最终降级）。
+- `self_host=False`（云托管）时，无 Token 或 Token 校验失败返回 401，不走 IP 降级。
+- 生产环境应配置可信代理链（`X-Forwarded-For` 头信任），避免 IP 伪造攻击（属第 11 章安全硬约束）。
 
 **安全约束**：
 - JWT 验证与 `user_id` 获取应在 API 入口中间件完成，不推荐在业务节点内重复解析。
-- `user_id` 获取 API 调用应设超时（默认 5s），超时降级 `DEFAULT_USER_ID` 并告警。
+- `user_id` 获取 API 调用应设超时（默认 5s），超时降级到 IP-based 解析并告警（`self_host=True`）。
 - 禁止将原始 JWT token 写入日志或持久化存储；仅保留解析后的 `user_id`（属第 11 章安全硬约束）。
 
 ## 9. 工具与模型网关规则
@@ -245,7 +257,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 ## 12. 部署规则
 
-**容器清单（生产联网模式 6 个独立容器含本地 PostgreSQL；QA 模式 6 个独立容器含本地 PostgreSQL；生产离线模式 5 个独立容器 + 外部 PostgreSQL）**：
+**容器清单（生产联网模式 7 个独立容器含本地 PostgreSQL 与 SearXNG；QA 模式 7 个独立容器含本地 PostgreSQL 与 SearXNG；生产离线模式 6 个独立容器 + 外部 PostgreSQL）**：
 
 > 生产联网模式 PostgreSQL 由本地 `postgres` 容器提供（见 `docker-compose.yml`），与 redis/qdrant/embeddings 同属 compose 编排；业务表由 Agent 启动时执行 `scripts/init.sql` 创建（幂等）。
 > QA 模式（离线）保留本地 `postgres` 容器（见 `docker-compose-qa.yaml`），与 redis/qdrant/embeddings 同属 compose 编排，便于无外部数据库的离线测试环境。
@@ -259,6 +271,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 | `qdrant` | `qdrant/qdrant:≥1.18` | 6333/6334 | `/healthz` |
 | `redis` | `redis:≥8` | 6379 | `redis-cli ping` |
 | `postgres`（生产联网模式 + QA 模式） | `postgres:≥17`（业务表由 Agent 启动时执行 `scripts/init.sql` 创建） | 5432 | `pg_isready -U <user>` |
+| `searxng` | 本仓 `Dockerfile.searxng`（Alpine + curl_cffi） | 8099 | `wget http://127.0.0.1:8099/` |
 
 **APIKey 鉴权（核心约定，优先选择；密钥硬编码属第 11 章硬约束）**：
 - Qdrant 通过 `QDRANT__SERVICE__STATIC_API_KEY` 环境变量开启静态 API Key 鉴权；客户端通过 `QDRANT_API_KEY` 传递。
@@ -275,10 +288,10 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 **容器编排核心约定（优先选择）**：
 - `restart: always`（生产）/ `unless-stopped`（开发）。
 - `depends_on` 应用 `condition: service_healthy`，不推荐裸依赖（无健康检查直连）。
-- 依赖顺序：生产联网模式 `postgres` → `redis` → `qdrant` → `embeddings` → `agent`；QA 模式 `postgres` → `redis` → `qdrant` → `embeddings` → `agent`；生产离线模式 `redis` → `qdrant` → `embeddings` → `agent`（PostgreSQL 由外部托管，不在 `depends_on` 内）；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
+- 依赖顺序：生产联网模式 `postgres` → `redis` → `qdrant` → `embeddings` → `searxng` → `agent`；QA 模式 `postgres` → `redis` → `qdrant` → `embeddings` → `searxng` → `agent`；生产离线模式 `redis` → `qdrant` → `embeddings` → `searxng` → `agent`（PostgreSQL 由外部托管，不在 `depends_on` 内）；`rerank` 为可选容器（`rerank_enabled=True` 时通过 `profiles: [rerank]` 启用，插入 `embeddings` 与 `agent` 之间，`agent` 不强制依赖 `rerank`）。
 - 健康检查 `interval ≤ 30s` / `timeout ≤ 10s` / `retries ≥ 3` / `start_period ≥ 10s`。
-- 数据卷应用 `driver: local`，命名卷 `redis_data` / `qdrant_data` / `session_data` / `embeddings_models` / `rerank_models` / `uploads_data`（生产联网模式与 QA 模式额外含 `postgres_data`）。
-- 端口绑定：生产仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
+- 数据卷应用 `driver: local`，命名卷 `redis_data` / `qdrant_data` / `session_data` / `embeddings_models` / `rerank_models` / `uploads_data` / `searxng_data`（生产联网模式与 QA 模式额外含 `postgres_data`）。
+- 端口绑定：生产仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC/`searxng:8099`）绑定 `127.0.0.1`。
 
 **Agent 容器核心约定（优先选择）**：
 - 基础镜像 `python:3.12-slim`，非 root 用户运行。
@@ -295,9 +308,9 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 | 生产模式（联网） | `Dockerfile` | `docker-compose.yml` | `.env` | `docker-build.sh` | 开源社区、CI、外网环境 |
 | 生产模式（离线） | `Dockerfile.offline` | `docker-compose-offline.yaml` | `.env` | `docker-build.offline.sh` | 内网生产环境、离线部署 |
 
-- **QA 模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。适用于 QA 测试。所有端口绑定 `127.0.0.1`，仅本机访问。
-- **生产模式（联网）**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像（含 `postgres` 容器），无需预下载 `packages/`。适用于开源社区贡献者快速起栈。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
-- **生产模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball，模型从本地 volume 加载。镜像版本由 `packages/images/` 中的 tarball 决定，compose 文件中硬编码以确保匹配。适用于内网生产环境或离线部署。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC）绑定 `127.0.0.1`。
+- **QA 模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball（含 SearXNG 镜像，由 `Dockerfile.searxng` 构建），模型从本地 volume 加载。适用于 QA 测试。所有端口绑定 `127.0.0.1`，仅本机访问（含 `searxng:8099`）。
+- **生产模式（联网）**：构建时从 PyPI 下载 Python 依赖、从 Docker Hub 拉取基础镜像（含 `postgres` 容器），无需预下载 `packages/`。适用于开源社区贡献者快速起栈。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC/`searxng:8099`）绑定 `127.0.0.1`。
+- **生产模式（离线）**：所有文件宿主机预下载到 `packages/`（wheels/debs/models/images），构建时 `pip install --no-index` 离线安装，部署时 `docker load` 加载镜像 tarball（含 SearXNG 镜像，由 `Dockerfile.searxng` 构建），模型从本地 volume 加载。镜像版本由 `packages/images/` 中的 tarball 决定，compose 文件中硬编码以确保匹配。适用于内网生产环境或离线部署。仅 `agent:8066`/`rerank:8089`/`embeddings:8088`/`qdrant:6333` 对外暴露，其余（`postgres:5432`/`redis:6379`/`qdrant:6334` gRPC/`searxng:8099`）绑定 `127.0.0.1`。
 - QA 模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.qa`、`docker-compose-qa.yaml`、`docker-build.qa.bat`、`packages/wheels/`、`packages/debs/`、`packages/models/`、`packages/images/`。
 - 生产离线模式相关文件已加入 `.gitignore`（不入仓）：`Dockerfile.offline`、`docker-compose-offline.yaml`、`docker-build.offline.sh`。
 - "不推荐部署时联网拉镜像/装依赖/下模型" 约束适用于**QA 模式**和**生产离线模式**；生产联网模式允许构建时联网。
@@ -372,7 +385,7 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 
 **API 调用约束**：
 - 统一调用 OpenAI 兼容端点 `POST /v1/chat/completions`，请求体带 `stream: true`。
-- 请求头 `Authorization: Bearer <jwt_token>`：若页面 Token 输入框非空则携带该值，为空则不发该头（后端按第 8 章降级 `DEFAULT_USER_ID`）。
+- 请求头 `Authorization: Bearer <jwt_token>`：若页面 Token 输入框非空则携带该值，为空则不发该头（后端按第 8 章降级 IP-based UserId）。
 - 不推荐调用后端私有端点（如 `/internal/*`）；测试页面应只走对外 OpenAI 兼容接口。
 - 人在回路端点（P0-Future-03，仅 `human_review_enabled=True` 时使用）：
   - `POST /v1/feedback`：提交研究计划/大纲审核反馈，请求体 `{"session_id": str, "feedback": str}`；`feedback` 为空字符串或 `approve`/`accept`/`通过` 等关键词表示接受，其他内容视为修订意见。

@@ -65,6 +65,8 @@ def _make_searcher(
     mock_client = MagicMock()
     mock_client.post = AsyncMock(return_value=response or _make_response(200, {}))
     searcher._client = mock_client
+    # PERF-OPT-003: 禁用重试以保持现有单元测试快速 (重试行为由专用测试覆盖)
+    searcher._max_retries = 0
     return searcher
 
 
@@ -495,3 +497,125 @@ async def test_search_empty_documents_returns_empty() -> None:
     results = await searcher.search("")
 
     assert results == []
+
+
+# ========== PERF-OPT-003: 重试 + 熔断器 ==========
+
+
+@pytest.mark.asyncio
+async def test_search_retries_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PERF-OPT-003: 普通失败应重试, 首次失败后第二次成功."""
+    settings = _make_settings()
+    searcher = ExaSearcher(settings)
+    searcher._max_retries = 2
+
+    # mock asyncio.sleep 避免真实等待
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("asyncio.sleep", sleep_mock)
+
+    success_response = _make_response(
+        200, {"results": [{"title": "ok", "url": "https://x.com", "text": "s"}]}
+    )
+    searcher._client = MagicMock()
+    searcher._client.post = AsyncMock(side_effect=[ConnectionError("fail"), success_response])
+
+    results = await searcher.search("测试")
+
+    assert len(results) == 1
+    assert results[0]["title"] == "ok"
+    assert searcher._client.post.call_count == 2
+    # 第一次失败后应 sleep 0.5s (0.5 * 2^0)
+    sleep_mock.assert_called_once_with(0.5)
+
+
+@pytest.mark.asyncio
+async def test_search_retries_exhausted_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PERF-OPT-003: 重试耗尽后返回空列表."""
+    settings = _make_settings()
+    searcher = ExaSearcher(settings)
+    searcher._max_retries = 2
+
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    searcher._client = MagicMock()
+    searcher._client.post = AsyncMock(side_effect=ConnectionError("network down"))
+
+    results = await searcher.search("测试")
+
+    assert results == []
+    assert searcher._client.post.call_count == 3  # 1 + 2 retries
+
+
+@pytest.mark.asyncio
+async def test_search_quota_exceeded_not_retried() -> None:
+    """PERF-OPT-003: QuotaExceededError 不重试, 直接抛出."""
+    settings = _make_settings()
+    searcher = ExaSearcher(settings)
+    searcher._max_retries = 2
+
+    response = _make_response(429, text="limited", headers={})
+    searcher._client = MagicMock()
+    searcher._client.post = AsyncMock(return_value=response)
+
+    with pytest.raises(QuotaExceededError):
+        await searcher.search("测试")
+
+    assert searcher._client.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_opens_after_threshold_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PERF-OPT-003: 连续失败达阈值后熔断器开启, 后续请求快速失败."""
+    settings = _make_settings()
+    searcher = ExaSearcher(settings)
+    searcher._max_retries = 0  # 禁用重试, 每次调用只算 1 次失败
+
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    searcher._client = MagicMock()
+    searcher._client.post = AsyncMock(side_effect=ConnectionError("network down"))
+
+    # failure_threshold=3, 前 3 次调用失败 (熔断器在第 3 次后开启)
+    for _ in range(3):
+        assert await searcher.search("测试") == []
+
+    # 第 4 次调用: 熔断器已开启, 应快速失败不发起 HTTP
+    searcher._client.post = AsyncMock(return_value=_make_response(200, {"results": []}))
+
+    results = await searcher.search("测试")
+
+    assert results == []
+    # 熔断器开启, 不应调用 HTTP
+    searcher._client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_success_resets_counter() -> None:
+    """PERF-OPT-003: 成功调用重置失败计数器."""
+    settings = _make_settings()
+    searcher = ExaSearcher(settings)
+    searcher._max_retries = 0
+
+    searcher._client = MagicMock()
+    # 前 2 次失败, 第 3 次成功
+    searcher._client.post = AsyncMock(
+        side_effect=[
+            ConnectionError("fail"),
+            ConnectionError("fail"),
+            _make_response(
+                200, {"results": [{"title": "ok", "url": "https://x.com", "text": "s"}]}
+            ),
+        ]
+    )
+
+    assert await searcher.search("测试1") == []
+    assert await searcher.search("测试2") == []
+    results3 = await searcher.search("测试3")
+    assert len(results3) == 1
+
+    # 成功后计数器重置, 再失败 1 次不应触发熔断 (failure_threshold=3)
+    searcher._client.post = AsyncMock(side_effect=ConnectionError("fail"))
+    assert await searcher.search("测试4") == []
+    assert not searcher._circuit_breaker.is_open()

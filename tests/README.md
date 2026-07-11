@@ -188,7 +188,7 @@ tests/
 │   ├── test_all_formats.py                 # 全格式导出验证
 │   └── __init__.py
 ├── conftest.py     # 全局配置: .env 加载 + 容器栈可达性自动跳过
-└── REPORT.md       # 测试报告
+└── __init__.py
 ```
 
 ## 3. 测试执行命令

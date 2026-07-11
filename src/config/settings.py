@@ -256,7 +256,7 @@ class Settings(BaseSettings):
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
     fastembed_model_path: str = (
-        "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+        "./packages/models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
     )
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度

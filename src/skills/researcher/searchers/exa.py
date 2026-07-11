@@ -7,12 +7,14 @@ P2-Future-04: 对标 GPT Researcher retrievers/exa/exa.py.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 
+from src.common.circuit_breaker import CircuitBreaker
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
@@ -37,6 +39,8 @@ class ExaSearcher(BaseSearcher):
         self._client = httpx.AsyncClient(
             timeout=10.0
         )  # P1: 15s→10s (trace 4ad14970 优化, 消除 >10s 离群点)
+        self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
+        self._max_retries = 2  # P0: 限制 2 次避免 API 成本激增
 
     async def search(
         self,
@@ -54,58 +58,68 @@ class ExaSearcher(BaseSearcher):
             logger.warning("Exa API Key 未配置, 跳过 Exa 搜索")
             return []
 
+        if self._circuit_breaker.is_open():
+            logger.warning("Exa 熔断器开启, 跳过搜索")
+            return []
+
         async with trace_tool(
             name="exa-search",
             input={"query": query[:100], "max_results": max_results},
             metadata={"tool_name": "exa", "region": "global"},
         ) as span:
-            try:
-                headers = {
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                }
-                payload: dict[str, Any] = {
-                    "query": query,
-                    "num_results": max_results,
-                    "use_autoprompt": True,
-                    "contents": {
-                        "text": {"maxCharacters": 1000},
-                    },
-                }
-                response = await self._client.post(self._api_url, headers=headers, json=payload)
-                if response.status_code == 429:
-                    reset_at = self._calc_quota_reset(response)
-                    raise QuotaExceededError(
-                        engine="exa",
-                        reset_at=reset_at,
-                        message="Exa 月度额度已满",
-                    )
-                response.raise_for_status()
-                data = response.json()
-
-                results: list[dict[str, Any]] = []
-                # Exa 返回结构: {"results": [{"title": "", "url": "", "text": ""}]}
-                for item in data.get("results", [])[:max_results]:
-                    results.append(
-                        self._normalize_result(
-                            title=item.get("title", ""),
-                            url=item.get("url", ""),
-                            snippet=item.get("text", ""),
+            for attempt in range(self._max_retries + 1):
+                try:
+                    headers = {
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    }
+                    payload: dict[str, Any] = {
+                        "query": query,
+                        "num_results": max_results,
+                        "use_autoprompt": True,
+                        "contents": {
+                            "text": {"maxCharacters": 1000},
+                        },
+                    }
+                    response = await self._client.post(self._api_url, headers=headers, json=payload)
+                    if response.status_code == 429:
+                        reset_at = self._calc_quota_reset(response)
+                        raise QuotaExceededError(
+                            engine="exa",
+                            reset_at=reset_at,
+                            message="Exa 月度额度已满",
                         )
-                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-                results = self._filter_by_domains(results, query_domains)
-                span.update(
-                    output={"results_count": len(results)},
-                    metadata={"tool_name": "exa", "success": True},
-                )
-                return results
-            except QuotaExceededError:
-                raise
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Exa 搜索失败: %s", e)
-                span.update(metadata={"tool_name": "exa", "success": False, "error": str(e)})
-                return []
+                    results: list[dict[str, Any]] = []
+                    # Exa 返回结构: {"results": [{"title": "", "url": "", "text": ""}]}
+                    for item in data.get("results", [])[:max_results]:
+                        results.append(
+                            self._normalize_result(
+                                title=item.get("title", ""),
+                                url=item.get("url", ""),
+                                snippet=item.get("text", ""),
+                            )
+                        )
+
+                    results = self._filter_by_domains(results, query_domains)
+                    self._circuit_breaker.record_success()
+                    span.update(
+                        output={"results_count": len(results)},
+                        metadata={"tool_name": "exa", "success": True},
+                    )
+                    return results
+                except QuotaExceededError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    self._circuit_breaker.record_failure()
+                    if attempt < self._max_retries:
+                        await asyncio.sleep(0.5 * (2**attempt))
+                        continue
+                    logger.warning("Exa 搜索失败 (重试 %d 次): %s", self._max_retries, e)
+                    span.update(metadata={"tool_name": "exa", "success": False, "error": str(e)})
+                    return []
 
     def _calc_quota_reset(self, resp: httpx.Response) -> datetime:
         """Exa 额度重置时间: 优先 Retry-After 头, 默认次月 1 日."""

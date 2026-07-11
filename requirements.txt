@@ -67,8 +67,6 @@ httpx==0.28.1  # 博查/Tavily/Exa/秘塔/CrossRef/GDELT/HackerNews/GitHub/Arxiv
 # === 网页抓取 (GPT Researcher 模式, 用户需求 12) ===
 beautifulsoup4==4.15.0
 lxml==6.1.1
-lxml-html-clean==0.4.5
-readability-lxml==0.8.4.1
 playwright==1.61.0  # JS 渲染抓取(可选, 镜像内安装 chromium)
 PyMuPDF==1.28.0  # PDF 抓取与解析
 trafilatura==2.1.0  # 网页内容提取, 轻量级去噪, LLM 友好 Markdown 输出
@@ -92,7 +90,6 @@ tiktoken==0.13.0  # Token 计数
 
 # === JSON 容错 (GPT Researcher 模式) ===
 json-repair==0.61.2
-json5==0.15.0
 
 # === 工具库 ===
 tenacity==9.1.4  # 重试

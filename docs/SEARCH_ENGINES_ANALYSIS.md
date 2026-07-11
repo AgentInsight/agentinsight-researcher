@@ -37,7 +37,7 @@
 
 1. **样本规模**：经 v1.0→v2.0→v2.1→v3.0 四轮迭代后保留 **30 款国内可用搜索引擎**（v2.1 的 48 款中移除 19 款需代理/不可访问/无国内镜像项；DuckDuckGo 经国内镜像 `s.ddg.titlecan.cn` 验证后恢复）。
 2. **国内可访问性实测结论**：
-   - ✅ 国内可直连：**23 款**（含项目已集成 15 款，DuckDuckGo 经镜像）
+   - ✅ 国内可直连：**23 款**（含项目已集成 22 款，DuckDuckGo 经镜像）
    - ⚠️ 受限访问：**7 款**（Yandex/Naver/Lens/Kaggle/Guardian/OpenAI SearchGPT/Andi/SciSpace，主站或文档站可达）
 3. **AI 搜索引擎国内可访问性实测**：Tavily/Exa/Consensus/Elicit/秘塔/夸克 国内可直连；Perplexity/You.com/Brave/Felo/Microsoft Copilot/Google AI Overviews 已移除（国内不可访问）。
 4. **中国本土搜索引擎重大发现**：**没有任何一家中国本土传统搜索引擎提供公开 Web Search REST API**（百度/搜狗/360/神马/头条/夸克/知乎/微信/CSDN/有道/百度学术/知网/万方/维普 均无）；唯一提供公开 API 的是 **博查搜索（Bocha）**，本项目已集成。
@@ -54,7 +54,7 @@
 
 | 维度 | 现状 | 评价 |
 |------|------|------|
-| 已集成数量 | 16 款（含 1 款建议移除） | ⚠️ 需清理 |
+| 已集成数量 | 22 款 | ✅ 已扩展 |
 | AI 搜索覆盖 | Tavily + Exa（实测国内可直连） | ✅ 已占两大生态位 |
 | 学术搜索覆盖 | arXiv + PubMed + Semantic Scholar + OpenAlex | ✅ 已覆盖核心四件套 |
 | 中文搜索覆盖 | Bocha（国内唯一公开 API）+ DuckDuckGo（经国内镜像） | ✅ 已集成 |
@@ -72,7 +72,7 @@
 ### 3.1 研究流程
 
 ```
-[1] 项目代码扫描 → 摸清已集成 16 款引擎
+[1] 项目代码扫描 → 摸清已集成 22 款引擎
         ↓
 [2] 4 个并行研究小组 → 各负责 1 类引擎
         ↓
@@ -436,7 +436,7 @@
 
 ## 八、项目集成现状与建议
 
-### 8.1 项目已集成 16 款引擎评估（含实测）
+### 8.1 项目已集成 22 款引擎评估（含实测）
 
 | # | 引擎 | 文件 | 实测国内可访问性 | 评估 | 建议 |
 |---|------|------|----------------|------|------|
@@ -456,6 +456,12 @@
 | 14 | serpapi | [searchers/serpapi.py](src/skills/researcher/searchers/serpapi.py) | 🟢 直连 | ✅ 多引擎 | 保留 |
 | 15 | serper | [searchers/serper_searcher.py](src/skills/researcher/searchers/serper_searcher.py) | 🟢 直连 | ✅ 最便宜 | 保留 |
 | 16 | tavily | [searchers/tavily.py](src/skills/researcher/searchers/tavily.py) | 🟢 直连 | ✅ SimpleQA 第一 | 保留并扩展 /research |
+| 17 | crossref | [searchers/crossref.py](src/skills/researcher/searchers/crossref.py) | 🟢 直连 | ✅ DOI 权威 | 保留 |
+| 18 | gdelt | [searchers/gdelt.py](src/skills/researcher/searchers/gdelt.py) | 🟢 直连 | ✅ 新闻事件库 | 保留 |
+| 19 | github | [searchers/github.py](src/skills/researcher/searchers/github.py) | 🟢 直连 | ✅ 代码搜索 | 保留 |
+| 20 | hackernews | [searchers/hackernews.py](src/skills/researcher/searchers/hackernews.py) | 🟢 直连 | ✅ 科技趋势 | 保留 |
+| 21 | metaso | [searchers/metaso.py](src/skills/researcher/searchers/metaso.py) | 🟢 直连 | ✅ 国内 AI 搜索 | 保留 |
+| 22 | unpaywall | [searchers/unpaywall.py](src/skills/researcher/searchers/unpaywall.py) | 🟢 直连 | ✅ OA 版本查找 | 保留 |
 
 ### 8.2 建议移除/清理
 
@@ -876,7 +882,7 @@ QUERY_TYPE_TO_SEARCHERS = {
 
 本研究由 12 个 AI 专家角色协同完成，经 WebFetch 实测验证和 4 轮迭代后保留 **30 款国内可用搜索引擎**（v2.1 的 48 款中移除 19 款需代理/不可访问/无国内镜像项；DuckDuckGo 经国内镜像验证后恢复）。核心结论：
 
-1. **项目已集成 16 款引擎**，但 Bing Search API 已退役需移除，Brave Search 国内不可访问需移除，移除后实际可用 14 款。
+1. **项目已集成 22 款引擎**（含 metaso/unpaywall/github/crossref/hackernews/gdelt 等新增引擎），Bing Search API 已退役、Brave Search 国内不可访问仍需关注。
 2. **国内合规首选博查（Bocha）**，是国内唯一公开 Web Search API，已集成。
 3. **AI 搜索 Tavily + Exa 已占两大生态位**，且实测国内可直连。
 4. **学术搜索七件套（OpenAlex/CrossRef/Semantic Scholar/arXiv/PubMed/CORE/Unpaywall）国内全部可直连**，建议补充 CORE 与 Unpaywall。

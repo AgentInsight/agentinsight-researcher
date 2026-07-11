@@ -25,14 +25,18 @@
     <Content Include="AGENTS.md" />
     <Content Include="pyproject.toml" />
     <Content Include="requirements.txt" />
+    <Content Include="requirements.in" />
+    <Content Include="requirements-dev.in" />
+    <Content Include="requirements-dev.txt" />
     <Content Include="server.py" />
     <Content Include=".env.template" />
     <Content Include=".gitignore" />
     <Content Include=".dockerignore" />
   </ItemGroup>
-  <!-- Docker 编排与构建脚本 (联网模式入仓; QA/离线模式由 .gitignore 排除) -->
+  <!-- Docker 编排与构建脚本 (联网模式入仓; QA/离线模式由 .gitignore 排除; SearXNG 镜像构建入仓) -->
   <ItemGroup>
     <Content Include="Dockerfile" />
+    <Content Include="Dockerfile.searxng" />
     <Content Include="docker-compose.yml" />
     <Content Include="docker-build.sh" />
   </ItemGroup>
@@ -40,7 +44,7 @@
   <ItemGroup>
     <Content Include="src\**\*.py" />
   </ItemGroup>
-  <!-- 脚本: 在线构建/数据库初始化 (QA/离线脚本由 .gitignore 排除) -->
+  <!-- 脚本: 在线构建/数据库初始化/SearXNG 与 uv 离线包预备 (QA/离线脚本由 .gitignore 排除) -->
   <ItemGroup>
     <Content Include="scripts\build-online.ps1" />
     <Content Include="scripts\init.sql" />
@@ -49,6 +53,10 @@
     <Content Include="scripts\prepare-nodejs-packages.sh" />
     <Content Include="scripts\prepare-playwright-chromium.ps1" />
     <Content Include="scripts\prepare-playwright-chromium.sh" />
+    <Content Include="scripts\prepare-searxng-packages.ps1" />
+    <Content Include="scripts\prepare-searxng-packages.sh" />
+    <Content Include="scripts\prepare-uv-packages.ps1" />
+    <Content Include="scripts\prepare-uv-packages.sh" />
   </ItemGroup>
   <!-- 前端测试页面 (AGENTS.md 第 14 章) -->
   <ItemGroup>
@@ -57,7 +65,6 @@
   <!-- 测试: 全量 Python 文件 (AGENTS.md 第 13 章测试分层) -->
   <ItemGroup>
     <Content Include="tests\**\*.py" />
-    <Content Include="tests\REPORT.md" />
   </ItemGroup>
   <!-- 评测: 全量 Python 文件 (AGENTS.md 第 10 章评测门禁) -->
   <ItemGroup>
@@ -84,6 +91,9 @@
     <Folder Include="src\common\" />
     <Folder Include="src\config\" />
     <Folder Include="src\config\researcher\" />
+    <Folder Include="src\config\researcher\prompts\" />
+    <Folder Include="src\config\researcher\prompts\chitchat\" />
+    <Folder Include="src\config\researcher\replies\" />
     <Folder Include="src\graph\" />
     <Folder Include="src\llm\" />
     <Folder Include="src\memory\" />

@@ -1,7 +1,7 @@
 """模型转换脚本: 将 bge-small-zh-v1.5 转为 ONNX INT8 格式.
 
 用法:
-    python scripts/convert_bge_small_zh_to_onnx.py --output ./models/bge-small-zh-v1.5-onnx
+    python scripts/convert_bge_small_zh_to_onnx.py --output ./packages/models/bge-small-zh-v1.5-onnx
 
 依赖:
     torch>=2.0
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         type=str,
-        default="./models/bge-small-zh-v1.5-onnx",
+        default="./packages/models/bge-small-zh-v1.5-onnx",
         help="输出目录",
     )
     parser.add_argument(

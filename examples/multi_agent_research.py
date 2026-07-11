@@ -102,6 +102,8 @@ def main() -> None:
                 sources.extend(srcs)
 
             # 工具调用 (MCP 工具触发时推送)
+            # 注意: 流式响应当前未推送 tool_calls 字段, 此为前瞻性代码,
+            # 工具调用次数可能显示为 0. 后端 _stream_research 未在 delta 中包含该字段.
             if tc := delta.get("tool_calls"):
                 tool_calls.extend(tc)
 

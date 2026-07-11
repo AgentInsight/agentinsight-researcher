@@ -31,7 +31,7 @@ copy .env.template .env   # Windows
 至少需要配置：
 - `AGENTINSIGHT_PUBLIC_KEY` / `AGENTINSIGHT_SECRET_KEY`（可观测性，必填）
 - `DEEPSEEK_API_KEY` 或 `ZHIPU_API_KEY`（LLM，至少一个）
-- `BOCHA_API_KEY` 或其他搜索引擎 Key（搜索，至少一个）
+- `BOCHA_API_KEY` 或其他搜索引擎 Key（搜索，至少一个；默认已配置 SearXNG 自托管元搜索 `SEARX_URL`，可不配置外部 Key）
 
 ### 3. 验证服务可用
 
@@ -111,6 +111,9 @@ python examples/openai_sdk_compatible.py
 ### 输出格式（`report_format` 字段）
 
 `markdown`（默认） / `html` / `pdf` / `docx` / `json`
+
+> 下载端点 `GET /v1/reports/{report_id}/download?format=` 支持 markdown/html/pdf/docx/json；
+> Publisher 层另支持 `latex`/`epub`（学术/电子书场景，仅经流式 `content` 推送，不提供下载端点）。
 
 ### 报告语言
 

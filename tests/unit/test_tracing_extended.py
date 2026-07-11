@@ -100,7 +100,11 @@ async def test_trace_agent_client_none_yields_noop(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 async def test_trace_generation_calls_sdk(fake_client: _FakeClient) -> None:
-    """trace_generation 传递 as_type="generation", model, model_parameters, usage_details, cost_details."""
+    """trace_generation 传递 as_type="generation", model, model_parameters.
+
+    PERF-OPT-004: usage_details 和 cost_details 不在创建时传入,
+    调用完成后由 llm/client.py span.update() 设置.
+    """
     tracer = AgentInsightTracer()
     async with tracer.trace_generation(
         name="test-gen",
@@ -118,8 +122,9 @@ async def test_trace_generation_calls_sdk(fake_client: _FakeClient) -> None:
     assert call["as_type"] == "generation"
     assert call["model"] == "deepseek/deepseek-chat"
     assert call["model_parameters"] == {"temperature": 0.7}
-    assert call["usage_details"] == {"prompt_tokens": 10}
-    assert call["cost_details"] == {"cost_usd": 0.001}
+    # PERF-OPT-004: usage_details 和 cost_details 不在创建时传入 (由 span.update 后续设置)
+    assert "usage_details" not in call
+    assert "cost_details" not in call
     assert call["version"] == "1.0"
 
 

@@ -104,7 +104,8 @@ QDRANT_API_KEY=sk-你的Qdrant密钥
 
 - 📊 **研究报告生成** — 支持 `basic_report` / `detailed_report` / `deep_research` 三种报告类型,输出 Markdown / HTML / PDF / DOCX / JSON 五种格式
 - 🔍 **混合 RAG 检索** — BM25 + 向量 + RRF 融合 + 可选 Rerank
-- 🌐 **中文优先多搜索引擎** — 博查/Tavily/Brave/Bing/Google/PubMed/Arxiv 等 15+ 数据源
+- 🌐 **中文优先多搜索引擎** — 22 个搜索源(博查/Tavily/Brave/Bing/Google/PubMed/Arxiv 等)
+- 🔎 **自托管 SearXNG 元搜索引擎** — 端口 8099,聚合 Bing/Baidu/Brave 等 22 个搜索源
 - 🤖 **多 Agent 协作** — Researcher → Writer → FactChecker → Reviewer → Reviser → Visualizer → Publisher 完整流水线
 - 🔧 **MCP 工具协议** — 支持 stdio/sse/streamable_http 三种传输,LLM 自动选工具
 - 👨‍💻 **人在回路审核** — WebSocket 实时推送研究计划,用户审核后才继续执行
@@ -193,7 +194,7 @@ docker compose -p agentinsight ps
 | 18 | `/` | GET | 匿名 | 前端测试页面(`ENABLE_TEST_PAGE=true`) |
 | 19 | `/docs` | GET | 匿名 | Swagger 文档(仅 `ENV=dev`) |
 
-> \* `SELF_HOST=True`(默认)时 token 可选,缺失降级 `DEFAULT_USER_ID`;`SELF_HOST=False` 时研究端点强制要求 Bearer Token + `org_id`/`project_id`。
+> \* `SELF_HOST=True`(默认)时 token 可选,缺失降级 IP-based UserId;`SELF_HOST=False` 时研究端点强制要求 Bearer Token + `org_id`/`project_id`。
 > \*\* WebSocket 在 `ENV=prod` 强制 Origin + JWT 校验;`ENV=dev` 可放宽。
 
 ---
@@ -1014,8 +1015,7 @@ curl -X POST ${BASE_URL}/v1/mcp/system/5/clone
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `SELF_HOST` | `True` | `True`=自托管(token 可选,降级 `DEFAULT_USER_ID`);`False`=云托管(强制 JWT + 点数校验) |
-| `DEFAULT_USER_ID` | `anonymous` | 匿名降级用户 ID |
+| `SELF_HOST` | `True` | `True`=自托管(token 可选,降级 IP-based UserId);`False`=云托管(强制 JWT + 点数校验) |
 | `ENV` | `dev` | `dev` / `prod`(prod 关闭 docs/openapi) |
 | `ENABLE_TEST_PAGE` | `dev=true / prod=false` | 是否挂载前端测试页面 |
 | `WEBSOCKET_ENABLED` | `False` | 是否启用 WebSocket 端点 |
@@ -1155,7 +1155,8 @@ This project defaults to a DeepSeek stack + Zhipu free tier plan, with a single 
 
 - 📊 **Research Report Generation** — Supports `basic_report` / `detailed_report` / `deep_research` report types, output in Markdown / HTML / PDF / DOCX / JSON formats
 - 🔍 **Hybrid RAG Retrieval** — BM25 + Vector + RRF fusion + optional Rerank
-- 🌐 **Chinese-first Multi-Search Engine** — Bocha/Tavily/Brave/Bing/Google/PubMed/Arxiv and 15+ data sources
+- 🌐 **Chinese-first Multi-Search Engine** — 22 search sources (Bocha/Tavily/Brave/Bing/Google/PubMed/Arxiv etc.)
+- 🔎 **Self-hosted SearXNG Meta Search Engine** — Port 8099, aggregating Bing/Baidu/Brave and 22 search sources
 - 🤖 **Multi-Agent Collaboration** — Researcher → Writer → FactChecker → Reviewer → Reviser → Visualizer → Publisher pipeline
 - 🔧 **MCP Tool Protocol** — Supports stdio/sse/streamable_http transports, LLM auto-selects tools
 - 👨‍💻 **Human-in-the-Loop Review** — WebSocket real-time push of research plans, continues only after user approval
@@ -1244,7 +1245,7 @@ docker compose -p agentinsight ps
 | 18 | `/` | GET | Anonymous | Frontend test page (when `ENABLE_TEST_PAGE=true`) |
 | 19 | `/docs` | GET | Anonymous | Swagger docs (only `ENV=dev`) |
 
-> \* `SELF_HOST=True` (default): token optional, degrades to `DEFAULT_USER_ID` if missing; `SELF_HOST=False`: research endpoint strictly requires Bearer Token + `org_id`/`project_id`.
+> \* `SELF_HOST=True` (default): token optional, degrades to IP-based UserId if missing; `SELF_HOST=False`: research endpoint strictly requires Bearer Token + `org_id`/`project_id`.
 > \*\* WebSocket forces Origin + JWT validation in `ENV=prod`; can be relaxed in `ENV=dev`.
 
 ---
@@ -2049,8 +2050,7 @@ All configurations are injected via `.env` + environment variables, no hardcodin
 
 | Config | Default | Description |
 |--------|---------|-------------|
-| `SELF_HOST` | `True` | `True`=self-hosted (token optional, degrades to `DEFAULT_USER_ID`); `False`=cloud-hosted (strict JWT + quota validation) |
-| `DEFAULT_USER_ID` | `anonymous` | Anonymous degraded user ID |
+| `SELF_HOST` | `True` | `True`=self-hosted (token optional, degrades to IP-based UserId);`False`=cloud-hosted (strict JWT + quota validation) |
 | `ENV` | `dev` | `dev` / `prod` (prod disables docs/openapi) |
 | `ENABLE_TEST_PAGE` | `dev=true / prod=false` | Whether to mount frontend test page |
 | `WEBSOCKET_ENABLED` | `False` | Whether to enable WebSocket endpoint |

@@ -4,7 +4,7 @@ AGENTS.md 第 14 章硬约束:
 - 测试页面统一调用 OpenAI 兼容端点 POST /v1/chat/completions, 请求体带 stream: true
 - 不推荐调用后端私有端点, 测试应只走对外 OpenAI 兼容接口
 - 流式响应用浏览器原生 fetch + ReadableStream 解析 SSE
-- 请求头 Authorization: Bearer <jwt_token> 可选 (空则降级 DEFAULT_USER_ID)
+- 请求头 Authorization: Bearer <jwt_token> 可选 (空则降级 IP-based UserId)
 
 API 契约 (src/api/routes.py):
 - POST /v1/chat/completions (stream=false) -> 200 + chat.completion + choices + usage

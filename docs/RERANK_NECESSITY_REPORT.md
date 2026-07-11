@@ -47,7 +47,7 @@ agentinsight-researcher 项目的 `AGENTS.md` 第 7 章将 Rerank 列为**硬约
 
 ## 二、AI 专家团队成员（12 位）
 
-> 本团队为虚拟专家团，对标 `REQUIREMENTS.md` 第二章 12 个开发角色，但本评估中各专家**针对 Rerank 必要性**形成独立立场。
+> 本团队为虚拟专家团，对标 `AGENTS.md` 开发角色，但本评估中各专家**针对 Rerank 必要性**形成独立立场。
 
 | # | 专家角色 | 立场倾向 | 核心关注点 |
 |---|---|---|---|
@@ -318,7 +318,7 @@ def _should_rerank(self, namespaces: list[str]) -> bool:
 新增 `evals/rag/run_ab_rerank.py`：
 - 同一评测集跑两次：`rerank_enabled=True` / `False`
 - 输出 RAGAS 三项指标对比表
-- 写入 `tests/REPORT.md` 作为门禁决策依据
+- 输出门禁决策依据
 
 ---
 
@@ -374,8 +374,7 @@ def _should_rerank(self, namespaces: list[str]) -> bool:
 - [src/rag/retriever.py — HybridRetriever 实现](src/rag/retriever.py)
 - [src/config/settings.py — Rerank 配置项](src/config/settings.py)
 - [docker-compose.yml — rerank 容器定义](docker-compose.yml)
-- [REQUIREMENTS.md — 项目需求规格](REQUIREMENTS.md)
-- [tests/REPORT.md — 测试报告](tests/REPORT.md)
+- [AGENTS.md — 项目执行规则](AGENTS.md)
 
 ### 10.2 网络参考资料
 

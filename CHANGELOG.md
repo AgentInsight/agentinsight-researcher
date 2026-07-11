@@ -67,15 +67,16 @@
 - HNSW 参数调优(`m=32`、`ef_construct=200`、Scalar INT8 量化)
 - Redis 缓存 + LRU 淘汰
 - 内容 hash 去重
+- 新增 FastEmbed 本地 Embeddings(bge-small-zh-v1.5,512 维)用于上下文压缩
 
 **搜索引擎矩阵**
-- 国内(CN):博查 Bocha(主)+ DuckDuckGo(兜底)
-- 国外(GLOBAL):Tavily、Brave、Bing、Google(serpapi)、Serper、Exa、SearchAPI.io、SearXNG、Custom
-- 学术(ACADEMIC):PubMed、Semantic Scholar、Arxiv、OpenAlex
+- 国内(CN):博查 Bocha(主)、秘塔 Metaso、DuckDuckGo(兜底)
+- 国外(GLOBAL):Tavily、Brave、Bing、Google、SerpApi、Serper、Exa、SearchAPI.io、SearXNG、Custom、HackerNews、GDELT、GitHub
+- 学术(ACADEMIC):PubMed、Semantic Scholar、Arxiv、OpenAlex、CrossRef、Unpaywall
 - 区域自动检测(中文字符比例 + 学术关键词)
 
 **抓取器矩阵**
-- 8 种抓取器:bs(默认)、playwright、nodriver、firecrawl、tavily_extract、arxiv_scraper、pymupdf、markitdown
+- 9 种抓取器:bs(默认)、playwright、nodriver、firecrawl、tavily_extract、arxiv_scraper、pymupdf、markitdown、trafilatura
 - 并行抓取(15 worker)+ 限流 + 图片筛选
 
 **工具协议**
@@ -101,6 +102,7 @@
 - Bearer JWT Token 可选认证
 - 调用 `GET https://agentinsight.goldebridge.com/api/user` 获取 user_id
 - 超时降级(5s)到 DEFAULT_USER_ID
+- 新增 IP-based 用户身份解析(无 JWT 网关场景的降级方案)
 - WebSocket Origin 校验 + JWT 校验(防 CSWSH)
 
 **安全合规**
@@ -111,7 +113,8 @@
 
 **部署**
 - 三套构建模式:QA 离线 / 生产联网 / 生产离线
-- 6 容器编排:agent + embeddings + qdrant + redis + postgres + 可选 rerank
+- 7 容器编排:agent + embeddings + qdrant + redis + postgres + searxng + 可选 rerank
+- 新增 SearXNG 自托管元搜索引擎容器(端口 8099),聚合 22 个搜索源
 - 多阶段 Docker 构建(python:3.12-slim,非 root 用户)
 - 启动时业务表幂等初始化(`CREATE TABLE IF NOT EXISTS`)
 - 短查询 + 离题种子向量预热
@@ -126,7 +129,7 @@
 
 **测试**
 - 五层测试:单元 / 功能 / API / 回归 / 端到端
-- 470+ 单元测试用例
+- 96 个单元测试用例
 - 完整 CI 流水线(构建 → 单元 → 容器栈 → 功能 → API → 回归 → e2e)
 
 #### 🔒 安全
@@ -211,15 +214,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - HNSW parameter tuning (`m=32`, `ef_construct=200`, Scalar INT8 quantization)
 - Redis cache + LRU eviction
 - Content hash deduplication
+- Added FastEmbed local Embeddings (bge-small-zh-v1.5, 512 dims) for context compression
 
 **Search Engine Matrix**
-- Domestic (CN): Bocha (primary) + DuckDuckGo (fallback)
-- Global (GLOBAL): Tavily, Brave, Bing, Google (serpapi), Serper, Exa, SearchAPI.io, SearXNG, Custom
-- Academic (ACADEMIC): PubMed, Semantic Scholar, Arxiv, OpenAlex
+- Domestic (CN): Bocha (primary), Metaso, DuckDuckGo (fallback)
+- Global (GLOBAL): Tavily, Brave, Bing, Google, SerpApi, Serper, Exa, SearchAPI.io, SearXNG, Custom, HackerNews, GDELT, GitHub
+- Academic (ACADEMIC): PubMed, Semantic Scholar, Arxiv, OpenAlex, CrossRef, Unpaywall
 - Auto region detection (Chinese character ratio + academic keywords)
 
 **Scraper Matrix**
-- 8 scrapers: bs (default), playwright, nodriver, firecrawl, tavily_extract, arxiv_scraper, pymupdf, markitdown
+- 9 scrapers: bs (default), playwright, nodriver, firecrawl, tavily_extract, arxiv_scraper, pymupdf, markitdown, trafilatura
 - Parallel scraping (15 workers) + rate limiting + image filtering
 
 **Tool Protocol**
@@ -245,6 +249,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Bearer JWT Token optional authentication
 - Call `GET https://agentinsight.goldebridge.com/api/user` to obtain user_id
 - Timeout degradation (5s) to DEFAULT_USER_ID
+- Added IP-based user identity resolution (fallback for scenarios without JWT gateway)
 - WebSocket Origin validation + JWT validation (CSWSH protection)
 
 **Security Compliance**
@@ -255,7 +260,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **Deployment**
 - Three build modes: QA offline / Production online / Production offline
-- 6-container orchestration: agent + embeddings + qdrant + redis + postgres + optional rerank
+- 7-container orchestration: agent + embeddings + qdrant + redis + postgres + searxng + optional rerank
+- Added SearXNG self-hosted meta search engine container (port 8099), aggregating 22 search sources
 - Multi-stage Docker build (python:3.12-slim, non-root user)
 - Idempotent business table initialization at startup (`CREATE TABLE IF NOT EXISTS`)
 - Short query + off-topic seed vector warmup
@@ -270,7 +276,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **Testing**
 - Five-tier testing: Unit / Functional / API / Regression / End-to-End
-- 470+ unit test cases
+- 96 unit test cases
 - Complete CI pipeline (build → unit → container stack → functional → API → regression → e2e)
 
 #### 🔒 Security

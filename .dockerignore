@@ -16,7 +16,6 @@ __pycache__/
 .vscode/
 .idea/
 *.md
-!REQUIREMENTS.md
 !AGENTS.md
 tests/
 evals/

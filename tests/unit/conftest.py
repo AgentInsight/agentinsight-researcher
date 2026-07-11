@@ -1,7 +1,7 @@
 """单元测试专用配置: SELF_HOST=True 绕过 JWT 强制校验.
 
 AGENTS.md 第 8 章:
-- self_host=True (自托管): JWT Token 可选, 不存在时降级 DEFAULT_USER_ID
+- self_host=True (自托管): JWT Token 可选, 不存在时降级 IP-based UserId
 - self_host=False (云托管): 强制校验 JWT Token, 不存在时返回 401
 
 单元测试不应依赖 JWT Token, 路由逻辑测试需要绕过认证.

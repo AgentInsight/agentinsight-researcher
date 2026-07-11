@@ -2,7 +2,7 @@
 
 AGENTS.md 第 8/11 章硬约束:
 - JWT 验证与 user_id 获取必须在 API 入口中间件完成
-- self_host=True (自托管): token 不存在或调用失败时降级 DEFAULT_USER_ID
+- self_host=True (自托管): token 不存在或调用失败时降级 IP-based UserId
 - self_host=False (云托管): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
 - 禁止将原始 JWT token 写入日志或持久化存储
 - 安全响应头中间件不可绕过

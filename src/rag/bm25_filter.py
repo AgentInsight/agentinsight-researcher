@@ -24,6 +24,7 @@ AGENTS.md 第 10 章: 检索节点必带 trace_retriever span (含 matched/candi
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Any
@@ -125,9 +126,11 @@ class BM25Filter:
                     )
                     return [str(d.get("content", "")) for d in documents[:max_results]]
 
-                # 2. jieba 分词 + 缓存
-                chunk_tokens = [self._get_tokens(c["content"]) for c in chunks]
-                query_tokens = self._get_tokens(query)
+                # 2. jieba 分词 + 缓存 (异步并行, 避免阻塞事件循环)
+                chunk_tokens = await asyncio.gather(
+                    *[self._get_tokens_async(c["content"]) for c in chunks]
+                )
+                query_tokens = await self._get_tokens_async(query)
 
                 if not query_tokens or not any(chunk_tokens):
                     span.update(
@@ -140,15 +143,9 @@ class BM25Filter:
                     )
                     return [str(d.get("content", "")) for d in documents[:max_results]]
 
-                # 3. BM25 语料构建 (显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题)
-                bm25 = BM25Okapi(
-                    chunk_tokens,
-                    k1=self.settings.bm25_k1,
-                    b=self.settings.bm25_b,
-                )
-
-                # 4. 打分 + 阈值过滤
-                scores = bm25.get_scores(query_tokens)
+                # 3. BM25 语料构建 + 打分 (CPU 密集操作放入线程池, 避免阻塞事件循环)
+                # 显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题
+                scores = await asyncio.to_thread(self._build_and_score, chunk_tokens, query_tokens)
                 scored: list[tuple[float, str]] = list(
                     zip(scores, [c["content"] for c in chunks], strict=False)
                 )
@@ -233,3 +230,42 @@ class BM25Filter:
             self._token_cache.pop(next(iter(self._token_cache)))
         self._token_cache[key] = tokens
         return tokens
+
+    async def _get_tokens_async(self, text: str) -> list[str]:
+        """异步 jieba 分词 (不阻塞事件循环).
+
+        将同步 jieba.cut 放入线程池执行, 复用实例级 LRU 缓存.
+        """
+        key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        cached = self._token_cache.get(key)
+        if cached is not None:
+            return cached
+        tokens = await asyncio.to_thread(self._tokenize_sync, text)
+        # FIFO 淘汰: 超过上限删除最旧 (dict 在 Python 3.7+ 保持插入顺序)
+        if len(self._token_cache) >= _TOKEN_CACHE_MAX_SIZE:
+            self._token_cache.pop(next(iter(self._token_cache)))
+        self._token_cache[key] = tokens
+        return tokens
+
+    def _tokenize_sync(self, text: str) -> list[str]:
+        """同步分词 (在线程池中执行)."""
+        import jieba
+
+        return list(jieba.cut(text))
+
+    def _build_and_score(
+        self,
+        chunk_tokens: list[list[str]],
+        query_tokens: list[str],
+    ) -> list[float]:
+        """同步构建 BM25 并打分 (在线程池中执行).
+
+        显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题.
+        """
+        bm25 = BM25Okapi(
+            chunk_tokens,
+            k1=self.settings.bm25_k1,
+            b=self.settings.bm25_b,
+        )
+        scores = bm25.get_scores(query_tokens)
+        return scores

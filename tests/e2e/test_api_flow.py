@@ -539,7 +539,7 @@ async def test_research_with_bearer_token() -> None:
     """验证带 Bearer JWT Token 的完整研究链路.
 
     AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
-    调用失败降级 DEFAULT_USER_ID.
+    调用失败降级 IP-based UserId.
     AGENTS.md 第 13 章: API 测试应包含携带 Bearer JWT Token 场景.
     """
     sid = _unique_session_id()
@@ -551,7 +551,7 @@ async def test_research_with_bearer_token() -> None:
             client, query, sid, token="test-token-e2e-flow"
         )
 
-    # 带 token 请求应能正常受理 (降级 DEFAULT_USER_ID), 不应 401/403
+    # 带 token 请求应能正常受理 (降级 IP-based UserId), 不应 401/403
     assert content, "带 Token 研究 content 为空"
     assert len(content) > 50, f"带 Token 研究内容过短: {len(content)} 字"
     assert finish_reason == "stop", f"带 Token 研究 finish_reason 非 stop: {finish_reason}"

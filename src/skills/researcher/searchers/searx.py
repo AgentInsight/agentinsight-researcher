@@ -13,11 +13,13 @@ P0-1 优化: 国内主搜索引擎, 替代 DuckDuckGo (平均 22.5s/次) 作为 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 import httpx
 
+from src.common.circuit_breaker import CircuitBreaker
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
@@ -40,6 +42,10 @@ class SearXNGSearcher(BaseSearcher):
         super().__init__(settings)
         # 拼接完整搜索端点: {searx_url}/search (去除尾部斜杠避免双斜杠)
         self._api_url = f"{self.settings.searx_url.rstrip('/')}/search"
+        # P0: 实例级连接池复用 (避免每次请求新建 client)
+        self._client = httpx.AsyncClient(timeout=self.settings.search_timeout)
+        self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
+        self._max_retries = 2  # P0: 限制 2 次避免请求堆积
 
     async def search(
         self,
@@ -64,52 +70,68 @@ class SearXNGSearcher(BaseSearcher):
         # 可选参数从 kwargs 读取 (默认 categories=general, time_range 不过滤)
         time_range = kwargs.get("time_range")
         categories = kwargs.get("categories", "general,science,it,news")
+
+        if self._circuit_breaker.is_open():
+            logger.warning("SearXNG 熔断器开启, 跳过搜索")
+            return []
+
         async with trace_tool(
             name="searxng-search",
             input={"query": query[:100], "max_results": max_results},
             metadata={"tool_name": "searxng", "region": "global"},
         ) as span:
-            try:
-                params: dict[str, Any] = {
-                    "q": query,
-                    "format": "json",
-                    "pageno": 1,
-                    "safesearch": 0,  # 关闭安全搜索过滤, 避免遗漏相关结果
-                    "language": "zh-CN",  # 中文优先, 提升国内查询召回质量
-                    "categories": categories,
-                }
-                # time_range 仅在显式传入时加入 (None 表示不过滤, 不传该参数)
-                if time_range:
-                    params["time_range"] = time_range
-                # P0 修复: 添加 X-Forwarded-For 头, 避免 SearXNG botdetection 警告
-                # (SearXNG ProxyFix 中间件检查此头, 缺失时记录 "X-Forwarded-For nor X-Real-IP header is set!")
-                headers = {
-                    "X-Forwarded-For": "127.0.0.1",
-                }
-                # timeout 从 settings 读取 (默认 10.0, P0-1 优化替代硬编码 15.0)
-                async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
-                    response = await client.get(self._api_url, params=params, headers=headers)
+            for attempt in range(self._max_retries + 1):
+                try:
+                    params: dict[str, Any] = {
+                        "q": query,
+                        "format": "json",
+                        "pageno": 1,
+                        "safesearch": 0,  # 关闭安全搜索过滤, 避免遗漏相关结果
+                        "language": "zh-CN",  # 中文优先, 提升国内查询召回质量
+                        "categories": categories,
+                    }
+                    # time_range 仅在显式传入时加入 (None 表示不过滤, 不传该参数)
+                    if time_range:
+                        params["time_range"] = time_range
+                    # P0 修复: 添加 X-Forwarded-For 头, 避免 SearXNG botdetection 警告
+                    # (SearXNG ProxyFix 中间件检查此头, 缺失时记录 "X-Forwarded-For nor X-Real-IP header is set!")
+                    headers = {
+                        "X-Forwarded-For": "127.0.0.1",
+                    }
+                    # P0: 实例级连接池复用 (不再每次新建 client)
+                    response = await self._client.get(self._api_url, params=params, headers=headers)
                     response.raise_for_status()
                     data = response.json()
 
-                results: list[dict[str, Any]] = []
-                # SearXNG 返回结构: {"results": [{"title": "", "url": "", "content": ""}]}
-                for item in data.get("results", [])[:max_results]:
-                    results.append(
-                        self._normalize_result(
-                            title=item.get("title", ""),
-                            url=item.get("url", ""),
-                            snippet=item.get("content", ""),
+                    results: list[dict[str, Any]] = []
+                    # SearXNG 返回结构: {"results": [{"title": "", "url": "", "content": ""}]}
+                    for item in data.get("results", [])[:max_results]:
+                        results.append(
+                            self._normalize_result(
+                                title=item.get("title", ""),
+                                url=item.get("url", ""),
+                                snippet=item.get("content", ""),
+                            )
                         )
-                    )
 
-                results = self._filter_by_domains(results, query_domains)
-                span.update(
-                    output={"results_count": len(results)},
-                    metadata={"tool_name": "searxng", "success": True},
-                )
-                return results
-            except Exception as e:  # noqa: BLE001
-                logger.warning("SearXNG 搜索失败: %s", e)
-                span.update(metadata={"tool_name": "searxng", "success": False, "error": str(e)})
-                return []
+                    results = self._filter_by_domains(results, query_domains)
+                    self._circuit_breaker.record_success()
+                    span.update(
+                        output={"results_count": len(results)},
+                        metadata={"tool_name": "searxng", "success": True},
+                    )
+                    return results
+                except Exception as e:  # noqa: BLE001
+                    self._circuit_breaker.record_failure()
+                    if attempt < self._max_retries:
+                        await asyncio.sleep(0.5 * (2**attempt))
+                        continue
+                    logger.warning("SearXNG 搜索失败 (重试 %d 次): %s", self._max_retries, e)
+                    span.update(
+                        metadata={"tool_name": "searxng", "success": False, "error": str(e)}
+                    )
+                    return []
+
+    async def close(self) -> None:
+        """释放实例级 httpx 客户端连接池."""
+        await self._client.aclose()

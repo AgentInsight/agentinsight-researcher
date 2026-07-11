@@ -152,10 +152,14 @@ jobs:
           AGENTINSIGHT_HOST=https://agent.goldebridge.com
 
           # ========== 用户身份 ==========
-          DEFAULT_USER_ID=ci-test-user
+          # DEFAULT_USER_ID 已移除, 改为 IP-based UserId (无 JWT Token 时按 IP 生成确定性 UserId)
           SELF_HOST=True
+          # 每日报告生成限额 (按 IP 限流, 默认 3 次/日, 仅报告成功才计数; 0=不限制)
+          IP_DAILY_REPORT_LIMIT=3
 
           # ========== 搜索引擎 API Key (占位符) ==========
+          # SearXNG 元搜索引擎 (自托管, 替代 DuckDuckGo 直连)
+          SEARX_URL=http://searxng:8099
           BOCHA_API_KEY=
           METASO_API_KEY=
           TAVILY_API_KEY=
@@ -168,6 +172,8 @@ jobs:
           UNPAYWALL_EMAIL=
 
           # ========== 抓取 ==========
+          # Agent 并发抓取数据的数量 (控制同时抓取多少个 URL)
+          MAX_SCRAPER_WORKERS=15
           FIRECRAWL_API_KEY=
 
           # ========== CORS ==========

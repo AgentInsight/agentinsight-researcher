@@ -38,10 +38,10 @@ if (-not $SkipBuild) {
 
 # ========== 2. 起栈 ==========
 Write-Host "[2/3] 启动容器栈 (联网模式)..." -ForegroundColor Yellow
-$composeArgs = @("-f", $ComposeFile, "down")
+$composeArgs = @("-p", "agentinsight", "-f", $ComposeFile, "down")
 docker @composeArgs 2>&1 | Out-Null
 
-$composeArgs = @("-f", $ComposeFile, "up", "-d")
+$composeArgs = @("-p", "agentinsight", "-f", $ComposeFile, "up", "-d")
 if ($EnableRerank) {
     $composeArgs += @("--profile", "rerank")
     Write-Host "  启用 rerank 容器 (profile: rerank)" -ForegroundColor DarkGray
@@ -55,7 +55,7 @@ $deadline = (Get-Date).AddMinutes(5)
 $healthy = $false
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 15
-    $status = docker compose -f $ComposeFile ps --format json 2>&1 | ConvertFrom-Json
+    $status = docker compose -p agentinsight -f $ComposeFile ps --format json 2>&1 | ConvertFrom-Json
     $allHealthy = $true
     foreach ($s in $status) {
         if ($s.Health -ne "healthy") {
@@ -75,12 +75,12 @@ Write-Host "========== 联网构建完成 ==========" -ForegroundColor Cyan
 if ($healthy) {
     Write-Host "所有容器健康!" -ForegroundColor Green
 } else {
-    Write-Host "部分容器未健康, 请检查 docker compose -f $ComposeFile ps" -ForegroundColor Red
+    Write-Host "部分容器未健康, 请检查 docker compose -p agentinsight -f $ComposeFile ps" -ForegroundColor Red
 }
 
 Write-Host ""
 Write-Host "容器状态:" -ForegroundColor Cyan
-docker compose -f $ComposeFile ps
+docker compose -p agentinsight -f $ComposeFile ps
 Write-Host ""
 Write-Host "访问地址: http://localhost:8066" -ForegroundColor Cyan
 Write-Host "健康检查: http://localhost:8066/health" -ForegroundColor Cyan

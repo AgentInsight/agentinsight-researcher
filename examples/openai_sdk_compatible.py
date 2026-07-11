@@ -58,14 +58,17 @@ def main() -> None:
 
     print(resp.choices[0].message.content)
 
-    # 扩展字段 (sources / report_id) 在 SDK 顶层属性上
+    # 扩展字段 (sources / report_id) 经 model_extra 字典访问
+    # OpenAI SDK 严格模式下扩展字段不在顶层属性, 需通过 model_extra 获取
     print("\n--- 扩展元信息 ---")
-    if hasattr(resp, "sources") and resp.sources:
-        print(f"检索来源 ({len(resp.sources)} 条):")
-        for i, src in enumerate(resp.sources, 1):
+    extra = resp.model_extra or {}
+    sources = extra.get("sources") or []
+    if sources:
+        print(f"检索来源 ({len(sources)} 条):")
+        for i, src in enumerate(sources, 1):
             print(f"  {i}. {src.get('title', '')} - {src.get('url', '')}")
-    if hasattr(resp, "report_id") and resp.report_id:
-        print(f"报告 ID: {resp.report_id}")
+    if extra.get("report_id"):
+        print(f"报告 ID: {extra['report_id']}")
     if resp.usage:
         print(f"Token 用量: {resp.usage.total_tokens}")
 

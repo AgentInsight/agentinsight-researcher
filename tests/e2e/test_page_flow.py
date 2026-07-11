@@ -336,7 +336,7 @@ def test_5_session_id_uuid_v4_format(page: Page):
 
 
 def test_6_no_token_anonymous_user():
-    """无 Bearer JWT Token 时后端降级 DEFAULT_USER_ID (AGENTS.md 第 8 章).
+    """无 Bearer JWT Token 时后端降级 IP-based UserId (AGENTS.md 第 8 章).
 
     测试页面 Token 输入框为空时, 请求头不发 Authorization, 后端按匿名用户处理.
     用流式请求只读首字即关闭, 避免等完整研究流程.
@@ -355,9 +355,9 @@ def test_6_no_token_anonymous_user():
         },
         timeout=httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0),
     ) as r:
-        # 不带 token 应能正常受理 (降级 DEFAULT_USER_ID), 不应 401/403
-        assert r.status_code != 401, "无 token 请求不应返回 401 (应降级 DEFAULT_USER_ID)"
-        assert r.status_code != 403, "无 token 请求不应返回 403 (应降级 DEFAULT_USER_ID)"
+        # 不带 token 应能正常受理 (降级 IP-based UserId), 不应 401/403
+        assert r.status_code != 401, "无 token 请求不应返回 401 (应降级 IP-based UserId)"
+        assert r.status_code != 403, "无 token 请求不应返回 403 (应降级 IP-based UserId)"
         # 读首字节即关闭 (验证端点接受请求)
         for line in r.iter_lines():
             if line:

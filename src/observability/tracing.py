@@ -282,8 +282,8 @@ class AgentInsightTracer:
             input=input,
             model=model,
             model_parameters=model_parameters,
-            usage_details=usage_details,
-            cost_details=cost_details,
+            # usage_details 和 cost_details 不在创建时传入
+            # 调用完成后由 llm/client.py span.update() 设置
             metadata=merged_metadata or None,
             version=version,
         )

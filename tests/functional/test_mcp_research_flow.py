@@ -16,7 +16,7 @@ AGENTS.md 第 13 章硬约束:
 前置条件:
 - 容器栈全部 healthy (agent/postgres/redis/qdrant/embeddings)
 - 用户已配置至少一个可用的 MCP 服务 (POST /v1/mcp 创建测试配置)
-- 默认走 SELF_HOST 模式 (无 JWT), user_id=DEFAULT_USER_ID
+- 默认走 SELF_HOST 模式 (无 JWT), user_id=IP-based UserId
 
 执行方式 (宿主机, 容器栈已 healthy):
     set AGENT_URL=http://127.0.0.1:8066
@@ -159,7 +159,7 @@ def test_mcp_config_crud_end_to_end() -> None:
 def test_mcp_config_data_isolation_per_user() -> None:
     """数据隔离: 不同 user_id 的 MCP 配置互不可见 (AGENTS.md 第 7 章).
 
-    SELF_HOST 模式下无 JWT 时所有请求使用 DEFAULT_USER_ID, 无法直接测试多用户隔离.
+    SELF_HOST 模式下无 JWT 时所有请求使用 IP-based UserId, 无法直接测试多用户隔离.
     本用例验证: 同一用户多次列出 MCP 配置结果一致 (单用户视角数据隔离正确).
     完整多用户隔离测试需在云托管模式 (SELF_HOST=False) + 不同 JWT token 下进行.
     """

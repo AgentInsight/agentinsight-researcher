@@ -79,7 +79,7 @@ COPY --chown=agent:agent . .
 
 # 生产联网模式: FastEmbed 模型在运行时自动从 HuggingFace 下载
 # 如需使用本地预下载模型, 在 docker-compose.yml 中挂载 bind mount:
-#   - ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
+#   - ./packages/models/bge-small-zh-v1.5-onnx:/app/packages/models/bge-small-zh-v1.5-onnx:ro
 
 USER agent
 

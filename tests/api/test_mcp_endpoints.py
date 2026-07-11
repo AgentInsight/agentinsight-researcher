@@ -488,7 +488,7 @@ def test_mcp_config_isolation_agent_id(
 ) -> None:
     """数据隔离: agent_id=agentinsight-researcher 自动注入, 配置归属于本 Agent.
 
-    SELF_HOST 模式下所有请求使用同一 DEFAULT_USER_ID, 本用例验证:
+    SELF_HOST 模式下所有请求使用同一 IP-based UserId, 本用例验证:
     - 创建的配置可被同一用户列出 (一致性)
     - 系统 MCP 与用户私有 MCP 分开列出 (is_system 隔离)
     """
@@ -516,7 +516,7 @@ def test_mcp_config_isolation_user_id_consistency(
 ) -> None:
     """数据隔离: 同一 user_id 多次请求结果一致.
 
-    SELF_HOST 模式无 JWT → DEFAULT_USER_ID, 所有请求视为同一用户.
+    SELF_HOST 模式无 JWT → IP-based UserId, 所有请求视为同一用户.
     本用例验证: 创建后, 多次列出都稳定返回该配置 (无随机性).
     """
     name = _unique_config_name()
