@@ -478,19 +478,53 @@ class ReportGenerator:
             )
 
             # 汇总并行结果 (按子主题顺序)
+            # V4-P1-04 优化 1+4+5: TOC 后置生成 + 失败章节标记 + 一致性校验
+            # 对标 GPTR detailed_report.py:197-205 (TOC 从实际 body 提取, 非独立生成)
             sections: list[str] = []
+            valid_topics_for_toc: list[str] = []
             all_sources: list[dict[str, Any]] = list(sources)
             skipped_count = 0
-            for section_md, sub_sources, skipped in section_results:
+            for topic, (section_md, sub_sources, skipped) in zip(
+                subtopics, section_results, strict=False
+            ):
                 if skipped:
                     skipped_count += 1
+                    logger.info("子主题 '%s' 被去重跳过, 从 TOC 移除", topic)
+                    continue
                 if sub_sources:
                     all_sources.extend(sub_sources)
                 if section_md:
-                    sections.append(section_md)
+                    if section_md == _SECTION_FAILURE_PLACEHOLDER:
+                        # 优化 4: 失败章节在 TOC 中标记, 正文中显示失败提示
+                        valid_topics_for_toc.append(f"{topic} (生成失败)")
+                        sections.append(f"### {topic}\n\n*此章节内容生成失败, 请重试。*")
+                    else:
+                        valid_topics_for_toc.append(topic)
+                        sections.append(section_md)
+                else:
+                    logger.warning("子主题 '%s' section_md 为空, 从 TOC 移除", topic)
+
+            # 优化 5: 一致性校验 (防御性编程)
+            if len(valid_topics_for_toc) != len(sections):
+                logger.warning(
+                    "TOC 条目数 (%d) 与 sections 数 (%d) 不一致, 可能存在内容缺失",
+                    len(valid_topics_for_toc),
+                    len(sections),
+                )
+                valid_topics_for_toc = valid_topics_for_toc[: len(sections)]
+
+            # 空章节告警
+            if len(sections) < len(subtopics):
+                missing = len(subtopics) - len(sections)
+                logger.warning(
+                    "detailed_report 有 %d/%d 个子主题被跳过 (去重/失败), 报告可能不完整",
+                    missing,
+                    len(subtopics),
+                )
 
             # 步骤 5: TOC + 引言 + 正文 + 结论 + 引用拼接
-            toc = self._generate_toc(subtopics)
+            # 优化 1: TOC 只含有效子主题 (对标 GPTR TOC 后置生成)
+            toc = self._generate_toc(valid_topics_for_toc)
             conclusion = await self._write_conclusion(
                 query,
                 sections,
@@ -615,11 +649,13 @@ class ReportGenerator:
                 sub_contexts = []
                 sub_sources = []
 
-        # 复用主研究上下文 (优先), 不足时用嵌套搜索结果补充
+        # V4-P1-04 优化 2: 每个子主题使用独立 sub_context (对标 GPTR 串行设计)
+        # 从 combined_context 中用 BM25 检索与 topic 相关的片段,
+        # 而非整体复用, 避免并行场景下所有子主题 embedding 必然相似导致去重误判
         if sub_contexts:
             sub_context = "\n\n---\n\n".join(sub_contexts)
         elif combined_context:
-            sub_context = combined_context
+            sub_context = self._extract_topic_context(topic, combined_context)
         else:
             sub_context = ""
         if len(sub_context) > max_context_chars:
@@ -629,22 +665,27 @@ class ReportGenerator:
         # 锁外: compute_embedding 完成网络 I/O (embed_texts), 不持锁保持并行度
         # 锁内: check_and_update 做 numpy 相似度比对 + 更新内部状态 (同步操作)
         # 旧版将 should_keep 整体放锁内, embedding 网络调用使并行退化为串行
+        # V4-P1-04 优化 3: 使用 check_and_update_partial 只丢弃相似 chunk, 保留差异部分
         try:
             chunks, content_embs = await written_compressor.compute_embedding(sub_context)
             async with dedup_lock:
-                keep = written_compressor.check_and_update(chunks, content_embs)
+                keep, filtered_context = written_compressor.check_and_update_partial(
+                    chunks, content_embs
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("子主题 '%s' 去重检查失败, 保留内容: %s", topic, e)
             keep = True
+            filtered_context = sub_context
 
         if not keep:
             logger.info("子主题 '%s' 内容与已写章节高度相似, 跳过", topic)
             return None, sub_sources, True
 
         # 3. 写子主题章节 (V4-P1-03: _write_section 内部已含 try/except + 重试)
+        # 优化 3: 使用过滤后的 context (只含不相似 chunk), 避免重复内容
         section_md = await self._write_section(
             topic,
-            sub_context,
+            filtered_context,
             references,
             role_persona=role_persona,
             tone=tone,
@@ -653,6 +694,72 @@ class ReportGenerator:
             language=language,
         )
         return section_md, sub_sources, False
+
+    def _extract_topic_context(self, topic: str, combined_context: str) -> str:
+        """V4-P1-04 优化 2: 从 combined_context 中提取与 topic 相关的片段.
+
+        用 BM25 关键词匹配检索相关片段, 而非整体复用 combined_context,
+        避免并行场景下所有子主题 embedding 必然相似导致去重误判.
+
+        对标 GPTR 串行设计: GPTR 用 for 循环串行处理子主题, 每个子主题独立研究;
+        本项目用 asyncio.gather 并行, 通过 BM25 检索为每个子主题构造独立 sub_context,
+        使 embedding 不会必然相似.
+
+        Args:
+            topic: 子主题文本 (用于 BM25 打分)
+            combined_context: 主研究合并上下文
+
+        Returns:
+            与 topic 最相关的片段 (Top-3, 按 BM25 分数降序拼接).
+            combined_context 过短或分词失败时降级返回原文.
+        """
+        if not combined_context or not combined_context.strip():
+            return ""
+        # 上下文过短时无需检索, 直接返回
+        if len(combined_context) < 500:
+            return combined_context
+
+        try:
+            # 1. 分块 (复用 embeddings_filter 的 recursive_split, chunk_size=500)
+            from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
+
+            chunks = recursive_split(
+                combined_context,
+                separators=DEFAULT_SEPARATORS,
+                chunk_size=500,
+                chunk_overlap=50,
+            )
+            if len(chunks) <= 1:
+                return combined_context
+
+            # 2. jieba 分词
+            import jieba
+
+            query_tokens = list(jieba.cut_for_search(topic))
+            query_tokens = [t for t in query_tokens if t.strip()]
+            chunk_tokens = [[t for t in jieba.cut_for_search(c) if t.strip()] for c in chunks]
+
+            if not query_tokens or not any(chunk_tokens):
+                return combined_context
+
+            # 3. BM25 打分
+            from rank_bm25 import BM25Okapi
+
+            bm25 = BM25Okapi(chunk_tokens)
+            scores = bm25.get_scores(query_tokens)
+
+            # 4. 取 Top-3 相关片段 (分数 > 0)
+            scored = list(zip(scores, chunks, strict=False))
+            scored = [(s, c) for s, c in scored if s > 0]
+            if not scored:
+                # 无相关片段, 降级返回原文前 2000 字符
+                return combined_context[:2000]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_chunks = [c for _, c in scored[:3]]
+            return "\n\n".join(top_chunks)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BM25 检索 topic context 失败, 降级用原文: %s", e)
+            return combined_context
 
     async def _generate_subtopics(
         self,

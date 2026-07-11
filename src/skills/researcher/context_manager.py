@@ -877,6 +877,86 @@ class WrittenContentCompressor:
         self._written_chunks.extend(chunks)
         return True
 
+    def check_and_update_partial(
+        self,
+        chunks: list[str],
+        content_embs: list[list[float]],
+    ) -> tuple[bool, str]:
+        """V4-P1-04 优化 3: 跨章节语义去重 (只丢弃相似 chunk, 保留差异部分).
+
+        对标 GPTR 串行去重: GPTR 串行处理子主题, 每个参考已写章节避免重复;
+        本项目并行处理, 旧版"任意 chunk 相似即整篇丢弃"过于激进,
+        导致子主题间有部分相似内容时整篇被丢弃 (TOC 有标题但正文无内容).
+
+        新策略:
+        - 所有 chunk 都相似: 整篇丢弃 (返回 (False, ""))
+        - 部分 chunk 相似: 只保留不相似的 chunk (返回 (True, filtered_content))
+        - 无相似 chunk: 全部保留 (返回 (True, original_content))
+
+        Args:
+            chunks: 分块后的文本列表 (来自 compute_embedding)
+            content_embs: 对应的 embedding 列表 (来自 compute_embedding)
+
+        Returns:
+            (keep, content):
+            - keep=False, content="": 整篇丢弃
+            - keep=True, content=filtered_content: 部分保留
+            - keep=True, content=original_content: 全部保留
+        """
+        # compute_embedding 失败时返回 ([], []), 此处降级保留
+        if not chunks or not content_embs:
+            return True, "\n\n".join(chunks) if chunks else ""
+
+        original_content = "\n\n".join(chunks)
+
+        # 首次写入: 直接记录所有 chunks 的 embedding, 无需比对
+        if not self._written_embeddings:
+            self._written_embeddings.extend(content_embs)
+            self._written_chunks.extend(chunks)
+            return True, original_content
+
+        # P4 修复: numpy 矩阵运算替代双重 for 循环
+        try:
+            sim_matrix = ContextManager._cosine_similarity_batch(
+                content_embs,
+                self._written_embeddings,
+            )
+        except ValueError:
+            # 维度不匹配 (如不同 embedding 模型), 降级保留并记录
+            self._written_embeddings.extend(content_embs)
+            self._written_chunks.extend(chunks)
+            return True, original_content
+        if sim_matrix.size == 0:
+            # 矩阵为空 (维度不匹配等), 降级保留并记录
+            self._written_embeddings.extend(content_embs)
+            self._written_chunks.extend(chunks)
+            return True, original_content
+
+        # 每个 chunk 与所有已写入 chunks 的最高相似度
+        max_sims = np.max(sim_matrix, axis=1)
+        similar_mask = max_sims >= self.threshold
+
+        # 所有 chunk 都相似: 整篇丢弃
+        if bool(np.all(similar_mask)):
+            return False, ""
+
+        # 部分 chunk 相似: 只保留不相似的 chunk
+        keep_indices = [i for i, is_sim in enumerate(similar_mask) if not is_sim]
+        if len(keep_indices) < len(chunks):
+            # 有部分相似 chunk 被过滤
+            keep_chunks = [chunks[i] for i in keep_indices]
+            keep_embs = [content_embs[i] for i in keep_indices]
+            # 只记录不相似 chunk 的 embedding
+            self._written_embeddings.extend(keep_embs)
+            self._written_chunks.extend(keep_chunks)
+            filtered_content = "\n\n".join(keep_chunks)
+            return True, filtered_content
+
+        # 无相似 chunk: 全部保留
+        self._written_embeddings.extend(content_embs)
+        self._written_chunks.extend(chunks)
+        return True, original_content
+
     async def compute_embedding_batch(
         self,
         contents: list[str],

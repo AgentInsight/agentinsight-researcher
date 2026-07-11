@@ -27,7 +27,9 @@ class AgentError(Exception):
     code: str = "agent_error"
     http_status: int = 500
 
-    def __init__(self, message: str = "", *, code: str | None = None, http_status: int | None = None) -> None:
+    def __init__(
+        self, message: str = "", *, code: str | None = None, http_status: int | None = None
+    ) -> None:
         super().__init__(message)
         if code is not None:
             self.code = code

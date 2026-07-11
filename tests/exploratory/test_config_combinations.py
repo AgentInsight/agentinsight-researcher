@@ -86,9 +86,23 @@ def _make_context_manager(
     ):
         cm = ContextManager(settings)
     # 替换 _written_compressor 为 mock (避免触发真实 embedding 调用)
+    # OPT-005: compute_embedding_batch 是 async 方法 (被 _post_filter_compress await),
+    # 必须用 AsyncMock; check_and_update_batch 是 sync 方法, 返回 list[bool].
+    # 两者返回形状需与 WrittenContentCompressor 实现一致 (见 context_manager.py:954/1033).
     cm._written_compressor = MagicMock()
     cm._written_compressor.should_keep = AsyncMock(return_value=True)
     cm._written_compressor.reset = MagicMock()
+    # 批量计算 embedding: 每个 content 视为 1 个 chunk, 返回 (all_chunks, all_embs)
+    cm._written_compressor.compute_embedding_batch = AsyncMock(
+        side_effect=lambda contents: (
+            [[c] for c in contents],
+            [[[0.1] * 768] for _ in contents],
+        ),
+    )
+    # 批量判断保留: 全部保留 (True), 使 deduped 保留所有原始 chunk
+    cm._written_compressor.check_and_update_batch = MagicMock(
+        side_effect=lambda all_chunks, all_embs: [True] * len(all_chunks),
+    )
     return cm
 
 

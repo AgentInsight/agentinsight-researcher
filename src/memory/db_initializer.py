@@ -89,7 +89,9 @@ async def init_database(settings: Settings | None = None) -> bool:
             # P2-3: 按分号拆分逐条执行, 独立事务隔离错误
             # 原 conn.execute(sql) 在非 autocommit 模式下隐式开启事务,
             # 中间失败会回滚全部已执行的 DDL. 拆分后每条独立执行.
-            statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+            statements = [
+                s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")
+            ]
             failed_count = 0
             for stmt in statements:
                 try:

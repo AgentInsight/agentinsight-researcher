@@ -264,12 +264,14 @@ def test_empty_bearer_token_treated_as_no_token() -> None:
     import json as _json
 
     session_id = f"test_sec_empty_{uuid.uuid4().hex[:8]}"
-    body = _json.dumps({
-        "model": "agentinsight-researcher",
-        "messages": [{"role": "user", "content": "你好"}],
-        "stream": False,
-        "session_id": session_id,
-    })
+    body = _json.dumps(
+        {
+            "model": "agentinsight-researcher",
+            "messages": [{"role": "user", "content": "你好"}],
+            "stream": False,
+            "session_id": session_id,
+        }
+    )
     conn = http.client.HTTPConnection("127.0.0.1", 8066, timeout=60.0)
     try:
         conn.request(

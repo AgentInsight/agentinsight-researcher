@@ -537,14 +537,21 @@ class ResearchConductor:
         )
 
         # 3. 拼接为分章节报告
+        # V4-P1-04 优化 6: 失败/空 context 跳过时同步移除 subtopics 条目
+        # 避免 sub_queries 含失败子主题但 contexts 不含, 导致 TOC 与正文不一致
         all_contexts: list[str] = []
         all_sources: list[dict[str, Any]] = []
+        valid_subtopics: list[str] = []
         for topic, section in zip(subtopics, sections, strict=False):
             if isinstance(section, Exception):
-                logger.warning("子主题 '%s' 研究失败: %s", topic, section)
+                logger.warning("子主题 '%s' 研究失败, 从列表移除: %s", topic, section)
                 continue
             section = cast(dict[str, Any], section)
             ctx = section.get("context", "")
+            if not ctx:
+                logger.warning("子主题 '%s' context 为空, 从列表移除", topic)
+                continue
+            valid_subtopics.append(topic)
             all_contexts.append(f"## {topic}\n\n{ctx}")
             if section.get("sources"):
                 all_sources.extend(section["sources"])
@@ -553,7 +560,7 @@ class ResearchConductor:
         if uploaded_files_context:
             all_contexts.extend(uploaded_files_context)
         return {
-            "sub_queries": subtopics,
+            "sub_queries": valid_subtopics,
             "contexts": all_contexts,
             "sources": all_sources,
             "visited_urls": {s["url"] for s in all_sources if s.get("url")},

@@ -94,13 +94,9 @@ async def test_warmup_failure_caught_by_warmup_function(
         # 模拟 server.py _warmup_graph 的 try/except 逻辑
         try:
             await _get_graph()
-            logging.getLogger("server").info(
-                "LangGraph 研究图已预热 (全局单例, QPS 预期 +44%)"
-            )
+            logging.getLogger("server").info("LangGraph 研究图已预热 (全局单例, QPS 预期 +44%)")
         except Exception as e:  # noqa: BLE001
-            logging.getLogger("server").warning(
-                "图预热失败 (不阻断启动, 首次请求时重试): %s", e
-            )
+            logging.getLogger("server").warning("图预热失败 (不阻断启动, 首次请求时重试): %s", e)
 
     # 构建失败, _compiled_graph 仍为 None
     assert routes_mod._compiled_graph is None
