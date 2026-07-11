@@ -5,7 +5,7 @@
 - _process_sub_query(): 搜索 -> 抓取 -> 压缩流程
 - conduct_research(): 聚合多个子查询的上下文
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务
+单元测试不依赖外部服务
 (LLM/Searchers/Scrapers/ContextManager 全部 mock).
 """
 

@@ -2,7 +2,7 @@
 
 验证 Markdown → LaTeX / EPUB / JSON / DOCX / HTML 转换逻辑,
 不依赖外部服务 (LLM / 文件系统).
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

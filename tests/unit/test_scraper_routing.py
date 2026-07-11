@@ -7,7 +7,7 @@
 - enable_fallback / min_content_length 边界控制
 - best_content 回退 (三级全部内容不足时取最长)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有 scraper 类与 get_settings 全部 mock, 不实际网络请求.
 """
 

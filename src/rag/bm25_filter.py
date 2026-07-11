@@ -18,8 +18,8 @@
   * 总 chunk 数 <= 30 → 直接返回 BM25 结果 (跳过 Embeddings)
   * 总 chunk 数 > 30 → FastEmbed 从 Top-50 中再选 Top-20 (精排, 本地 bge-small-zh)
 
-AGENTS.md 第 7 章: BM25 用 rank-bm25+jieba (已声明, 零新依赖).
-AGENTS.md 第 10 章: 检索节点必带 trace_retriever span (含 matched/candidate_count/retriever_type/top_score).
+BM25 用 rank-bm25+jieba (已声明, 零新依赖).
+检索节点必带 trace_retriever span (含 matched/candidate_count/retriever_type/top_score).
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class BM25Filter:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         # 实例级分词缓存 (不直接调 HybridRetriever._get_tokens, 避免反向依赖 rag/retriever.py)
-        # AGENTS.md 第 3 章: rag/ 内部模块尽量不互相 import
+        # rag/ 内部模块尽量不互相 import
         self._token_cache: dict[str, list[str]] = {}
 
     async def filter(

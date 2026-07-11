@@ -10,7 +10,7 @@
 - 缓存读取异常降级
 - 缓存写入异常不阻断
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (Redis / Searcher 全部 mock).
+单元测试不依赖外部服务 (Redis / Searcher 全部 mock).
 """
 
 from __future__ import annotations

@@ -12,11 +12,11 @@
     revision 子图: START → reviewer → (accept → END | revise → reviser)
                    reviser → reviewer
 
-守卫 (AGENTS.md 第 5 章: max_iterations 为硬上限):
+守卫 (max_iterations 为硬上限):
 - fact_checker revise → writer: create_fact_check_guard(graph_max_iterations)
 - reviewer revise → reviser: create_revision_guard(max_revisions)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (use_checkpointer=False 跳过 Postgres).
+单元测试不依赖外部服务 (use_checkpointer=False 跳过 Postgres).
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ class TestBuildMultiAgentGraph:
     async def test_build_researcher_graph_max_iterations_guard(self) -> None:
         """验证 graph_max_iterations 守卫正确传递给 create_fact_check_guard.
 
-        AGENTS.md 第 5 章: max_iterations 为硬上限, 不可软超时.
+        max_iterations 为硬上限, 不可软超时.
         iteration_count 由 fact_checker 节点累加, 达上限强制 accept.
         """
         settings = Settings(_env_file=None, graph_max_iterations=7)

@@ -1,6 +1,6 @@
 """Researcher Supervisor (多 Agent 协作).
 
-AGENTS.md 第 5 章: 多 Agent 协作限 Supervisor 模式.
+多 Agent 协作限 Supervisor 模式.
 Supervisor 决策下一个执行的 Agent, 含 max_iterations 守卫.
 """
 
@@ -28,7 +28,7 @@ class ResearcherSupervisor:
         Returns:
             "researcher" | "reviewer" | "writer" | "publisher" | "END"
         """
-        # max_iterations 守卫 (AGENTS.md 第 5 章)
+        # max_iterations 守卫
         iter_count = state.get("iteration_count", 0)
         if iter_count >= self.settings.graph_max_iterations:
             logger.warning(

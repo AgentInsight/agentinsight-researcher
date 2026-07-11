@@ -1,7 +1,7 @@
 """单元测试: 可观测性 tracing 封装.
 
 验证 6 类 trace_xxx 在 SDK 不可用时降级为 _NoopSpan.
-AGENTS.md 第 10 章: SDK 初始化失败时, 所有 trace_xxx yield _NoopSpan.
+SDK 初始化失败时, 所有 trace_xxx yield _NoopSpan.
 """
 
 from __future__ import annotations

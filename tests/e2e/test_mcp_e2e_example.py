@@ -1,6 +1,6 @@
 """端到端测试: MCP 调用示例 (用户特别要求).
 
-AGENTS.md 第 9/13/14 章硬约束:
+测试约定:
 - e2e 必须在容器栈 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - MCP 工具配置存储在 PostgreSQL mcp_configs 表 (按 agent_id + user_id 隔离)
@@ -34,7 +34,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # e2e 测试超时 600s (完整研究 5-10 分钟)
@@ -45,7 +45,7 @@ MCP_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (测试数据隔离: session_id=test_*)."""
     return f"test_e2e_mcp_{uuid.uuid4().hex[:12]}"
 
 
@@ -117,7 +117,7 @@ async def cleanup_mcp_configs():
 async def test_mcp_stdio_transport_e2e(cleanup_mcp_configs: list[int]) -> None:
     """stdio 传输模式完整示例: 创建 + 测试 + 清理 (含 command + args + env_vars).
 
-    AGENTS.md 第 9 章: MCP 传输模式 stdio (本地模式), 通过 stdin/stdout 与本地进程通信.
+    MCP 传输模式 stdio (本地模式), 通过 stdin/stdout 与本地进程通信.
     MCP 配置 (mcp_routes.py): stdio 模式 command 必填, server_url 可选.
 
     流程:
@@ -190,7 +190,7 @@ async def test_mcp_stdio_transport_e2e(cleanup_mcp_configs: list[int]) -> None:
 async def test_mcp_sse_transport_e2e(cleanup_mcp_configs: list[int]) -> None:
     """sse 传输模式完整示例: 创建 + 测试 + 清理.
 
-    AGENTS.md 第 9 章: MCP 传输模式 sse (远程模式), 通过 SSE 连接远程 HTTP 服务器.
+    MCP 传输模式 sse (远程模式), 通过 SSE 连接远程 HTTP 服务器.
     MCP 配置 (mcp_routes.py): sse 模式 server_url 必填, command 不需要.
 
     流程:
@@ -251,8 +251,8 @@ async def test_mcp_research_flow_with_tool_call(
 ) -> None:
     """/v1/chat/completions 触发研究 → MCP 工具调用 → 结果出现在报告中.
 
-    AGENTS.md 第 9 章: 运行时由 mcp_coordinator.py 加载用户启用配置并经 LLM 智能选工具.
-    AGENTS.md 第 13 章: e2e 应覆盖完整链路: 提问 → 检索 → 工具调用 → 流式响应.
+    运行时由 mcp_coordinator.py 加载用户启用配置并经 LLM 智能选工具.
+    e2e 应覆盖完整链路: 提问 → 检索 → 工具调用 → 流式响应.
 
     流程:
     1. 创建 MCP 配置 (不可达, enabled=False → 不影响研究流程)
@@ -320,7 +320,7 @@ async def test_mcp_multi_server_concurrent(
 ) -> None:
     """多 MCP Server 并发调用: 创建多个配置 → 并发测试 → 验证独立结果.
 
-    AGENTS.md 第 9 章: MCP_SERVERS 注册行业专用工具服务器, mcp_coordinator.py
+    MCP_SERVERS 注册行业专用工具服务器, mcp_coordinator.py
     让 LLM 自动选工具.
 
     流程:
@@ -379,7 +379,7 @@ async def test_mcp_multi_server_concurrent(
 async def test_mcp_cache_cross_session_reuse() -> None:
     """同一 query 不同 session_id 时 fast 策略缓存命中.
 
-    AGENTS.md 第 6/7 章: 会话隔离键为 thread_id, 会话间状态通过 Checkpointer 隔离.
+    会话隔离键为 thread_id, 会话间状态通过 Checkpointer 隔离.
     研究结果缓存 (fast 策略) 应跨会话复用, 减少重复计算.
 
     流程:

@@ -1,6 +1,6 @@
 """冒烟测试: 核心模块可导入 + 核心函数可调用.
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 冒烟测试只验证核心模块的导入性与基本可实例化性, 不深入业务逻辑:
 - Settings SSOT 加载
 - LLMClient (LiteLLM 网关) 实例化
@@ -36,13 +36,13 @@ def test_settings_instantiable_without_env() -> None:
     from src.config.settings import Settings
 
     settings = Settings(_env_file=None)
-    # 默认值检查 (AGENTS.md 第 1 章: agent_name=agentinsight-researcher)
+    # 默认值检查 (agent_name=agentinsight-researcher)
     assert settings.agent_name == "agentinsight-researcher"
-    # 默认 LLM 三级分层 (AGENTS.md 第 9 章)
+    # 默认 LLM 三级分层
     assert settings.fast_llm
     assert settings.smart_llm
     assert settings.strategic_llm
-    # Qdrant 默认配置 (AGENTS.md 第 7 章)
+    # Qdrant 默认配置
     assert settings.qdrant_collection == "agents"
     assert settings.qdrant_vector_size == 768
 
@@ -116,7 +116,7 @@ def test_embeddings_generate_point_id_static() -> None:
     """验证 EmbeddingsClient.generate_point_id 静态方法可调用 (uuid5 幂等)."""
     from src.rag.embeddings import EmbeddingsClient
 
-    # 同一输入应生成相同 id (uuid5 幂等, AGENTS.md 第 7 章)
+    # 同一输入应生成相同 id (uuid5 幂等)
     id1 = EmbeddingsClient.generate_point_id("ns1", "content")
     id2 = EmbeddingsClient.generate_point_id("ns1", "content")
     id3 = EmbeddingsClient.generate_point_id("ns2", "content")
@@ -293,7 +293,7 @@ def test_skills_report_generator_importable() -> None:
 def test_server_app_importable() -> None:
     """验证 server.py 可导入 (FastAPI app 实例).
 
-    AGENTS.md 第 12 章: server.py 为入口, CMD ["python", "server.py"].
+    server.py 为入口, CMD ["python", "server.py"].
     本测试仅验证模块可导入, 不实际启动服务 (避免触发 lifespan).
     """
     import server

@@ -1,6 +1,5 @@
 """性能测试: 端点延迟 (GET 类 + 短查询首块 + 研究查询首块).
 
-AGENTS.md 第 13 章硬约束:
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码
 - 测试数据隔离: session_id=test_perf_*
@@ -38,7 +37,7 @@ LATENCY_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id(prefix: str = "perf_latency") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -67,7 +66,7 @@ def _chat_payload(
 def test_health_endpoint_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 GET /health 延迟 < 100ms (无 LLM 调用, 仅健康检查).
 
-    AGENTS.md 第 12 章: agent 容器健康检查 GET /health.
+    agent 容器健康检查 GET /health.
     """
     threshold_ms = perf_thresholds["health_ms"]
     with make_http_client(timeout=LATENCY_TIMEOUT) as client:
@@ -98,7 +97,7 @@ def test_models_endpoint_latency(agent_url: str, perf_thresholds: dict[str, floa
 def test_mcp_system_list_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 GET /v1/mcp/system 延迟 < 500ms (Postgres 查询, 无 LLM 调用).
 
-    AGENTS.md 第 7/9 章: MCP 配置按 agent_id 隔离, 系统公用 MCP 可查看.
+    MCP 配置按 agent_id 隔离, 系统公用 MCP 可查看.
     """
     threshold_ms = perf_thresholds["mcp_system_ms"]
     with make_http_client(timeout=LATENCY_TIMEOUT) as client:
@@ -116,7 +115,7 @@ def test_mcp_system_list_latency(agent_url: str, perf_thresholds: dict[str, floa
 def test_agent_discovery_latency(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 GET /.well-known/agent-discovery.json 延迟 < 200ms (静态元信息, 无 LLM 调用).
 
-    AGENTS.md 第 11 章: 公开发现端点, 无需鉴权.
+    公开发现端点, 无需鉴权.
     """
     threshold_ms = perf_thresholds["agent_discovery_ms"]
     with make_http_client(timeout=LATENCY_TIMEOUT) as client:

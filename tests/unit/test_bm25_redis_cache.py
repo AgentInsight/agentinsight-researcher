@@ -7,8 +7,8 @@
 - _bm25_version_key / _bm25_corpus_key 键格式 (含 namespace + 版本号)
 - _BM25_CORPUS_CACHE_TTL / _BM25_CORPUS_DEFAULT_VERSION 常量契约
 
-AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Redis/Qdrant).
+Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
+单元测试不依赖外部服务 (mock Redis/Qdrant).
 """
 
 from __future__ import annotations

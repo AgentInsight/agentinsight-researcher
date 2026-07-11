@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare Node.js 22 LTS binary and MCP npm packages (QA/Offline mode)
 .DESCRIPTION
-    Follows AGENTS.md chapter 12: QA/Offline mode, all deps pre-downloaded to packages/
+    QA/Offline mode, all deps pre-downloaded to packages/
     This script does two things:
     1. Download Node.js 22 LTS binary tarball to packages/nodejs/
     2. Use Docker container (node:22-slim) to pre-install 40 MCP npm packages globally,

@@ -1,6 +1,6 @@
 """PostgreSQL 数据库初始化器.
 
-AGENTS.md 第 6/7 章硬约束:
+硬约束:
 - 单一数据库 agents, 业务表含 agent_id+user_id 双列复合索引
 - LangGraph Checkpointer 表由官方 SDK 管理
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 INIT_SQL_PATH = Path(__file__).parent.parent.parent / "scripts" / "init.sql"
 
 # 模块级 asyncpg 连接池单例 (业务表 CRUD 共用, 与 Checkpointer 的 psycopg 池独立)
-# AGENTS.md 第 6 章: 业务表读写复用同一 asyncpg 池, 避免每次请求创建新连接.
+# 业务表读写复用同一 asyncpg 池, 避免每次请求创建新连接.
 _pool_instance: asyncpg.Pool | None = None
 _pool_lock = asyncio.Lock()
 
@@ -140,7 +140,7 @@ __all__ = ["get_pool", "init_database", "close_pool"]
 async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
     """获取 asyncpg 连接池单例 (业务表 CRUD 共用).
 
-    AGENTS.md 第 6 章: 业务表读写复用同一 asyncpg 池, 与 Checkpointer 的 psycopg 池独立.
+    业务表读写复用同一 asyncpg 池, 与 Checkpointer 的 psycopg 池独立.
     双重检查锁保证并发场景下只创建一个实例; 池大小从 settings.postgres_connection_pool_size 读取.
 
     Args:

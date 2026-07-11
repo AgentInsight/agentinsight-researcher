@@ -9,9 +9,9 @@
 - TokenBudgetAllocator.get_total_cost: 汇总
 - 并发安全 (asyncio.Lock)
 
-AGENTS.md 第 5 章: max_iterations 为硬上限, 在此基础上增加 token 预算硬上限.
-AGENTS.md 第 10 章: 成本归因通过 trace span 自动传播.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+max_iterations 为硬上限, 在此基础上增加 token 预算硬上限.
+成本归因通过 trace span 自动传播.
+单元测试不依赖外部服务.
 
 注: 本模块为 token 预算分配器, 非上下文窗口管理 (800K chars 压缩在 context_manager.py).
 任务描述中 "上下文窗口阈值/压缩触发" 场景在此适配为预算阈值与 BudgetExceededError 触发.

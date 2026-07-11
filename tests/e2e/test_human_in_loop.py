@@ -1,6 +1,6 @@
 """端到端测试: 人在回路完整流程 (human_review_enabled + WebSocket + FeedbackQueue).
 
-AGENTS.md 第 13/14 章硬约束:
+测试约定:
 - e2e 必须在容器栈 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - /v1/feedback 为允许调用的端点 (人在回路反馈通道)
@@ -51,7 +51,7 @@ try:
 except ImportError:
     HAS_WEBSOCKETS = False
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # WebSocket 基础 URL (http→ws, https→wss)
@@ -81,7 +81,7 @@ KNOWN_WS_MSG_TYPES: set[str] = {
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (测试数据隔离: session_id=test_*)."""
     return f"test_e2e_hil_{uuid.uuid4().hex[:12]}"
 
 
@@ -93,7 +93,7 @@ def _log(msg: str) -> None:
 async def _connect_websocket(session_id: str) -> object | None:
     """连接 WebSocket, 返回 ws 对象; 连接失败 (鉴权/Origin/未启用) 返回 None.
 
-    AGENTS.md 第 14 章: /v1/ws/{session_id} 为允许调用的端点.
+    /v1/ws/{session_id} 为允许调用的端点.
     生产环境强制 JWT 鉴权 + Origin 校验.
     """
     ws_uri = f"{WS_BASE}/v1/ws/{session_id}"
@@ -155,7 +155,7 @@ async def _start_research(
 async def test_human_feedback_approve_flow() -> None:
     """审核通过流程: multi_agent=True → human_feedback_request → approve → 完成.
 
-    AGENTS.md 第 14 章: 人在回路端点 POST /v1/feedback.
+    人在回路端点 POST /v1/feedback.
     feedback="approve" 表示接受研究计划/大纲, 研究继续执行.
 
     流程:
@@ -245,7 +245,7 @@ async def test_human_feedback_approve_flow() -> None:
 async def test_human_feedback_revise_flow() -> None:
     """审核修订流程: multi_agent=True → human_feedback_request → 修订意见 → 重做 → 完成.
 
-    AGENTS.md 第 14 章: feedback 非 approve/accept/通过 等关键词时视为修订意见.
+    feedback 非 approve/accept/通过 等关键词时视为修订意见.
     修订意见触发回 agent_creator 重新生成角色, 研究重做.
 
     流程:
@@ -348,7 +348,7 @@ async def test_human_feedback_revise_flow() -> None:
 async def test_websocket_eight_message_types() -> None:
     """WebSocket 8 类结构化消息推送验证.
 
-    AGENTS.md 第 14 章: 服务端推送 8 类结构化消息.
+    服务端推送 8 类结构化消息.
     src/api/websocket.py ALL_WS_MSG_TYPES:
         logs / content / node_progress / sources / tool_call /
         report / human_feedback_request / error

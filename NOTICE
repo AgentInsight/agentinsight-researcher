@@ -22,6 +22,5 @@ License compatibility summary:
 - Most dependencies use permissive licenses (MIT / Apache-2.0 / BSD).
 - psycopg / psycopg-pool (LGPL-3.0-or-later): used as system libraries,
   do not impose copyleft on the project.
-- PyMuPDF (AGPL-3.0-or-later): network copyleft license, used for PDF
-  parsing only. Review your distribution model before deploying as a
-  network service.
+- All direct dependencies use permissive licenses (MIT / Apache-2.0 / BSD),
+  no copyleft licenses (AGPL/LGPL) are included in runtime dependencies.

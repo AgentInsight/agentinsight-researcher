@@ -6,9 +6,9 @@
 - _post_filter_compress 复用 _embeddings_rerank 已缓存的 embedding (零额外 FastEmbed 调用)
 - FastEmbedClient batch_size=64 批量推理与进程内缓存交互
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (FastEmbed 模型 / TEI / LLM) 全部 mock.
-AGENTS.md 第 7 章硬约束: 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维),
+上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维),
 不依赖远程 TEI.
 """
 

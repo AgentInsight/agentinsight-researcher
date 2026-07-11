@@ -6,7 +6,7 @@
 - stdio 缺少 command 时跳过该配置
 - _select_tool_with_llm 的 args_schema pydantic model vs dict 两种分支
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有 MCP Server 连接 / LLM 调用 / 数据库全部 mock.
 """
 

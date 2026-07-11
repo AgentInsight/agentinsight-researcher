@@ -1,17 +1,17 @@
 """API 测试: 敏感工具权限隔离 (read/write/execute/network 显式授权).
 
-AGENTS.md 第 11 章硬约束:
+安全硬约束:
 - 工具调用权限隔离 (read/write/execute/network 显式授权)
 - 敏感工具 (写文件/执行命令) 应显式声明权限, 由中间件校验
-- 禁止 eval/exec 求值用户输入 (注入风险, 属第 11 章安全硬约束)
+- 禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束)
 - LLM 输出经结构化校验后再入工具
 
 测试策略:
 - 通过 /v1/chat/completions 端点构造可能触发受限工具的查询
 - 验证 AI 不会声称执行了写/执行/网络等受限操作
-- 工具权限按 agent_id 隔离 (AGENTS.md 第 7 章)
+- 工具权限按 agent_id 隔离
 
-AGENTS.md 第 13 章:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 测试数据隔离: session_id=test_*
@@ -29,7 +29,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s (短查询响应快; 涉及工具调用时可能较长)
@@ -37,7 +37,7 @@ API_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=30.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (测试数据隔离: session_id=test_*)."""
     return f"test_tool_perm_{uuid.uuid4().hex[:12]}"
 
 
@@ -57,7 +57,7 @@ def _chat_payload(
 
 
 # ============================================================================
-# read 权限工具测试 (AGENTS.md 第 11 章: read 权限无需额外授权)
+# read 权限工具测试 (read 权限无需额外授权)
 # ============================================================================
 
 
@@ -65,7 +65,7 @@ def _chat_payload(
 def test_read_only_tool_allowed_without_auth() -> None:
     """验证 read 权限工具无需额外授权即可使用.
 
-    AGENTS.md 第 11 章: 工具调用权限隔离, read 权限为只读操作, 默认允许.
+    工具调用权限隔离, read 权限为只读操作, 默认允许.
     通过简单查询触发检索/read 操作, 验证 AI 正常响应不报权限错误.
     注意: 使用短查询避免触发完整研究流程 (防止服务阻塞).
     """
@@ -98,7 +98,7 @@ def test_read_only_tool_allowed_without_auth() -> None:
 
 
 # ============================================================================
-# write 权限工具测试 (AGENTS.md 第 11 章: write 需显式授权)
+# write 权限工具测试 (write 需显式授权)
 # ============================================================================
 
 
@@ -106,7 +106,7 @@ def test_read_only_tool_allowed_without_auth() -> None:
 def test_write_tool_requires_explicit_permission() -> None:
     """验证 write 权限工具需显式授权.
 
-    AGENTS.md 第 11 章: 敏感工具 (写文件) 应显式声明权限, 由中间件校验.
+    敏感工具 (写文件) 应显式声明权限, 由中间件校验.
     构造写文件请求, 验证 AI 不会执行写入操作或声称已写入.
     """
     write_queries = [
@@ -143,7 +143,7 @@ def test_write_tool_requires_explicit_permission() -> None:
 
 
 # ============================================================================
-# execute 权限工具测试 (AGENTS.md 第 11 章: execute 默认阻断)
+# execute 权限工具测试 (execute 默认阻断)
 # ============================================================================
 
 
@@ -151,7 +151,7 @@ def test_write_tool_requires_explicit_permission() -> None:
 def test_execute_tool_blocked_by_default() -> None:
     """验证 execute 权限工具默认阻断.
 
-    AGENTS.md 第 11 章: 工具调用权限隔离, execute 权限默认阻断.
+    工具调用权限隔离, execute 权限默认阻断.
     构造执行系统命令请求, 验证 AI 不会执行命令或声称已执行.
     """
     execute_queries = [
@@ -187,7 +187,7 @@ def test_execute_tool_blocked_by_default() -> None:
 
 
 # ============================================================================
-# network 权限工具测试 (AGENTS.md 第 11 章: network 需白名单)
+# network 权限工具测试 (network 需白名单)
 # ============================================================================
 
 
@@ -195,7 +195,7 @@ def test_execute_tool_blocked_by_default() -> None:
 def test_network_tool_requires_whitelist() -> None:
     """验证 network 权限工具需白名单授权.
 
-    AGENTS.md 第 11 章: 工具调用权限隔离, network 权限需白名单.
+    工具调用权限隔离, network 权限需白名单.
     构造访问内网/非白名单地址请求, 验证 AI 不会执行或声称已访问.
 
     注: 减少查询数量避免超时 (每个研究查询 300s+).
@@ -232,7 +232,7 @@ def test_network_tool_requires_whitelist() -> None:
 
 
 # ============================================================================
-# 工具权限按 agent_id 隔离测试 (AGENTS.md 第 7 章)
+# 工具权限按 agent_id 隔离测试
 # ============================================================================
 
 
@@ -240,8 +240,8 @@ def test_network_tool_requires_whitelist() -> None:
 def test_tool_permission_isolation_per_agent() -> None:
     """验证工具权限按 agent_id 隔离.
 
-    AGENTS.md 第 7 章: 每个 Agent 的数据隔离键为 agent_id=agent_name, 全局唯一.
-    AGENTS.md 第 11 章: 工具调用权限隔离按 agent_id 区分.
+    每个 Agent 的数据隔离键为 agent_id=agent_name, 全局唯一.
+    工具调用权限隔离按 agent_id 区分.
     验证不同 agent_id 的会话不会交叉影响工具权限.
     """
     # 使用两个不同的 session_id 模拟不同 agent 上下文

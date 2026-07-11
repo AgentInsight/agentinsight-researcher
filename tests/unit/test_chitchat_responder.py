@@ -5,10 +5,10 @@
 - respond_off_topic: FAST_LLM 成功 / 失败降级 / category 路由 / 未知 category 兜底 greeting
 - _fallback_reply: chitchat_fallback_to_template 开关 (YAML 模板 vs settings 固定话术)
 
-AGENTS.md 第 5 章: 节点为纯函数, 单一职责.
-AGENTS.md 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM).
-AGENTS.md 第 10 章: trace_chain span 包裹.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/Config 全部 mock).
+节点为纯函数, 单一职责.
+LLM 调用经 llm/ 网关 (LiteLLM).
+trace_chain span 包裹.
+单元测试不依赖外部服务 (LLM/Config 全部 mock).
 """
 
 from __future__ import annotations

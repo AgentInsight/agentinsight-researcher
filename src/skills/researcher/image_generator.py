@@ -2,9 +2,9 @@
 
 本项目使用 deepseek-v4-flash (用户明确要求, 非 gemini).
 
-AGENTS.md 第 9 章: 全部 LLM/图像调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连.
-AGENTS.md 第 10 章: 必须包裹在 trace span 内 (用 trace_chain).
-AGENTS.md 第 4 章: 禁用观察者模式.
+全部 LLM/图像调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连.
+必须包裹在 trace span 内 (用 trace_chain).
+禁用观察者模式.
 
 注意: deepseek-v4-flash 图像生成能力假设支持, 实际能力以官方文档为准.
 配置项 image_model 可由用户在 .env 覆盖.
@@ -93,7 +93,7 @@ def _enhance_prompt(
 ) -> dict[str, str]:
     """增强图像生成 prompt.
 
-    业界实践多步生成: 计划 → 生成 → 评估 → 重试.
+    多步生成: 计划 → 生成 → 评估 → 重试.
     AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词).
 
     Args:
@@ -124,7 +124,7 @@ class ImageGenerator:
 
     用户明确要求: 使用 deepseek-v4-flash 模型 (非 gemini).
 
-    AGENTS.md 第 9 章: 通过 LiteLLM aimage_generation 调用, 禁厂商 SDK 直连.
+    通过 LiteLLM aimage_generation 调用, 禁厂商 SDK 直连.
     """
 
     settings: Settings
@@ -177,7 +177,7 @@ class ImageGenerator:
         ) as span:
             try:
                 # prompt 增强
-                # 业界实践多步生成: 计划 → 生成 → 评估 → 重试
+                # 多步生成: 计划 → 生成 → 评估 → 重试
                 # AIR 简化版: 单步增强 prompt (主题风格 + negative prompt + 质量词)
                 enhanced = _enhance_prompt(prompt, topic)
                 prompt = enhanced["prompt"]
@@ -200,7 +200,7 @@ class ImageGenerator:
                 if quality:
                     kwargs["quality"] = quality
 
-                # 通过 LiteLLM aimage_generation 调用图像生成 (AGENTS.md 第 9 章)
+                # 通过 LiteLLM aimage_generation 调用图像生成
                 # deepseek-v4-flash 图像生成能力假设支持, 实际以官方文档为准
                 # OpenAI DALL-E 不支持 negative_prompt, 仅用正向增强 prompt;
                 # negative_prompt 记录在 trace metadata 供排查 (SDXL/ComfyUI 可用)

@@ -6,8 +6,8 @@
 - LLM 返回非法 JSON 时 _fallback_scores 兜底 (全 6 分 → accept)
 - 评分缓存命中时跳过 LLM 调用 (跨实例共享, TTL 30 分钟)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM 全部 mock).
-AGENTS.md 第 5 章: Reviewer 不强制 max_iterations (由图级守卫负责),
+单元测试不依赖外部服务 (LLM 全部 mock).
+Reviewer 不强制 max_iterations (由图级守卫负责),
   Reviewer 自身的"强制"机制是评分缓存 (避免重复评审).
 """
 

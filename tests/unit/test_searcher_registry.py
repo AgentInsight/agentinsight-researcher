@@ -9,7 +9,7 @@
 - get_searchers 返回排序后列表 (按 _sort_key 综合排序)
 - deduplicate_results 跨引擎 URL 去重
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Settings Key 字段).
+单元测试不依赖外部服务 (mock Settings Key 字段).
 VALID_RETRIEVERS + 装饰器模式.
 """
 

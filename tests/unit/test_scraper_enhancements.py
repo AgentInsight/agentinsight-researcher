@@ -8,7 +8,7 @@
 3. 浏览器池化 (scrapers/playwright_scraper.py _PlaywrightPool):
    max_browsers=5 + 负载均衡 (min processing_count) + acquire/release 语义
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有 Playwright/httpx 全部 mock, 不启动真实 chromium.
 """
 

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare curl_cffi wheel for SearXNG QA/Offline Docker builds
 .DESCRIPTION
-    严格遵循 AGENTS.md 第 12 章: QA/离线模式所有依赖预下载到 packages/
+    QA/离线模式所有依赖预下载到 packages/
     使用 SearXNG 镜像本身下载 curl_cffi wheel, 确保 musllinux 兼容 (Alpine 环境)
     下载到 packages/searxng-wheels/ 供 Dockerfile.searxng 离线安装
 

@@ -13,7 +13,7 @@ Trafilatura 降级后的第二级抓取器, 输出 LLM 友好 Markdown 而非纯
 2. BS + markdownify (HTML→Markdown, 纯本地) ← 本抓取器
 3. Playwright (JS 渲染兜底, 输出 HTML)
 
-AGENTS.md 第 4 章: 抓取栈未列入硬选型, 属 "Ask first" 范畴.
+抓取栈未列入硬选型, 属 "Ask first" 范畴.
 """
 
 from __future__ import annotations

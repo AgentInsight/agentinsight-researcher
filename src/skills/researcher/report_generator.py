@@ -1,6 +1,6 @@
 """ReportGenerator 报告生成器.
 
-AGENTS.md 用户需求 3: Writer (报告合成).
+Writer (报告合成).
 
 按动态角色 persona 合成长报告, 支持 tone 语气控制.
 报告生成后可选生成 1 张配图 (deepseek-v4-flash).
@@ -378,8 +378,8 @@ class ReportGenerator:
         单个子主题 LLM 调用失败时重试 1 次, 仍失败用占位文本, 不阻断整体.
         注入 report_style 风格预设.
 
-        AGENTS.md 第 10 章: 整个流程包裹在 trace_chain 内.
-        AGENTS.md 第 9 章: 所有 LLM 调用经 LLMClient (achat 内部包裹 trace_generation).
+        整个流程包裹在 trace_chain 内.
+        所有 LLM 调用经 LLMClient (achat 内部包裹 trace_generation).
 
         返回 dict 含:
         - report_md: 完整 Markdown 报告
@@ -772,7 +772,7 @@ class ReportGenerator:
         优化:
         - prompt 提取到 PromptFamily.subtopics_prompt (旧版内联)
         - temperature: 0.4 → 0.25
-        - 用 STRATEGIC LLM 拆解 (与业界实践一致)
+        - 用 STRATEGIC LLM 拆解
 
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
         LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].

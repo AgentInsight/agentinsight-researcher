@@ -9,8 +9,8 @@
 - _llm_classify 未知意图字符串走 _fallback_intent
 - classify() 集成: LLM 失败时返回 fallback
 
-AGENTS.md 第 5 章: 节点纯函数, 无副作用.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock LLM/Redis).
+节点纯函数, 无副作用.
+单元测试不依赖外部服务 (mock LLM/Redis).
 """
 
 from __future__ import annotations
@@ -342,7 +342,7 @@ async def test_llm_classify_has_report_false_includes_hint(
 def test_fallback_uses_dict_lookup_not_if_else() -> None:
     """_fallback_intent 应使用字典查表 (无 if-else 分支).
 
-    AGENTS.md 第 3 章: 共享逻辑下沉, 避免重复 if-else.
+    共享逻辑下沉, 避免重复 if-else.
     验证源码不含 if-else 链 (允许 .get() 默认值).
     """
     import inspect

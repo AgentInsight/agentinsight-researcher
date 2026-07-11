@@ -6,8 +6,8 @@
 - init_database() 成功时返回 True
 - DSN 替换: postgresql+asyncpg:// → postgresql://
 
-AGENTS.md 第 6/7 章: 业务表由 Agent 启动时执行 scripts/init.sql 创建 (幂等).
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (用 mock asyncpg).
+业务表由 Agent 启动时执行 scripts/init.sql 创建 (幂等).
+单元测试不依赖外部服务 (用 mock asyncpg).
 """
 
 from __future__ import annotations

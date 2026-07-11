@@ -8,8 +8,8 @@
 - 缺少 feedback 字段 → 返回 error (无待处理请求)
 - WebSocket 断开 → 资源清理
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
-AGENTS.md 第 14 章: /v1/ws/{session_id} 为允许调用的端点 (人在回路通道).
+单元测试不依赖外部服务.
+/v1/ws/{session_id} 为允许调用的端点 (人在回路通道).
 """
 
 from __future__ import annotations

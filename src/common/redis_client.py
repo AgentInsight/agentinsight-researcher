@@ -1,6 +1,6 @@
 """统一 Redis 客户端工厂.
 
-AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:
+Redis 键应加前缀 {agent_id}:{user_id}:
 本模块仅负责客户端创建, 键前缀由调用方管理.
 
 3 处调用点 (retriever.py / query_classifier.py / quota_cache.py) 共享同一单例,

@@ -8,7 +8,7 @@
 5. self_host=False 不走限额 (无 token → 401)
 6. ip_daily_report_limit=0 不限制
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (Redis/Postgres/LLM 全部 mock).
+单元测试不依赖外部服务 (Redis/Postgres/LLM 全部 mock).
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ def test_ip_user_exceeded_stream(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_jwt_user_not_limited(monkeypatch: pytest.MonkeyPatch) -> None:
     """JWT Token 用户 (user_id 不以 "ip_" 开头) 不走限额检查.
 
-    AGENTS.md 第 8 章: 携带有效 Bearer Token 时, user_id 由 user_info API 解析,
+    携带有效 Bearer Token 时, user_id 由 user_info API 解析,
     不以 "ip_" 前缀标识, 限额检查条件 user_id.startswith("ip_") 不满足.
     """
     settings = _make_settings(self_host=True, ip_daily_report_limit=3)
@@ -213,7 +213,7 @@ def test_jwt_user_not_limited(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_self_host_false_no_token_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
     """self_host=False 时无 token → 401 (中间件拦截, 不走限额检查).
 
-    AGENTS.md 第 8 章: self_host=False (云托管) 强制校验 JWT Token,
+    self_host=False (云托管) 强制校验 JWT Token,
     不存在时返回 401, 请求不会到达限额检查逻辑.
     """
     settings = _make_settings(self_host=False, ip_daily_report_limit=3)

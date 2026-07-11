@@ -4,8 +4,8 @@
 - research_mode == "deep" → "deep_research" (递归深度研究)
 - 其他值/缺失 → "research_conductor" (常规并行检索)
 
-AGENTS.md 第 5 章: 路由必须显式 add_conditional_edges, 禁止隐式跳转.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+路由必须显式 add_conditional_edges, 禁止隐式跳转.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations

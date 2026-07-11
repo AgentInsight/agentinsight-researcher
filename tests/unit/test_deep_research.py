@@ -5,7 +5,7 @@
 - _assess_complexity(): 自适应复杂度评估 (LLM 返回 1-5 映射 breadth/depth)
 - _research_sub_query(): 搜索 + 抓取 + 压缩 (含 _visited_urls 跨子查询去重)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务
+单元测试不依赖外部服务
 (LLM/Searchers/Scrapers/QuotaCache/ContextManager 全部 mock).
 """
 

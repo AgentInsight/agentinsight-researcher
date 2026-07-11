@@ -9,7 +9,7 @@
 6. server.port == 8099 (项目硬约束, 非 8080)
 7. limiter: false (无 redis, 不开启限流)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 项目硬约束: SearXNG 服务端口 8099 (非 8080), SEARXNG_PORT 环境变量覆盖 settings.yml.
 """
 

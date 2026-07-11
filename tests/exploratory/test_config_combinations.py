@@ -1,6 +1,6 @@
 """探索性测试: L1+L2 方案配置组合 (Trafilatura + BM25).
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 本测试验证 L1+L2 方案在不同配置组合下的行为:
 - L1 抓取降级链: Trafilatura → BS+markdownify → Playwright
 - L2 上下文压缩: BM25Filter (rank-bm25 + jieba)

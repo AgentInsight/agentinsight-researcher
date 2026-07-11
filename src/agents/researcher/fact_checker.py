@@ -1,14 +1,14 @@
 """FactChecker 事实核查 Agent.
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
-fact_checker + DeepEval 幻觉率门禁 (AGENTS.md 第 10 章).
+LangGraph StateGraph 唯一编排, 节点纯函数.
+fact_checker + DeepEval 幻觉率门禁.
 
 FactChecker 职责:
 - 核查报告事实是否与上下文一致
 - LLM 提取报告中的事实声明, 逐条核对上下文
 - 返回 fact_check_accepted (bool) + fact_check_issues (list[str])
 - 用 LLMClient tier=STRATEGIC, 用 safe_json_parse 解析
-- 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
+- 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器)
 
 启用开关: settings.fact_check_enabled (默认 True).
 """
@@ -56,8 +56,8 @@ class FactChecker:
 
         Args:
             state: 研究状态, 含 report_md / contexts
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
 
         Returns:
             {"fact_check_accepted": bool, "fact_check_issues": list[str]}

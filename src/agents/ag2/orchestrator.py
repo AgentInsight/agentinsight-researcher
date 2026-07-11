@@ -3,10 +3,10 @@
 用 autogen GroupChat + GroupChatManager 编排 4 个角色:
 Researcher → Writer → Reviewer → Publisher.
 
-设计要点 (AGENTS.md 合规):
+设计要点:
 - AG2 仅作为编排层, ConversableAgent 的 llm_config=False, 禁用 AG2 内置 LLM.
 - 所有 LLM 调用经 LLMClient (LiteLLM), 复用现有 Skill 组件.
-- 每个 Agent 的 reply 函数包裹在 trace_chain span 内 (AGENTS.md 第 10 章).
+- 每个 Agent 的 reply 函数包裹在 trace_chain span 内.
 - AG2 (autogen) 是可选依赖, try/except import, 未安装时 _AG2_AVAILABLE=False.
 """
 
@@ -136,8 +136,8 @@ class AG2Orchestrator:
         Args:
             query: 研究查询
             agent_role: 角色 persona (AGENT_ROLE, 可选)
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
             report_type: 报告类型 (basic_report / detailed_report)
             report_format: 输出格式 (markdown / html / pdf / docx / json)
             tone: 语气 (objective / analytical / opinionated / casual)

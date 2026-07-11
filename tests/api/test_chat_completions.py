@@ -1,11 +1,11 @@
 """API 测试: OpenAI 兼容端点 /v1/chat/completions.
 
-AGENTS.md 第 13/14 章硬约束:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 必须覆盖 OpenAI 兼容端点 (流式 SSE + 非流式 + 错误码)
 - 必须包含携带 Bearer JWT Token 与不携带两种场景
 - 测试目标地址从环境变量 AGENT_URL 注入
-- 每次用唯一 session_id=test_* (AGENTS.md 第 13 章: 测试数据隔离)
+- 每次用唯一 session_id=test_* (测试数据隔离)
 
 执行方式 (宿主机, 容器栈已 healthy):
     set AGENT_URL=http://127.0.0.1:8066
@@ -25,7 +25,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s (短查询响应快; 带 token 时 user_info API 超时 5s)
@@ -33,7 +33,7 @@ API_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_api_{uuid.uuid4().hex[:12]}"
 
 
@@ -195,7 +195,7 @@ def test_empty_query() -> None:
 def test_with_bearer_token() -> None:
     """验证带 Bearer JWT Token: Authorization: Bearer test-token → 200 (不报错).
 
-    AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
+    token 存在时调用 /api/user 获取 user_id,
     调用失败 (test-token 非合法 JWT) 按无 token 处理并降级 IP-based UserId.
     中间件超时 5s, 总超时 60s 应足够.
     """
@@ -216,7 +216,7 @@ def test_with_bearer_token() -> None:
 def test_without_token() -> None:
     """验证不带 Bearer Token: 无 Authorization 头 → 200 (降级 IP-based UserId).
 
-    AGENTS.md 第 8 章: token 不存在时使用 IP-based UserId.
+    token 不存在时使用 IP-based UserId.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -247,7 +247,7 @@ def test_models_endpoint() -> None:
 def test_session_id_header_in_stream() -> None:
     """验证流式响应携带 X-Session-Id 头 (会话隔离键).
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键.
+    thread_id 做会话隔离键.
     """
     sid = _unique_session_id()
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -272,7 +272,7 @@ def test_session_id_header_in_stream() -> None:
 def test_invalid_stream_type_returns_422() -> None:
     """验证 stream 字段非布尔值: stream="yes" → 422 (Pydantic 校验失败).
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -322,7 +322,7 @@ def test_invalid_messages_type_returns_422() -> None:
 def test_invalid_model_name_returns_200_or_400() -> None:
     """验证未知 model 名称: model="unknown-model" → 200 或 400.
 
-    AGENTS.md 第 14 章: OpenAI 兼容端点, model 字段用于路由.
+    OpenAI 兼容端点, model 字段用于路由.
     实现可能: (a) 不校验 model 直接走默认 (200), (b) 校验 model 不在白名单 (400).
     两种行为均可接受, 不应返回 5xx.
     """
@@ -364,7 +364,7 @@ def test_mixed_roles_messages_returns_200() -> None:
 def test_invalid_report_type_handled_gracefully() -> None:
     """验证未知 report_type: report_type="unknown_type" → 不应 5xx 崩溃.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     未知 report_type 应降级为默认值或返回 4xx, 不应崩溃.
     """
     sid = _unique_session_id()
@@ -386,7 +386,7 @@ def test_invalid_report_type_handled_gracefully() -> None:
 def test_long_session_id_handled() -> None:
     """验证超长 session_id (1K 字符) 不应崩溃.
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键, 不应限制长度.
+    thread_id 做会话隔离键, 不应限制长度.
     """
     long_sid = "test_long_" + "x" * 1000
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -409,7 +409,7 @@ def test_long_session_id_handled() -> None:
 def test_chat_completions_report_type_basic_report() -> None:
     """验证 report_type=basic_report 路由: 短查询 + 显式 report_type → 200.
 
-    AGENTS.md 第 5/7 章: report_type=basic_report 走 basic 研究模式 (research_mode=basic).
+    report_type=basic_report 走 basic 研究模式 (research_mode=basic).
     短查询触发 short_query_reply (ChitchatResponder), 但 report_type 字段应被接受不报错.
     完整 basic_report 研究流程由 e2e 测试覆盖 (test_full_research_chain_non_stream).
     """
@@ -429,7 +429,7 @@ def test_chat_completions_report_type_basic_report() -> None:
 def test_chat_completions_report_type_detailed_report() -> None:
     """验证 report_type=detailed_report 路由: 短查询 + 显式 report_type → 200.
 
-    AGENTS.md 第 5/7 章: report_type=detailed_report 走 basic 研究模式 (非 deep_research).
+    report_type=detailed_report 走 basic 研究模式 (非 deep_research).
     短查询触发 short_query_reply, 但 report_type 字段应被接受不报错.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -448,7 +448,7 @@ def test_chat_completions_report_type_detailed_report() -> None:
 def test_chat_completions_multi_agent_true() -> None:
     """验证 multi_agent=True 路由: 短查询 + multi_agent=True → 200.
 
-    AGENTS.md 第 5 章: multi_agent=True 走 multi_agent_graph (Supervisor 模式).
+    multi_agent=True 走 multi_agent_graph (Supervisor 模式).
     短查询触发 short_query_reply (不走图), 但 multi_agent 字段应被接受不报错.
     完整 multi_agent 研究流程由 e2e 测试覆盖.
     """
@@ -468,7 +468,7 @@ def test_chat_completions_multi_agent_true() -> None:
 def test_chat_completions_self_host_false_missing_token_returns_401() -> None:
     """验证 SELF_HOST=False 缺 token 返回 401 (org_id 触发点数校验).
 
-    AGENTS.md 第 8 章: SELF_HOST=False 时强制校验 JWT Token, 缺 token 返回 401.
+    SELF_HOST=False 时强制校验 JWT Token, 缺 token 返回 401.
     服务端默认 SELF_HOST=True (跳过校验, 返回 200), 此时跳过本用例.
     仅当服务端配置 SELF_HOST=False 时才验证 401 行为.
 
@@ -492,7 +492,7 @@ def test_chat_completions_self_host_false_missing_token_returns_401() -> None:
 def test_chat_completions_uploaded_files_context_load() -> None:
     """验证 uploaded_files 加载已上传文件上下文: 上传文件 → 引用 file_id → 200.
 
-    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离, file_id 三级分键.
+    用户私有数据按 agent_id + user_id 隔离, file_id 三级分键.
     短查询触发 short_query_reply (不走研究图, 不实际加载文件上下文),
     但 uploaded_files 字段应被 Pydantic 接受不报错.
     实际文件上下文加载 (research 分支) 由 e2e 测试覆盖 (test_file_upload_then_chat).
@@ -524,7 +524,7 @@ def test_chat_completions_uploaded_files_context_load() -> None:
 def test_chat_completions_agent_role_override() -> None:
     """验证 agent_role 覆盖 (4 层机制 Config 层): 注入行业 persona → 200.
 
-    AGENTS.md 第 7 章: agent_role AGENT_ROLE 配置, 优先级高于 LLM 动态生成
+    agent_role AGENT_ROLE 配置, 优先级高于 LLM 动态生成
     (AgentCreator). 行业适配采用 4 层机制, 不使用行业分类器.
     短查询触发 short_query_reply, 但 agent_role 字段应被接受不报错.
     实际 agent_role 覆盖效果由 e2e 测试覆盖.
@@ -546,8 +546,8 @@ def test_chat_completions_agent_role_override() -> None:
 def test_error_400_missing_messages_field() -> None:
     """错误码 400/422: 缺少 messages 字段 → 422 (Pydantic 校验失败).
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
-    AGENTS.md 第 13 章: API 测试必须覆盖错误码.
+    所有外部输入经 Pydantic 校验.
+    API 测试必须覆盖错误码.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -563,7 +563,7 @@ def test_error_400_missing_messages_field() -> None:
 def test_error_400_empty_messages_array() -> None:
     """错误码 400: 空 messages 数组 → 400 (业务校验).
 
-    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (空 messages).
+    API 测试必须覆盖错误码 (空 messages).
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -670,8 +670,8 @@ def test_error_422_invalid_json_body() -> None:
 def test_error_401_self_host_false_missing_token() -> None:
     """错误码 401: SELF_HOST=False + org_id + 缺 token → 401.
 
-    AGENTS.md 第 8 章: SELF_HOST=False 时强制校验 JWT Token.
-    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (含 401).
+    SELF_HOST=False 时强制校验 JWT Token.
+    API 测试必须覆盖错误码 (含 401).
 
     路由逻辑 (routes.py): not settings.self_host and (org_id or project_id) and not token → 401.
     服务端默认 SELF_HOST=True 时跳过本用例.
@@ -693,7 +693,7 @@ def test_error_401_self_host_false_missing_token() -> None:
 def test_error_401_self_host_false_missing_token_project_id() -> None:
     """错误码 401: SELF_HOST=False + project_id + 缺 token → 401.
 
-    AGENTS.md 第 8 章: org_id 优先于 project_id, 二者至少一个触发校验.
+    org_id 优先于 project_id, 二者至少一个触发校验.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -711,8 +711,8 @@ def test_error_401_self_host_false_missing_token_project_id() -> None:
 def test_no_500_error_on_invalid_model() -> None:
     """验证无效 model 参数不触发 500 错误.
 
-    AGENTS.md 第 13 章: API 测试必须覆盖错误码 (无效 model 参数).
-    AGENTS.md 第 14 章: OpenAI 兼容端点, model 字段用于路由.
+    API 测试必须覆盖错误码 (无效 model 参数).
+    OpenAI 兼容端点, model 字段用于路由.
     实现可能: (a) 不校验 model 直接走默认 (200), (b) 校验 model 不在白名单 (400).
     两种行为均可接受, 不应返回 5xx.
     """
@@ -732,8 +732,8 @@ def test_no_500_error_on_invalid_model() -> None:
 def test_no_500_error_on_invalid_report_type() -> None:
     """验证未知 report_type 不触发 500 错误 (应降级为默认值).
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
-    AGENTS.md 第 13 章: 不应 5xx 崩溃.
+    所有外部输入经 Pydantic 校验.
+    不应 5xx 崩溃.
     """
     sid = _unique_session_id()
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -754,8 +754,8 @@ def test_no_500_error_on_invalid_report_type() -> None:
 def test_no_500_error_on_long_session_id() -> None:
     """验证超长 session_id 不触发 500 错误.
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键, 不应限制长度.
-    AGENTS.md 第 13 章: 不应 5xx 崩溃.
+    thread_id 做会话隔离键, 不应限制长度.
+    不应 5xx 崩溃.
     """
     long_sid = "test_long_" + "x" * 1000
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -775,7 +775,7 @@ def test_no_500_error_on_long_session_id() -> None:
 def test_stream_sse_format_complete() -> None:
     """验证流式 SSE 响应格式完整: 首块 + 内容块 + 末块 + [DONE].
 
-    AGENTS.md 第 13/14 章: API 测试必须覆盖流式 SSE.
+    API 测试必须覆盖流式 SSE.
     SSE 帧格式: data: {json}\\n\\n, 末帧为 data: [DONE]\\n\\n.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -813,7 +813,7 @@ def test_stream_sse_format_complete() -> None:
 def test_non_stream_response_structure_complete() -> None:
     """验证非流式响应结构完整: id/object/created/model/choices/usage.
 
-    AGENTS.md 第 13/14 章: API 测试必须覆盖非流式响应.
+    API 测试必须覆盖非流式响应.
     OpenAI 兼容响应结构必须包含完整字段.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -841,9 +841,9 @@ def test_non_stream_response_structure_complete() -> None:
 def test_bearer_token_request_returns_200() -> None:
     """验证携带 Bearer JWT Token 请求返回 200 (降级或真实解析).
 
-    AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
+    token 存在时调用 /api/user 获取 user_id,
     调用失败 (test-token 非合法 JWT) 按无 token 处理并降级.
-    AGENTS.md 第 13 章: 必须包含携带 Bearer JWT Token 场景.
+    必须包含携带 Bearer JWT Token 场景.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
@@ -860,8 +860,8 @@ def test_bearer_token_request_returns_200() -> None:
 def test_without_token_returns_200() -> None:
     """验证不携带 Token 请求返回 200 (降级 IP-based UserId).
 
-    AGENTS.md 第 8 章: token 不存在时降级 (self_host=True 默认).
-    AGENTS.md 第 13 章: 必须包含不携带 Token 场景.
+    token 不存在时降级 (self_host=True 默认).
+    必须包含不携带 Token 场景.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(

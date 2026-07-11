@@ -1,6 +1,6 @@
 """ChatAgent 对话式追问 Agent.
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
+LangGraph StateGraph 唯一编排, 节点纯函数.
 chat_with_report / 对话式追问模式.
 
 ChatAgent 职责:
@@ -8,7 +8,7 @@ ChatAgent 职责:
 - 系统提示含 report_md (截断 chat_report_truncate_chars 字符, 配置化)
 - 历史 messages 取最近 chat_history_limit 条 (配置化)
 - cascade 路由 (简单追问 FAST / 复杂追问 SMART)
-- 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
+- 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器)
 - 用 PromptFamily.chat_prompt 注入 prompt (策略模式)
 
 集成 (chat_builder.py):
@@ -91,8 +91,8 @@ class ChatAgent:
 
         Args:
             state: 研究状态, 含 query (追问) / report_md (已有报告) / messages (历史)
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
 
         Returns:
             {"messages": [HumanMessage, AIMessage]} 追问 + 回答追加到消息流
@@ -264,8 +264,8 @@ async def chat_node(
     """ChatAgent 对话节点.
 
     调用 ChatAgent.chat(), 返回 delta {"messages": [...]}.
-    AGENTS.md 第 5 章: 节点为纯函数, 单一职责无副作用.
-    AGENTS.md 第 10 章: 节点包裹在 trace span 内 (ChatAgent.chat 内部已包裹 trace_chain).
+    节点为纯函数, 单一职责无副作用.
+    节点包裹在 trace span 内 (ChatAgent.chat 内部已包裹 trace_chain).
     """
     agent = ChatAgent(settings)
     return await agent.chat(

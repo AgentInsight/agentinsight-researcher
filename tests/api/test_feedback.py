@@ -1,6 +1,6 @@
 """API 测试: 人在回路反馈端点 /v1/feedback.
 
-AGENTS.md 第 13/14 章硬约束:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - /v1/feedback 仅用于人在回路审核反馈
 - 未启用 human_review_enabled 时前端不应调用, 但端点本身应可用
@@ -21,7 +21,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s
@@ -32,7 +32,7 @@ API_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 def test_feedback_no_pending() -> None:
     """验证无待处理反馈: POST /v1/feedback 随机 session_id → 404.
 
-    AGENTS.md 第 14 章: /v1/feedback 为允许调用的端点 (人在回路反馈通道).
+    /v1/feedback 为允许调用的端点 (人在回路反馈通道).
     HumanAgent 未在等待时, FeedbackQueue.put_feedback() 返回 False → 404.
     """
     random_sid = f"test_feedback_{uuid.uuid4().hex[:12]}"

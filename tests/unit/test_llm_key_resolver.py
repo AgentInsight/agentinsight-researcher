@@ -7,9 +7,9 @@
 - 未匹配前缀返回 None
 - DRY: 取代 llm/client.py 和 image_generator.py 中重复的 _get_api_key
 
-AGENTS.md 第 3 章: 共享逻辑下沉到 common/, 不应重复实现.
-AGENTS.md 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM), 模型名以 LiteLLM 路由前缀声明.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Settings).
+共享逻辑下沉到 common/, 不应重复实现.
+LLM 调用经 llm/ 网关 (LiteLLM), 模型名以 LiteLLM 路由前缀声明.
+单元测试不依赖外部服务 (mock Settings).
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ def test_resolve_api_key_returns_empty_string_when_field_empty(
 def test_resolve_api_key_replaces_duplicate_get_api_key_in_llm_client() -> None:
     """DRY: llm/client.py 不应再定义独立的 _get_api_key (应复用 common/llm_key_resolver).
 
-    AGENTS.md 第 3 章: 共享逻辑下沉到 common/, 不应重复实现.
+    共享逻辑下沉到 common/, 不应重复实现.
     """
     import inspect
 

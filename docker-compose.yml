@@ -1,5 +1,5 @@
 # agentinsight-researcher 容器编排 (生产/联网模式)
-# 严格遵循 AGENTS.md 第 12 章: depends_on service_healthy + 命名卷
+# depends_on service_healthy + 命名卷
 # 联网模式: 构建时从 PyPI/Docker Hub 下载依赖与镜像, 适用于开源社区
 # 生产联网模式 PostgreSQL 由本地 postgres 容器提供, 与 redis/qdrant/embeddings 同属 compose 编排
 # 业务表由 Agent 启动时执行 scripts/init.sql 创建 (幂等)
@@ -90,7 +90,7 @@ services:
   embeddings:
     # BGE 服务镜像 (bge-base-zh-v1.5, 768维), 联网模式从 Docker Hub 拉取
     # 生产联网模式: 模型权重由 TEI 容器首次启动时从 HuggingFace 下载到命名卷 embeddings_models 缓存
-    # (AGENTS.md 第 12 章允许生产联网模式联网下载; 不挂载本地 packages/models/, 与离线模式区分)
+    # (生产联网模式允许联网下载; 不挂载本地 packages/models/, 与离线模式区分)
     image: tei-embedding:cpu-1.9
     restart: always
     env_file:

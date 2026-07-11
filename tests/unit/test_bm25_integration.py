@@ -10,8 +10,8 @@
 - _ensure_bm25_corpus 失败不阻断检索 (BM25 路径返回空)
 - update_bm25_corpus 由 _ensure_bm25_corpus 自动调用 (死代码修复)
 
-AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock Qdrant/Redis/Embeddings).
+检索必须混合 BM25 + 向量.
+单元测试不依赖外部服务 (mock Qdrant/Redis/Embeddings).
 """
 
 from __future__ import annotations
@@ -378,7 +378,7 @@ def test_bm25_cache_uid_shared_namespace_uses_anonymous(
 ) -> None:
     """_bm25_cache_uid: 共享 namespace 用 anonymous 常量 (跨用户共享缓存).
 
-    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层共享 namespace
+    default_user_id 环境变量已移除, RAG 层共享 namespace
     缓存键用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
     """
     retriever._qdrant.build_data_shared_namespace = MagicMock(return_value="agent-data")

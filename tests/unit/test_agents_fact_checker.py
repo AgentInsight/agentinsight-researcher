@@ -6,7 +6,7 @@
 - LLM 返回非法 JSON 时 safe_json_parse 兜底为 accepted=True (不阻断流程)
 - 空报告短路返回 accepted=False (不调用 LLM)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM 全部 mock).
+单元测试不依赖外部服务 (LLM 全部 mock).
 """
 
 from __future__ import annotations

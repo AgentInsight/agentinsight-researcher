@@ -1,6 +1,5 @@
 """性能测试: 搜索结果 Redis 缓存性能 (8 项优化之搜索缓存).
 
-AGENTS.md 第 7/13 章硬约束:
 - Redis 键应加前缀 {agent_id}:{user_id}:
 - 搜索缓存 TTL=300s (5 分钟), 相同 query+engine 5min TTL
 - 性能测试以单元测试为主 (mock + time.perf_counter), 不依赖容器栈
@@ -193,7 +192,7 @@ async def test_cache_key_generation_performance() -> None:
 async def test_cache_key_isolation_by_user_and_engine() -> None:
     """验证缓存 key 按 agent_id + user_id + engine 隔离.
 
-    AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:.
+    Redis 键应加前缀 {agent_id}:{user_id}:.
     不同 user_id 或 engine 的相同 query 应生成不同 cache_key.
     """
     settings = _make_settings(search_cache_ttl=300)

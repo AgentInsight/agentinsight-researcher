@@ -1,6 +1,6 @@
 """多 Agent 图构建器.
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数, 显式条件边.
+LangGraph StateGraph 唯一编排, 节点纯函数, 显式条件边.
 
 采用线性+条件边模式 (而非 Supervisor 循环模式):
 原因: reviewer/fact_checker 的 accept|revise 条件边与 Supervisor "回到 supervisor" 循环冲突.
@@ -36,7 +36,7 @@ max_plan_revisions 强制 accept. False 时跳过 human 节点, 保持原 agent_
 - human revise → agent_creator 循环: create_human_review_guard(max_plan_revisions)
   - revisions_count 由 human 节点累加, 达 max_plan_revisions 强制 accept
 - 三守卫均返回语义化 "accept"|"revise", 由 conditional_edges mapping 映射到具体节点
-- AGENTS.md 第 5 章: max_iterations 为硬上限, 不可软超时
+- max_iterations 为硬上限, 不可软超时
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def create_human_review_guard(
         if feedback is None:
             return "accept"
 
-        # max_plan_revisions 守卫: 达到修订上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
+        # max_plan_revisions 守卫: 达到修订上限强制 accept (max_iterations 硬上限)
         revisions_count = state.get("revisions_count", 0)
         if revisions_count >= max_plan_revisions:
             logger.warning(
@@ -129,7 +129,7 @@ def build_revision_subgraph(settings: Settings | None = None) -> Any:
     subgraph.set_entry_point("reviewer")
 
     # reviewer 条件边: accept → END (退出子图) | revise → reviser
-    # (含 max_revisions 守卫, 达到上限强制 accept, AGENTS.md 第 5 章 max_iterations 硬上限)
+    # (含 max_revisions 守卫, 达到上限强制 accept, max_iterations 硬上限)
     revision_guard = create_revision_guard(settings.max_revisions)
     subgraph.add_conditional_edges(
         "reviewer",
@@ -202,7 +202,7 @@ async def build_multi_agent_graph(
     # agent_creator → human | researcher (人在回路分支)
     if human_review_enabled:
         # agent_creator → human → (accept → researcher | revise → agent_creator)
-        # 含 max_plan_revisions 守卫, 达上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
+        # 含 max_plan_revisions 守卫, 达上限强制 accept (max_iterations 硬上限)
         graph.add_edge("agent_creator", "human")
         human_review_guard = create_human_review_guard(settings.max_plan_revisions)
         graph.add_conditional_edges(
@@ -223,7 +223,7 @@ async def build_multi_agent_graph(
 
     # fact_checker 条件边: accept → revision 子图 | revise → writer
     # (含 graph_max_iterations 守卫, 防止 fact_checker revise → writer 无限循环)
-    # AGENTS.md 第 5 章: max_iterations 为硬上限, 不可软超时
+    # max_iterations 为硬上限, 不可软超时
     fact_check_guard = create_fact_check_guard(settings.graph_max_iterations)
     graph.add_conditional_edges(
         "fact_checker",

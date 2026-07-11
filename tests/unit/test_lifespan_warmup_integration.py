@@ -6,9 +6,9 @@
 - 预热完成后后续 embed_texts 调用不再有冷启动延迟 (TextEmbedding 仅构造一次)
 - 预热失败时 lifespan 不阻断 (异常被捕获, 仅告警)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (FastEmbed 模型 / PostgreSQL / Qdrant / Redis / Playwright) 全部 mock.
-AGENTS.md 第 12 章: lifespan 启动时初始化业务数据, 失败不阻断启动.
+lifespan 启动时初始化业务数据, 失败不阻断启动.
 """
 
 from __future__ import annotations

@@ -1,6 +1,5 @@
 """性能测试: 并发负载场景 (TEI 限流 / 并发会话 / 熔断器 / Redis 缓存).
 
-AGENTS.md 第 6/13 章硬约束:
 - 每个 Agent 应支持并发多会话; 会话间状态通过 Postgres Checkpointer 隔离
 - TEI Embeddings 服务: 客户端并发限流 embeddings_max_concurrent=3
 - TEI 熔断器: 连续失败 5 次后短路, 60s 恢复探测
@@ -26,7 +25,7 @@ pytestmark = pytest.mark.unit
 async def test_concurrent_embeddings_10_requests() -> None:
     """验证 10 并发 embeddings 请求 (TEI 限流).
 
-    AGENTS.md 第 7 章: 客户端并发限流 embeddings_max_concurrent=3,
+    客户端并发限流 embeddings_max_concurrent=3,
     TEI 服务端 max_batch_requests=4.
     10 并发请求应在限流范围内有序执行, 不应触发大量 429.
 
@@ -72,7 +71,7 @@ async def test_concurrent_embeddings_10_requests() -> None:
 async def test_concurrent_research_sessions_5_parallel() -> None:
     """验证 5 并发研究会话.
 
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
+    每个 Agent 应支持并发多会话.
     5 个并发研究会话应在合理时间内完成, 验证并发隔离性.
 
     本测试使用 mock 简化场景, 测量并发执行时间.
@@ -111,7 +110,7 @@ async def test_concurrent_research_sessions_5_parallel() -> None:
 async def test_tei_circuit_breaker_recovery_time() -> None:
     """验证 TEI 熔断器恢复时间.
 
-    AGENTS.md 第 7 章: TEI 熔断器配置:
+    TEI 熔断器配置:
     - failure_threshold: 连续失败 5 次
     - recovery_timeout: 熔断后恢复探测时间 60s
 
@@ -148,7 +147,7 @@ async def test_tei_circuit_breaker_recovery_time() -> None:
 async def test_redis_cache_hit_rate_under_load() -> None:
     """验证 Redis 缓存命中率 (负载下).
 
-    AGENTS.md 第 7 章: 进程内 LRU+TTL 缓存, 提升 embedding 命中率.
+    进程内 LRU+TTL 缓存, 提升 embedding 命中率.
     本测试验证缓存机制在高负载下的命中率.
 
     注意: redis 未安装时跳过本测试.

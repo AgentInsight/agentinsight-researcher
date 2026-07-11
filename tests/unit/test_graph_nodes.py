@@ -10,8 +10,8 @@
 - reviewer_node: Reviewer 评审, 返回 review_decision/review_feedback
 - reviser_node: Reviser 修订, revision_count 累加 1
 
-AGENTS.md 第 5 章: 节点为纯函数 async def node(state: State) -> dict, 返回 delta 由 reducer 合并.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/Qdrant/Redis/Postgres 全部 mock).
+节点为纯函数 async def node(state: State) -> dict, 返回 delta 由 reducer 合并.
+单元测试不依赖外部服务 (LLM/Qdrant/Redis/Postgres 全部 mock).
 """
 
 from __future__ import annotations
@@ -462,7 +462,7 @@ async def test_fact_checker_node_returns_decision(
     """测试 fact_checker_node 返回 fact_check_accepted/fact_check_issues/iteration_count.
 
     iteration_count 累加 1 (Annotated[int, operator.add] reducer),
-    用于 graph_max_iterations 守卫 (AGENTS.md 第 5 章).
+    用于 graph_max_iterations 守卫.
     """
     mock_checker = MagicMock()
     mock_checker.check = AsyncMock(
@@ -583,7 +583,7 @@ async def test_reviser_node_increments_count(
     """测试 reviser_node 返回修订后报告 + revision_count 累加 1.
 
     revision_count 用 Annotated[int, operator.add] reducer,
-    节点返回 1 由 reducer 累加 (AGENTS.md 第 5 章).
+    节点返回 1 由 reducer 累加.
     """
     mock_reviser = MagicMock()
     mock_reviser.revise = AsyncMock(return_value={"report_md": "# 修订后报告\n\n改进内容"})

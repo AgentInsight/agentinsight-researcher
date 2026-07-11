@@ -1,12 +1,12 @@
 """Reviser 报告修订 Agent.
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
+LangGraph StateGraph 唯一编排, 节点纯函数.
 reviser 角色 + 章节级修订循环.
 
 Reviser 职责:
 - 根据 Reviewer 反馈修订报告, 返回新的 report_md
 - 用 LLMClient tier=SMART 调用 (适合长文本写作)
-- 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
+- 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器)
 
 行业适配采用 4 层机制, agent_role 注入角色 persona.
 修订循环上限由 settings.max_revisions 控制 (默认 3, 见 multi_agent_builder 守卫).
@@ -54,8 +54,8 @@ class Reviser:
 
         Args:
             state: 研究状态, 含 report_md / review_feedback / contexts / query
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
 
         Returns:
             {"report_md": str} 修订后的报告

@@ -6,7 +6,7 @@
 - 单子主题 LLM 失败重试 + 占位文本 (不阻断整体)
 - 章节并行后报告拼接顺序正确 (TOC + 引言 + 正文 + 结论)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM 全部 mock).
+单元测试不依赖外部服务 (LLM 全部 mock).
 """
 
 from __future__ import annotations

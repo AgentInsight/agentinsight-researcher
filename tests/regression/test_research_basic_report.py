@@ -1,6 +1,5 @@
 """回归测试: basic_report 完整研究流程.
 
-AGENTS.md 第 13 章硬约束:
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 回归测试为合并 main 前门禁, 不推荐跳过
 - 测试目标地址从环境变量 AGENT_URL 注入
@@ -24,7 +23,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 回归测试超时 300s (basic_report 研究 3-5 分钟)
@@ -35,7 +34,7 @@ MIN_CONTENT_LENGTH = 200
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_regression_*)."""
+    """生成唯一 session_id (session_id=test_regression_*)."""
     return f"test_regression_{uuid.uuid4().hex[:12]}"
 
 
@@ -48,8 +47,8 @@ def _log(msg: str) -> None:
 def test_basic_report_non_stream() -> None:
     """basic_report 非流式完整流程: stream=false → 200 + content 非空 + >200 字.
 
-    AGENTS.md 第 13 章: 回归测试为合并门禁.
-    AGENTS.md 第 14 章: OpenAI 兼容端点非流式响应.
+    回归测试为合并门禁.
+    OpenAI 兼容端点非流式响应.
     """
     sid = _unique_session_id()
     query = "用 300 字简述 Python 异步编程的核心优势与应用场景"
@@ -85,7 +84,7 @@ def test_basic_report_non_stream() -> None:
 def test_basic_report_stream() -> None:
     """basic_report 流式完整流程: stream=true → SSE 流 + content 非空.
 
-    AGENTS.md 第 13/14 章: 流式 SSE + 完整研究链路.
+    流式 SSE + 完整研究链路.
     """
     sid = _unique_session_id()
     query = "用 300 字简述 JavaScript 类型系统的核心特性"
@@ -144,7 +143,7 @@ def test_basic_report_stream() -> None:
 
 
 # ========== 异步回归测试 (httpx.AsyncClient, 仅验证 HTTP 状态码/响应头, 不依赖完整 LLM 研究) ==========
-# AGENTS.md 第 13 章: 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
+# 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
 # 流式研究请求的 StreamingResponse 在查询分类后立即返回 200 + headers,
 # 实际研究 (SMART LLM/检索) 在流式生成器中执行, 不消费流式体即不阻塞.
 
@@ -274,7 +273,7 @@ async def test_deep_research_stream_headers_accepted() -> None:
 async def test_invalid_report_type_list_returns_422() -> None:
     """report_type 为列表类型 → 422 (Pydantic 校验失败, 错误降级).
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     report_type 字段为 str | None, 传入 list 应被拒绝.
     """
     sid = _unique_session_id()
@@ -298,7 +297,7 @@ async def test_invalid_report_type_list_returns_422() -> None:
 async def test_unknown_report_type_string_stream_no_5xx() -> None:
     """未知 report_type 字符串流式: stream=true → 200 (降级为 basic, 不 5xx 崩溃).
 
-    AGENTS.md 第 11 章: 未知 report_type 应降级为默认值, 不应崩溃.
+    未知 report_type 应降级为默认值, 不应崩溃.
     routes.py 将未知 type 映射为 research_mode=basic, StreamingResponse 立即返回.
     """
     sid = _unique_session_id()

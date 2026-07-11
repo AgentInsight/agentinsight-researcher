@@ -1,6 +1,5 @@
 """探索性测试: 模拟人工测试的边界场景与降级路径.
 
-AGENTS.md 第 13 章硬约束:
 - 探索性测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 测试数据隔离: session_id=test_explore_*

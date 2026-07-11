@@ -4,7 +4,6 @@
 - Layer 1 Fast Path: < 8K 字符, 直接拼接原文 (零计算)
 - Layer 2 BM25Filter: >= 8K 字符, jieba+BM25Okapi 本地过滤 (主路径)
 
-AGENTS.md 第 13 章硬约束:
 - 性能测试以单元测试为主 (不依赖容器栈), 使用 mock + time.perf_counter 测量
 - 测试数据隔离: session_id=test_perf_*
 

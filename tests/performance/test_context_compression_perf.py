@@ -1,6 +1,5 @@
 """性能测试: 上下文压缩性能 (消息压缩延迟 / 内存占用).
 
-AGENTS.md 第 6 章硬约束:
 - ContextManager: 滑动窗口 + LLM 摘要压缩消息列表
 - 保留最近 25% 消息为原文, 其余 LLM 摘要化
 - CONTEXT_MAX_CHARS: 上下文总字符数上限
@@ -44,7 +43,7 @@ def _generate_test_messages(char_count: int) -> list[dict[str, str]]:
 async def test_compress_messages_100k_chars_latency() -> None:
     """验证 100K 字符消息压缩延迟.
 
-    AGENTS.md 第 6 章: ContextManager.compress_messages 负责长会话压缩.
+    ContextManager.compress_messages 负责长会话压缩.
     100K 字符约 25K tokens, 应在合理时间内完成压缩.
 
     阈值: 100K 字符压缩延迟 < 30s.
@@ -125,7 +124,7 @@ async def test_compress_messages_500k_chars_latency() -> None:
 async def test_context_compression_memory_usage() -> None:
     """验证上下文压缩内存占用.
 
-    AGENTS.md 第 6 章: 上下文压缩应控制内存占用, 避免 OOM.
+    上下文压缩应控制内存占用, 避免 OOM.
     本测试测量压缩过程中的内存变化, 验证内存增长在可控范围内.
 
     注意: psutil 未安装时跳过本测试.

@@ -1,6 +1,6 @@
 """Brave Search API 搜索器.
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 Brave Search 无中国境内可用, 适用于全球场景.
 需 BRAVE_API_KEY 环境变量.
 """

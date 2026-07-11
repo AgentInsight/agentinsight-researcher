@@ -1,6 +1,6 @@
 """SourceCurator 来源策展师.
 
-AGENTS.md 用户需求 3: Reviewer (质量审查).
+Reviewer (质量审查).
 
 用 LLM 评估来源可信度与相关性, 过滤低质量来源.
 cfg.CURATE_SOURCES=True 时启用 (默认 False).
@@ -100,7 +100,7 @@ class SourceCurator:
             score -= 0.10
 
         # Quantitative Value 评估
-        # 业界实践强调 "Quantitative Value" 5 次, 含统计数据的来源优先级显著高于纯文字描述.
+        # "Quantitative Value" 强调 5 次, 含统计数据的来源优先级显著高于纯文字描述.
         quant_score = self._score_quantitative_value(content)
         score += quant_score
 

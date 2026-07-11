@@ -5,9 +5,9 @@
 - fastembed_onnx_inter_threads 配置传递到 OMP_NUM_THREADS 环境变量
 - 配置值 0 (自动) 时的回退逻辑: intra → cpu_count, inter → cpu_count // 2
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (FastEmbed TextEmbedding / anyio.Path / os.cpu_count) 全部 mock.
-AGENTS.md 第 1 章: 配置经 config/ + 环境变量, 业务代码不硬编码.
+配置经 config/ + 环境变量, 业务代码不硬编码.
 """
 
 from __future__ import annotations

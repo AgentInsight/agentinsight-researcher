@@ -3,14 +3,14 @@
 验证 src/skills/researcher/scrapers/ 下所有抓取器与调度逻辑:
 - BeautifulSoupScraper: HTML 抓取 (默认主力, 剥离 script/style/nav/footer/header)
 - ArxivScraper: Arxiv 论文抓取 (元数据 + 全文)
-- PyMuPDFScraper: PDF 抓取 (fitz 提取文本)
+- PyMuPDFScraper: PDF 抓取 (pypdf 提取文本)
 - scrape_urls: 并发抓取多个 URL (WorkerPool + GlobalRateLimiter)
 - WorkerPool: 并发限流 (asyncio.Semaphore)
 - GlobalRateLimiter: 全局速率限制 (单例, asyncio.Lock)
 - scrape_with_fallback: 降级链 (BS → Playwright, lightweight 模式跳过降级)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务
-(HTTP/arxiv/PyMuPDF/Playwright 全部 mock).
+单元测试在构建期执行, 不依赖外部服务
+(HTTP/arxiv/pypdf/Playwright 全部 mock).
 """
 
 from __future__ import annotations
@@ -267,28 +267,27 @@ async def test_arxiv_scraper_no_results_returns_empty(mock_download: AsyncMock) 
 
 @pytest.mark.asyncio
 async def test_pymupdf_scraper_extracts_pdf_text(tmp_path) -> None:
-    """测试 PyMuPDF 抓取器从本地 PDF 文件提取文本.
+    """测试 PDF 抓取器从本地 PDF 文件提取文本.
 
-    PyMuPDFScraper 对本地路径调用 _extract_from_file → fitz.open → page.get_text,
-    多页文本以 "\\n\\n" 拼接. 使用 mock fitz 避免依赖真实 PDF.
+    PyMuPDFScraper 对本地路径调用 _extract_from_file → pypdf.PdfReader → page.extract_text,
+    多页文本以 "\\n\\n" 拼接. 使用 mock pypdf 避免依赖真实 PDF.
     """
-    # 创建临时 PDF 文件 (内容无所谓, fitz 被 mock)
+    # 创建临时 PDF 文件 (内容无所谓, pypdf 被 mock)
     pdf_path = tmp_path / "test.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 mock pdf content")
 
-    # Mock fitz 模块
-    mock_fitz = MagicMock()
-    mock_doc = MagicMock()
+    # Mock pypdf 模块
+    mock_pypdf = MagicMock()
+    mock_reader = MagicMock()
     mock_page1 = MagicMock()
-    mock_page1.get_text.return_value = "这是第一页的 PDF 文本内容."
+    mock_page1.extract_text.return_value = "这是第一页的 PDF 文本内容."
     mock_page2 = MagicMock()
-    mock_page2.get_text.return_value = "这是第二页的 PDF 文本内容."
-    # doc 迭代产出 page1, page2
-    mock_doc.__iter__ = MagicMock(return_value=iter([mock_page1, mock_page2]))
-    mock_doc.close = MagicMock()
-    mock_fitz.open.return_value = mock_doc
+    mock_page2.extract_text.return_value = "这是第二页的 PDF 文本内容."
+    # reader.pages 迭代产出 page1, page2
+    mock_reader.pages = [mock_page1, mock_page2]
+    mock_pypdf.PdfReader.return_value = mock_reader
 
-    with patch.dict("sys.modules", {"fitz": mock_fitz}):
+    with patch.dict("sys.modules", {"pypdf": mock_pypdf}):
         scraper = PyMuPDFScraper(str(pdf_path))
         result = await scraper.scrape()
 
@@ -300,10 +299,11 @@ async def test_pymupdf_scraper_extracts_pdf_text(tmp_path) -> None:
     assert result["content_type"] == "pdf"
     assert result["title"] == ""
     assert result["image_urls"] == []
-    # fitz.open 被调用
-    mock_fitz.open.assert_called_once_with(str(pdf_path))
-    # doc 被关闭
-    mock_doc.close.assert_called_once()
+    # pypdf.PdfReader 被调用
+    mock_pypdf.PdfReader.assert_called_once_with(str(pdf_path))
+    # 每页 extract_text 被调用
+    mock_page1.extract_text.assert_called_once()
+    mock_page2.extract_text.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -101,7 +101,7 @@ class ArxivScraper(BaseScraper):
                 f"Summary: {paper_info['summary']}\n\n"
             )
 
-            # 尝试获取全文 (PDF 流式下载 + PyMuPDF 提取)
+            # 尝试获取全文 (PDF 流式下载 + pypdf 提取)
             try:
                 pdf_url = paper_info.get("pdf_url", "")
                 if not pdf_url:
@@ -137,18 +137,20 @@ class ArxivScraper(BaseScraper):
 
     @staticmethod
     def _extract_pdf_text(pdf_path: str) -> str:
-        """从 PDF 文件提取全文 (同步, 供 asyncio.to_thread 包裹)."""
-        try:
-            import fitz  # PyMuPDF
+        """从 PDF 文件提取全文 (同步, 供 asyncio.to_thread 包裹).
 
-            doc = fitz.open(pdf_path)
+        使用 pypdf.PdfReader 逐页提取文本, 多页文本以 "\\n\\n" 拼接.
+        """
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(pdf_path)
             text_parts: list[str] = []
-            for page in doc:
-                text_parts.append(page.get_text())
-            doc.close()
+            for page in reader.pages:
+                text_parts.append(page.extract_text() or "")
             return "\n\n".join(text_parts)
         except ImportError:
-            logger.warning("PyMuPDF (fitz) 未安装, 无法提取 PDF 全文")
+            logger.warning("pypdf 未安装, 无法提取 PDF 全文")
             return ""
         except Exception as e:  # noqa: BLE001
             logger.warning("PDF 全文提取失败 %s: %s", pdf_path, e)

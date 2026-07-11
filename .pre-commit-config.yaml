@@ -1,5 +1,5 @@
-# Pre-commit hooks (AGENTS.md 第 13 章测试规则配套)
-# 预提交钩子 (配套 AGENTS.md 第 13 章测试规则)
+# Pre-commit hooks (测试规则配套)
+# 预提交钩子 (配套测试规则)
 #
 # 安装 / Install:    pip install pre-commit && pre-commit install
 # 手动运行 / Manual: pre-commit run --all-files

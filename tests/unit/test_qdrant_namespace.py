@@ -1,6 +1,6 @@
 """单元测试: Qdrant namespace 与 Embeddings 点 id 生成.
 
-验证 AGENTS.md 第 7 章 namespace 隔离规则与幂等点 id 生成.
+验证 namespace 隔离规则与幂等点 id 生成.
 不实际连接 Qdrant, 仅测试逻辑.
 """
 

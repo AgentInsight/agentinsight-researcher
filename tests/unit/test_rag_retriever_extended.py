@@ -9,7 +9,7 @@
 - _bm25_search: _bm25=None / score<=0 过滤
 - update_bm25_corpus: 空语料 _bm25=None
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def test_cache_key_format() -> None:
 def test_cache_key_user_id_fallback() -> None:
     """user_id 缺失时用 anonymous 常量.
 
-    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层无 user_id 时
+    default_user_id 环境变量已移除, RAG 层无 user_id 时
     用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
     """
     settings = Settings(agent_name="test-agent", _env_file=None)
@@ -383,7 +383,7 @@ def test_update_bm25_corpus_non_empty_initializes_bm25() -> None:
 async def test_score_threshold_not_applied_to_rrf_scores() -> None:
     """score_threshold=0.3 在 RRF 融合分数不应用 (仅 rerank 启用时生效).
 
-    AGENTS.md 第 7 章: score_threshold 默认 0.3, 低于阈值丢弃
+    score_threshold 默认 0.3, 低于阈值丢弃
     (仅当 rerank 启用时生效, RRF 融合分数不应用此阈值).
 
     场景: rerank_enabled=False, RRF 融合后分数远低于 0.3 (如 0.01),
@@ -435,7 +435,7 @@ async def test_score_threshold_not_applied_to_rrf_scores() -> None:
 async def test_embeddings_head_based_sampling() -> None:
     """Embeddings head-based 采样 (tracing_embedding_sample_rate=0.5).
 
-    AGENTS.md 第 10 章: trace_embedding head-based 采样, 默认
+    trace_embedding head-based 采样, 默认
     tracing_embedding_sample_rate=0.5 (高频 embed 调用降采样减存储压力).
 
     验证:
@@ -521,7 +521,7 @@ async def test_embeddings_head_based_sampling() -> None:
 async def test_bm25_only_path_no_vector_results() -> None:
     """BM25 单独路径: 向量检索无结果时, BM25 结果仍可经 RRF 融合返回.
 
-    AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量. 本测试验证当向量检索
+    检索必须混合 BM25 + 向量. 本测试验证当向量检索
     返回空 (如 query embedding 失败或 Qdrant 无匹配) 时, BM25 路径仍能
     独立提供结果, RRF 融合不会因向量空而失败.
 

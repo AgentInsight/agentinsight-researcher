@@ -1,10 +1,9 @@
 """单元测试: Phase 4 扩展功能 (文件上传 + 动态角色 + 静态页面).
 
-AGENTS.md 第 13/14 章硬约束:
-- 单元测试在构建期执行, 不得依赖外部服务 (Postgres/Qdrant/Redis/LLM)
-- 文件上传按 agent_id + user_id 隔离 (AGENTS.md 第 7 章)
+单元测试在构建期执行, 不得依赖外部服务 (Postgres/Qdrant/Redis/LLM)
+- 文件上传按 agent_id + user_id 隔离
 - 动态角色生成 (AgentCreator LLM 动态生成行业 persona)
-- 前端测试页面单文件托管 (AGENTS.md 第 14 章)
+- 前端测试页面单文件托管
 
 行业适配采用 4 层机制:
 - Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
@@ -90,7 +89,7 @@ class TestFileUpload:
         assert response.json()["extension"] == "md"
 
 
-# ========== 动态角色配置 (AGENT_ROLE, AGENTS.md 第 5/7 章) ==========
+# ========== 动态角色配置 (AGENT_ROLE) ==========
 
 
 class TestAgentRoleConfig:
@@ -132,14 +131,14 @@ class TestAgentRoleConfig:
         assert req.agent_role is None
 
 
-# ========== 静态页面 (AGENTS.md 第 14 章) ==========
+# ========== 静态页面 ==========
 
 
 class TestStaticPage:
     """前端测试页面托管测试."""
 
     def test_static_index_html_served(self) -> None:
-        """测试 / 返回 index.html (AGENTS.md 第 14 章)."""
+        """测试 / 返回 index.html."""
         client = TestClient(app)
         response = client.get("/")
         assert response.status_code == 200
@@ -160,7 +159,7 @@ class TestStaticPage:
         assert len(response.content) < 200_000
 
     def test_static_page_no_react_vue(self) -> None:
-        """测试静态页面未引入 React/Vue (AGENTS.md 第 14 章)."""
+        """测试静态页面未引入 React/Vue."""
         client = TestClient(app)
         response = client.get("/")
         text_lower = response.text.lower()

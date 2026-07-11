@@ -1,12 +1,12 @@
 """API 中间件 (纯 ASGI middleware, 不使用 BaseHTTPMiddleware).
 
-AGENTS.md 第 8/11 章硬约束:
+安全合规硬约束:
 - JWT 验证与 user_id 获取必须在 API 入口中间件完成
 - self_host=True (自托管): token 不存在或调用失败时降级 IP-based UserId
 - self_host=False (云托管): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
 - 禁止将原始 JWT token 写入日志或持久化存储
 - 安全响应头中间件不可绕过
-- CORS * 限制已移除 (AGENTS.md 第 11 章已更新)
+- CORS * 限制已移除
 
 BaseHTTPMiddleware 会将请求包裹在内部 task 中, 对 StreamingResponse (SSE) 有性能开销.
 改用纯 ASGI middleware (__call__ 方法), 避免 Starlette 内部 task 包装开销.
@@ -27,7 +27,7 @@ from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# 请求级上下文变量 (AGENTS.md 第 10 章: 认证上下文用 contextvars, 不用 span 上下文)
+# 请求级上下文变量 (认证上下文用 contextvars, 不用 span 上下文)
 _request_user_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "request_user_id",
     default="",
@@ -124,7 +124,7 @@ class RequestIDMiddleware:
 class JWTAuthMiddleware:
     """JWT 身份解析中间件 (纯 ASGI middleware).
 
-    AGENTS.md 第 8 章硬约束:
+    安全合规硬约束:
     - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管模式)
     - self_host=False (云托管模式): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
     - token 存在时: 同步调用 GET /api/user 获取 user_id, 携带原 Authorization 头
@@ -142,7 +142,7 @@ class JWTAuthMiddleware:
         global _jwt_middleware_instance
         _jwt_middleware_instance = self
 
-    # 公开路径白名单 (无需 JWT 校验, AGENTS.md 第 14 章: /health 与测试页面静态资源)
+    # 公开路径白名单 (无需 JWT 校验: /health 与测试页面静态资源)
     # /.well-known/agent-discovery.json 为 Agent Discovery Protocol 公开发现端点 (无需鉴权)
     _PUBLIC_PATHS: tuple[str, ...] = (
         "/health",
@@ -222,7 +222,7 @@ class JWTAuthMiddleware:
         """解析 user_id.
 
         返回 (user_id, error_message):
-        - self_host=True: token 不存在或失败时按 IP 生成确定性 UserId (AGENTS.md 第 8 章)
+        - self_host=True: token 不存在或失败时按 IP 生成确定性 UserId
         - self_host=False: token 不存在或失败时返回错误 (云托管强制校验)
         """
         from src.api.ip_user_resolver import generate_user_id_from_ip
@@ -271,7 +271,7 @@ class JWTAuthMiddleware:
 class SecurityHeadersMiddleware:
     """安全响应头中间件 (纯 ASGI middleware).
 
-    AGENTS.md 第 11 章硬约束: 安全响应头中间件不可绕过.
+    安全响应头中间件不可绕过.
     - X-Content-Type-Options: nosniff
     - X-Frame-Options: DENY
     - Strict-Transport-Security: HSTS (生产强制 HTTPS)
@@ -291,7 +291,7 @@ class SecurityHeadersMiddleware:
         async def send_with_security_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                # 安全响应头 (AGENTS.md 第 11 章, 不可绕过)
+                # 安全响应头 (不可绕过)
                 security_headers: list[tuple[bytes, bytes]] = [
                     (b"x-content-type-options", b"nosniff"),
                     (b"x-frame-options", b"DENY"),

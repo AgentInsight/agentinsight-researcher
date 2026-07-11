@@ -6,8 +6,8 @@
 - 预热失败异常被捕获 (不阻断启动, 由 server.py _warmup_graph try/except 保证)
 - _get_graph 本身不吞异常 (异常由调用方/预热函数捕获)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
-AGENTS.md 第 5 章: 生产 StateGraph 复用单例, 每次请求不重编译.
+单元测试在构建期执行, 不依赖外部服务.
+生产 StateGraph 复用单例, 每次请求不重编译.
 单例机制在 src/api/routes.py (_compiled_graph + _get_graph) 实现,
 server.py lifespan _warmup_graph 后台任务触发首次构建.
 """

@@ -1,6 +1,5 @@
 """回归测试: 短查询保护.
 
-AGENTS.md 第 13 章硬约束:
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 回归测试为合并 main 前门禁, 不推荐跳过
 
@@ -22,7 +21,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 短查询保护不走 graph, 响应快, 60s 足够
@@ -33,7 +32,7 @@ DEFAULT_SHORT_QUERY_REPLY = "您好！我是研究助手，请提供您想研究
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_short_query_{uuid.uuid4().hex[:12]}"
 
 
@@ -139,7 +138,7 @@ def test_short_query_fast_response() -> None:
 
 
 # ========== 异步回归测试 (httpx.AsyncClient, 仅验证 HTTP 状态码/响应时间, 不依赖完整 LLM) ==========
-# AGENTS.md 第 13 章: 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
+# 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
 # 覆盖: 短查询路由/闲聊离题/区域路由/工具选择/缓存机制.
 
 # 异步测试超时 (短查询/离题响应快速; 含研究流式头验证)
@@ -236,7 +235,7 @@ async def test_short_query_repeated_cache_hit_async() -> None:
 async def test_academic_keyword_query_stream_accepted() -> None:
     """学术关键词查询流式: stream=true → 200 + text/event-stream (区域路由不崩溃).
 
-    AGENTS.md 第 7 章: academic_keywords 命中时路由到 arxiv/pubmed 等专业数据源.
+    academic_keywords 命中时路由到 arxiv/pubmed 等专业数据源.
     验证学术关键词查询不导致 5xx 崩溃, 流式响应头正确返回.
     覆盖区域路由 (学术检索路由).
     """
@@ -268,7 +267,7 @@ async def test_academic_keyword_query_stream_accepted() -> None:
 async def test_research_query_tool_selection_stream_accepted() -> None:
     """研究查询 + 显式 report_type 流式: stream=true → 200 (工具选择路径不崩溃).
 
-    AGENTS.md 第 7/9 章: 显式 report_type 强制走 researcher graph,
+    显式 report_type 强制走 researcher graph,
     MCP 工具选择 (mcp_auto_tool_selection) 在图内执行.
     验证研究查询 + 工具选择路径不导致 5xx 崩溃, 流式响应头正确返回.
     覆盖工具选择路径.

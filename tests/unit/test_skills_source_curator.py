@@ -2,7 +2,7 @@
 
 验证 _score_credibility 按域名权威性 / 内容长度 / 统计数据评分,
 以及 _DOMAIN_CREDIBILITY 字典含预期域名.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

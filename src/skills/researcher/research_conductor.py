@@ -1,6 +1,6 @@
 """ResearchConductor 研究总指挥.
 
-AGENTS.md 用户需求 3: Planner (拆解问题) → Researcher (并行搜索爬取).
+Planner (拆解问题) → Researcher (并行搜索爬取).
 
 核心流程:
 1. plan_research: 按动态角色 persona 拆解子查询 (Planner, AGENT_ROLE)

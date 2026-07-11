@@ -1,5 +1,5 @@
 # agentinsight-researcher Python 项目配置
-# 严格遵循 AGENTS.md 第 1 章: Python ≥3.11
+# Python ≥3.11
 
 [build-system]
 requires = ["hatchling>=1.21"]
@@ -39,14 +39,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    # 编排内核 (AGENTS.md 第 5 章)
+    # 编排内核
     "langgraph>=1.2",
     "langgraph-checkpoint>=4.1",
     "langgraph-checkpoint-postgres>=2.0",
     "langchain-core>=1.4",
     "langchain-mcp-adapters>=0.1",
     "langchain-protocol>=0.0.18",
-    # LLM 网关 (AGENTS.md 第 9 章)
+    # LLM 网关
     "litellm>=1.6",
     "openai>=2.43",
     # MCP 工具协议
@@ -85,7 +85,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "playwright>=1.49",
-    "PyMuPDF>=1.24",
+    "pypdf>=5.4",  # PDF 抓取与解析 (BSD-3-Clause)
     "trafilatura>=1.10",
     "markdownify>=0.14.1",
     "curl_cffi>=0.7",

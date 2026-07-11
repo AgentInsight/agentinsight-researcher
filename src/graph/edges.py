@@ -1,6 +1,6 @@
 """LangGraph 条件边路由.
 
-AGENTS.md 第 5 章: 路由必须显式 add_conditional_edges, 禁止隐式跳转.
+路由必须显式 add_conditional_edges, 禁止隐式跳转.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def create_iteration_guard(
     max_iterations: int = 10,
 ) -> Callable[[ResearcherState], str]:
-    """创建迭代上限守卫路由函数 (AGENTS.md 第 5 章: max_iterations 硬上限).
+    """创建迭代上限守卫路由函数 (max_iterations 硬上限).
 
     用于循环图 (如 multi_agent) 的条件边路由, 达到上限时强制跳转 publisher 终止.
     线性流水线图无循环, 不需要此守卫.
@@ -35,7 +35,7 @@ def create_iteration_guard(
 def create_revision_guard(
     max_revisions: int = 3,
 ) -> Callable[[ResearcherState], str]:
-    """创建修订循环守卫路由函数 (AGENTS.md 第 5 章: max_iterations 硬上限).
+    """创建修订循环守卫路由函数 (max_iterations 硬上限).
 
     专用于 reviewer → reviser → reviewer 评审-修订循环的条件边路由.
     返回 "accept" (通过) 或 "revise" (需修订), 由调用方映射到具体节点:
@@ -56,7 +56,7 @@ def create_revision_guard(
         if decision == "accept":
             return "accept"
 
-        # max_revisions 守卫: 达到修订上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
+        # max_revisions 守卫: 达到修订上限强制 accept (max_iterations 硬上限)
         revision_count = state.get("revision_count", 0)
         if revision_count >= max_revisions:
             logger.warning(
@@ -73,7 +73,7 @@ def create_revision_guard(
 def create_fact_check_guard(
     max_iterations: int = 10,
 ) -> Callable[[ResearcherState], str]:
-    """创建事实核查循环守卫路由函数 (AGENTS.md 第 5 章: max_iterations 硬上限).
+    """创建事实核查循环守卫路由函数 (max_iterations 硬上限).
 
     专用于 fact_checker → writer 事实核查-重写循环的条件边路由.
     返回 "accept" (通过) 或 "revise" (需重写), 由调用方映射到具体节点:
@@ -94,7 +94,7 @@ def create_fact_check_guard(
         if accepted:
             return "accept"
 
-        # graph_max_iterations 守卫: 达到图迭代上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
+        # graph_max_iterations 守卫: 达到图迭代上限强制 accept (max_iterations 硬上限)
         iter_count = state.get("iteration_count", 0)
         if iter_count >= max_iterations:
             logger.warning(

@@ -1,6 +1,6 @@
 """研究报告持久化存储.
 
-AGENTS.md 第 6/7 章硬约束:
+硬约束:
 - 业务表含 agent_id + user_id 双列复合索引
 - 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (避免每次请求新建短连接)
 - save_report 失败不阻断主流程 (调用方 try/except)

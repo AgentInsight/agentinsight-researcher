@@ -1,6 +1,6 @@
 """API 路由: OpenAI 兼容端点 + 文件上传.
 
-AGENTS.md 第 13/14 章硬约束:
+OpenAI 兼容端点与 API 测试硬约束:
 - 统一调用 OpenAI 兼容端点 POST /v1/chat/completions, 请求体带 stream: true
 - 测试页面只能走对外 OpenAI 兼容接口, 禁止调用后端私有端点
 - API 测试必须覆盖流式 SSE + 非流式 + 错误码
@@ -70,7 +70,7 @@ _chat_graph: Any | None = None  # 对话追问图单例
 async def _get_graph(multi_agent: bool = False) -> Any:
     """获取/构建已编译的 LangGraph 单例.
 
-    AGENTS.md 第 5 章: 生产 StateGraph 必须挂 PostgresSaver.
+    生产 StateGraph 必须挂 PostgresSaver.
     首次调用时构建, 后续复用 (单例).
     multi_agent=True 时构建多 Agent Supervisor 图.
     """
@@ -91,7 +91,7 @@ async def _get_graph(multi_agent: bool = False) -> Any:
 async def _get_chat_graph() -> Any:
     """获取/构建对话追问图单例.
 
-    AGENTS.md 第 5 章: 生产 StateGraph 必须挂 PostgresSaver.
+    生产 StateGraph 必须挂 PostgresSaver.
     复用同一 thread_id 隔离, 支持多会话并发.
     单节点 chat 图, 依赖 checkpointer 自动加载会话历史 (report_md / messages).
     """
@@ -109,7 +109,7 @@ async def _has_report(session_id: str) -> bool:
     优先查 research_reports 表 (有 session_id 索引), 避免每次
     aget_state 加载全量 State; 查询失败时降级回 aget_state.
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离, checkpointer 自动持久化.
+    thread_id 做会话隔离, checkpointer 自动持久化.
 
     Args:
         session_id: 会话 ID (thread_id)
@@ -149,7 +149,7 @@ async def _has_report(session_id: str) -> bool:
 async def _load_chitchat_history(session_id: str) -> list[dict[str, str]]:
     """从 chat graph checkpointer 加载对话历史 (会话持久化).
 
-    AGENTS.md 第 6 章: 会话级数据通过 Checkpointer 隔离, thread_id 从请求上下文注入.
+    会话级数据通过 Checkpointer 隔离, thread_id 从请求上下文注入.
     ChitchatResponder 绕过 LangGraph 图, 需手动从 checkpointer 读取历史消息,
     否则跨请求上下文丢失.
 
@@ -190,7 +190,7 @@ async def _save_chitchat_response(
 ) -> None:
     """将 ChitchatResponder 的响应保存回 chat graph checkpointer (会话持久化).
 
-    AGENTS.md 第 6 章: 会话持久化到 Postgres Checkpointer.
+    会话持久化到 Postgres Checkpointer.
     ChitchatResponder 绕过 LangGraph 图, 需手动写入 checkpointer,
     否则下一次请求无法读到本次对话上下文.
 
@@ -311,7 +311,7 @@ async def chat_completions(
 ) -> Any:
     """OpenAI 兼容研究端点.
 
-    AGENTS.md 第 14 章: 测试页面统一调用此端点, 请求体带 stream: true.
+    测试页面统一调用此端点, 请求体带 stream: true.
     """
     settings = get_settings()
 
@@ -487,7 +487,7 @@ async def chat_completions(
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
     # SELF_HOST=False 时, 进入研究前校验 Agent 点数
-    # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图校验/扣除
+    # token 不得入日志/持久化; 仅 RESEARCH 意图校验/扣除
     if not settings.self_host and (request.org_id or request.project_id):
         from src.api.agentinsight_client import get_agentinsight_client
 
@@ -531,7 +531,7 @@ async def chat_completions(
             request.uploaded_files, user_id, agent_id
         )
 
-    # 初始 State (AGENTS.md 第 5 章: TypedDict, 节点返回 delta)
+    # 初始 State (TypedDict, 节点返回 delta)
     initial_state: dict[str, Any] = {
         "query": query,
         "session_id": session_id,
@@ -564,7 +564,7 @@ async def chat_completions(
         "iteration_count": 0,
     }
 
-    # LangGraph 配置: thread_id 做会话隔离 (AGENTS.md 第 6 章)
+    # LangGraph 配置: thread_id 做会话隔离
     graph_config = {"configurable": {"thread_id": session_id}}
 
     # IP-based 用户每日报告限额检查 (仅 self_host=True + IP-based 用户)
@@ -684,7 +684,7 @@ async def _stream_research(
     """流式 SSE 响应生成器.
 
     接入 LangGraph astream, 逐节点 yield 进度 + 最终报告.
-    AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
+    用 trace_agent 包裹 graph.ainvoke 作为根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -709,7 +709,7 @@ async def _stream_research(
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
 
-    # 根 span 包裹整次研究 (AGENTS.md 第 10 章)
+    # 根 span 包裹整次研究
     async with trace_agent(
         name="agentinsight-researcher",
         input={"query": initial_state["query"][:200], "session_id": session_id},
@@ -767,7 +767,7 @@ async def _stream_research(
                             progress += f"已策展 {len(delta['curated_sources'])} 来源\n"
                     elif node_name == "report_generator" and delta.get("report_md"):
                         # SELF_HOST=False 时, 报告生成成功后异步扣除点数 (不阻塞流式响应)
-                        # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图扣除
+                        # token 不得入日志/持久化; 仅 RESEARCH 意图扣除
                         settings_priv = get_settings()
                         if not settings_priv.self_host and (request.org_id or request.project_id):
                             from src.api.agentinsight_client import get_agentinsight_client
@@ -912,7 +912,7 @@ async def _run_research(
     """非流式研究执行.
 
     接入 LangGraph ainvoke.
-    AGENTS.md 第 10 章: trace_agent 根 span.
+    trace_agent 根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -958,7 +958,7 @@ async def _run_research(
                 content = "未生成报告内容 (可能上下文为空)"
             # 报告持久化 (从 publisher_node 移到 API 层, 节点纯函数无副作用)
             # graph 完成后调用 report_store.save_report, 保存失败仅 warn 不影响响应
-            # (用户已收到报告内容, 不返回 500; AGENTS.md 第 5 章节点纯函数约束)
+            # (用户已收到报告内容, 不返回 500; 节点纯函数约束)
             # 客户端用 report_id 构造 /v1/reports/{report_id}/download 链接
             # mypy no-redef: 第 706 行已声明 report_id, 此处重新赋值 (非重新声明)
             report_id = None
@@ -1036,7 +1036,7 @@ async def _run_research(
             }
 
     # SELF_HOST=False 时, 报告生成成功后同步扣除点数 (不阻断响应)
-    # AGENTS.md 第 11 章: token 不得入日志/持久化; 仅 RESEARCH 意图扣除
+    # token 不得入日志/持久化; 仅 RESEARCH 意图扣除
     settings_priv = get_settings()
     if (
         not settings_priv.self_host
@@ -1101,7 +1101,7 @@ async def _stream_short_query(
     """流式 SSE 短查询/离题回复生成器.
 
     直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
-    AGENTS.md 第 10 章: 用 trace_agent 包裹作为根 span.
+    用 trace_agent 包裹作为根 span.
 
     Args:
         reply: 回复内容 (短查询回复语或离题回复语)
@@ -1159,7 +1159,7 @@ async def _run_short_query(
     """非流式短查询/离题回复.
 
     直接返回 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph.
-    AGENTS.md 第 10 章: trace_agent 根 span.
+    trace_agent 根 span.
 
     Args:
         reply: 回复内容 (短查询回复语或离题回复语)
@@ -1262,7 +1262,7 @@ async def _stream_chitchat(
     """流式 SSE 闲聊响应生成器.
 
     从 ChitchatResponder 的 AsyncIterator 逐块 yield 内容, 包装为 SSE 格式.
-    AGENTS.md 第 10 章: trace_agent 根 span.
+    trace_agent 根 span.
 
     会话持久化: 流式结束后将完整响应保存回 checkpointer (save_query 非空时).
 
@@ -1345,7 +1345,7 @@ async def _run_chitchat(
     """非流式闲聊响应.
 
     从 ChitchatResponder 获取完整字符串响应.
-    AGENTS.md 第 10 章: trace_agent 根 span.
+    trace_agent 根 span.
 
     Args:
         content_or_future: ChitchatResponder 返回的字符串或 coroutine (await 后得到字符串)
@@ -1406,7 +1406,7 @@ async def _stream_chat(
     """流式 SSE 对话追问响应生成器.
 
     走 chat graph (单节点), 流式输出 AI 回答.
-    AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
+    用 trace_agent 包裹 graph.ainvoke 作为根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -1431,7 +1431,7 @@ async def _stream_chat(
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
 
-    # 根 span 包裹对话追问 (AGENTS.md 第 10 章)
+    # 根 span 包裹对话追问
     async with trace_agent(
         name="agentinsight-researcher-chat",
         input={"query": initial_state["query"][:200], "session_id": session_id},
@@ -1491,7 +1491,7 @@ async def _run_chat(
     """非流式对话追问执行.
 
     走 chat graph (单节点), 返回完整 AI 回答.
-    AGENTS.md 第 10 章: trace_agent 根 span.
+    trace_agent 根 span.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -1573,7 +1573,7 @@ _FILE_MAGIC_SIGNATURES: dict[str, list[bytes]] = {
 def _validate_magic_number(data: bytes, ext: str) -> bool:
     """校验文件 magic number (防止恶意文件伪装扩展名).
 
-    纯 Python 实现, 不依赖 python-magic / filetype 库 (AGENTS.md: 避免不必要依赖).
+    纯 Python 实现, 不依赖 python-magic / filetype 库 (避免不必要依赖).
     """
     signatures = _FILE_MAGIC_SIGNATURES.get(ext)
     if signatures is None:
@@ -1600,14 +1600,14 @@ async def upload_file(
     上传文件作为研究数据源, 文件 ID 可在 /v1/chat/completions 的
     uploaded_files 字段引用.
 
-    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离.
-    AGENTS.md 第 11 章: 安全约束 (大小/扩展名白名单/magic number).
+    用户私有数据按 agent_id + user_id 隔离.
+    安全约束 (大小/扩展名白名单/magic number).
     """
     settings = get_settings()
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
 
-    # 校验扩展名 (AGENTS.md 第 11 章: 白名单, 先于 I/O 校验)
+    # 校验扩展名 (白名单, 先于 I/O 校验)
     ext = Path(file.filename or "").suffix.lstrip(".").lower()
     if ext not in settings.allowed_extensions_list:
         raise HTTPException(
@@ -1689,7 +1689,7 @@ async def _load_uploaded_files_context(
 ) -> list[str]:
     """加载已上传文件内容作为研究上下文.
 
-    AGENTS.md 第 7 章: 按 agent_id + user_id 隔离, 禁止跨用户访问.
+    按 agent_id + user_id 隔离, 禁止跨用户访问.
     所有同步文件 I/O (exists/glob/read_text/第三方库 open) 经 asyncio.to_thread
     包裹, 避免阻塞事件循环. _extract_file_content 内部含 fitz/Document/openpyxl/pptx
     等同步库调用, 整体托管到线程执行.
@@ -1756,14 +1756,13 @@ def _extract_file_content(file_path: Path, ext: str) -> str:
 
         if ext == "pdf":
             try:
-                import fitz  # PyMuPDF
+                from pypdf import PdfReader
 
-                doc = fitz.open(str(file_path))
-                text = "\n".join(page.get_text() for page in doc)
-                doc.close()
+                reader = PdfReader(str(file_path))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
                 return str(text)
             except ImportError:
-                logger.warning("PyMuPDF 未安装, 跳过 PDF 文本提取")
+                logger.warning("pypdf 未安装, 跳过 PDF 文本提取")
                 return ""
 
         if ext == "docx":
@@ -1844,7 +1843,7 @@ async def list_models() -> Any:
 class FeedbackRequest(BaseModel):
     """人在回路反馈请求.
 
-    AGENTS.md 第 14 章: /v1/feedback 为允许调用的端点 (人在回路反馈通道).
+    /v1/feedback 为允许调用的端点 (人在回路反馈通道).
     用户通过此端点提交对研究计划/大纲的审核反馈, 解决 HumanAgent 等待的 Future.
     """
 
@@ -1862,7 +1861,7 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(request: FeedbackRequest) -> Any:
     """提交人在回路审核反馈.
 
-    AGENTS.md 第 14 章: /v1/feedback 为允许调用的端点.
+    /v1/feedback 为允许调用的端点.
     HumanAgent 在 human 节点通过 FeedbackQueue.wait_feedback() 阻塞等待,
     此端点调用 FeedbackQueue.put_feedback() 提交反馈, 解决等待.
 
@@ -1902,7 +1901,7 @@ async def list_session_reports(
     一个 session 可以生成多个报告, 返回按 created_at DESC 排序的列表.
     每项含: report_id, session_id, query, report_format, created_at, updated_at.
 
-    AGENTS.md 第 7 章: 数据按 agent_id + user_id 隔离, 此处复用请求上下文 user_id.
+    数据按 agent_id + user_id 隔离, 此处复用请求上下文 user_id.
     """
     from src.memory.report_store import get_report_store
 
@@ -1937,7 +1936,7 @@ async def download_report(
     """下载研究报告文件 (按 report_id, 支持多格式实时转换).
 
     支持 format: markdown / html / pdf / docx / json
-    AGENTS.md 第 7 章: 数据按 agent_id + user_id 隔离.
+    数据按 agent_id + user_id 隔离.
 
     向后兼容: 若 report_id 未匹配到记录, 尝试将其作为 session_id 查询最新报告
     (deprecated, 响应头 X-Deprecated 提示调用方迁移到 report_id).

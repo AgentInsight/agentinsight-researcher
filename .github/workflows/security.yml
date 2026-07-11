@@ -1,5 +1,5 @@
-# Security Scan Workflow (AGENTS.md 第 11 章安全合规红线配套)
-# 安全扫描工作流 (配套 AGENTS.md 第 11 章安全合规红线)
+# Security Scan Workflow (安全合规红线配套)
+# 安全扫描工作流 (配套安全合规红线)
 #
 # 包含三类扫描 / Three scans included:
 #   1. gitleaks   - 密钥泄露扫描 / Secret scanning

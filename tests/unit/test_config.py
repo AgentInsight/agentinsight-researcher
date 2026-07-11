@@ -1,7 +1,7 @@
 """单元测试: 配置 SSOT.
 
 验证 Settings 可从环境变量加载, 不依赖外部服务.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不得依赖外部服务.
+单元测试在构建期执行, 不得依赖外部服务.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_settings_production_validation(monkeypatch):
 
 
 def test_settings_cors_wildcard_allowed_in_prod(monkeypatch):
-    """测试生产环境 CORS 允许 * (AGENTS.md 第 11 章 CORS * 限制已移除)."""
+    """测试生产环境 CORS 允许 * (CORS * 限制已移除)."""
     for key in [
         "AGENTINSIGHT_PUBLIC_KEY",
         "AGENTINSIGHT_SECRET_KEY",

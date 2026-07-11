@@ -1,6 +1,6 @@
 """端到端测试: 通过浏览器自动化验证测试页面完整研究链路.
 
-AGENTS.md 第 13/14 章硬约束:
+测试约定:
 - e2e 必须在容器栈 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入 (默认 http://agent:8066, 宿主机跑用 127.0.0.1:8066)
 - 必须覆盖: 打开测试页面 → 新建会话 → 发送提问 → 验证流式渲染 →
@@ -22,10 +22,10 @@ from urllib.parse import urlparse
 import pytest
 from playwright.sync_api import ElementHandle, Page, expect
 
-# AGENTS.md 第 13 章: e2e 测试标记 (需容器栈 service_healthy 后执行)
+# e2e 测试标记 (需容器栈 service_healthy 后执行)
 pytestmark = pytest.mark.e2e
 
-# AGENTS.md 第 13 章: 测试目标地址从 AGENT_URL 注入, 禁止硬编码
+# 测试目标地址从 AGENT_URL 注入, 禁止硬编码
 # 默认 http://agent:8066 (容器内网络); 宿主机直跑用 127.0.0.1:8066
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
@@ -204,7 +204,7 @@ def page():
 
 
 def test_1_health_endpoint_ok():
-    """前置: /health 端点返回 200, 确认容器栈就绪 (AGENTS.md 第 13 章)."""
+    """前置: /health 端点返回 200, 确认容器栈就绪."""
     import httpx
 
     r = httpx.get(f"{AGENT_URL}/health", timeout=10.0)
@@ -215,7 +215,7 @@ def test_1_health_endpoint_ok():
 
 
 def test_2_test_page_loaded(page: Page):
-    """打开测试页面, 验证关键元素加载 (AGENTS.md 第 14 章)."""
+    """打开测试页面, 验证关键元素加载."""
     page.goto(f"{AGENT_URL}/", wait_until="domcontentloaded", timeout=30_000)
     # 标题
     expect(page).to_have_title(re.compile(r"AgentInsight Researcher"), timeout=10_000)
@@ -238,8 +238,8 @@ def test_2_test_page_loaded(page: Page):
 def test_3_research_flow_full_chain(page: Page):
     """完整研究链路: 新建会话 → 发送提问 → 流式渲染 → 检索/工具调用面板 → 报告输出.
 
-    AGENTS.md 第 13 章 e2e 必须覆盖: 提问 → 检索 → 工具调用 → 流式响应 → 会话持久化.
-    AGENTS.md 第 14 章: 验证流式渲染 + 工具调用展示面板.
+    e2e 必须覆盖: 提问 → 检索 → 工具调用 → 流式响应 → 会话持久化.
+    验证流式渲染 + 工具调用展示面板.
     """
     # 前置: 测试页面已加载 (依赖 test_2)
     sid1 = _new_session(page)
@@ -249,7 +249,7 @@ def test_3_research_flow_full_chain(page: Page):
     page.locator("#reportType").select_option("basic_report")
     _log("报告类型: basic_report")
 
-    # 提问: 简短明确的研究问题, 中文优先 (AGENTS.md 第 1 章: 中文场景)
+    # 提问: 简短明确的研究问题, 中文优先 (中文场景)
     query = "用 200 字简述 Python 异步编程的核心优势"
     _send_query(page, query)
 
@@ -273,7 +273,7 @@ def test_3_research_flow_full_chain(page: Page):
     assert panels >= 1, f"未出现任何折叠面板 (节点进度/参考来源), panels={panels}"
     _log(f"折叠面板数: {panels}")
 
-    # 截图存档 (便于人工核查, AGENTS.md 第 14 章: 工具调用/检索来源展示)
+    # 截图存档 (便于人工核查, 工具调用/检索来源展示)
     page.screenshot(path="tests/e2e/_research_done.png", full_page=True)
     _log("截图: tests/e2e/_research_done.png")
 
@@ -286,8 +286,8 @@ def test_3_research_flow_full_chain(page: Page):
 def test_4_session_isolation(page: Page):
     """会话隔离: 新建第二个会话, 提问第一个会话的内容, 验证不记得.
 
-    AGENTS.md 第 14 章: 切换会话验证隔离.
-    AGENTS.md 第 6 章: 会话间状态通过 Postgres Checkpointer 隔离, 禁止共享.
+    切换会话验证隔离.
+    会话间状态通过 Postgres Checkpointer 隔离, 禁止共享.
     """
     # 读取前一个测试保存的状态
     sid1 = page.evaluate("() => window.__test_sid1")
@@ -329,14 +329,14 @@ def test_4_session_isolation(page: Page):
 
 
 def test_5_session_id_uuid_v4_format(page: Page):
-    """验证 session_id 是合法 UUID v4 (AGENTS.md 第 6 章: thread_id 由请求上下文注入)."""
+    """验证 session_id 是合法 UUID v4 (thread_id 由请求上下文注入)."""
     sid = _new_session(page)
     assert UUID_RE.match(sid), f"session_id 非 UUID v4: {sid}"
     _log(f"UUID v4 格式校验通过: {sid}")
 
 
 def test_6_no_token_anonymous_user():
-    """无 Bearer JWT Token 时后端降级 IP-based UserId (AGENTS.md 第 8 章).
+    """无 Bearer JWT Token 时后端降级 IP-based UserId.
 
     测试页面 Token 输入框为空时, 请求头不发 Authorization, 后端按匿名用户处理.
     用流式请求只读首字即关闭, 避免等完整研究流程.
@@ -363,4 +363,4 @@ def test_6_no_token_anonymous_user():
             if line:
                 _log(f"无 token 流式响应首行: {line[:80]}")
                 break
-    _log(f"无 token 请求状态码: {r.status_code} (符合第 8 章降级预期)")
+    _log(f"无 token 请求状态码: {r.status_code} (符合降级预期)")

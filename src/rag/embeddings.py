@@ -1,13 +1,13 @@
 """Embeddings 封装.
 
-AGENTS.md 第 7 章硬约束:
+Embeddings 层硬约束:
 - Embeddings: bge-base-zh-v1.5 (中文最强开源嵌入, 本地零成本)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API
 - Qdrant 单集合 agents, payload namespace 隔离:
   - 共享知识库: namespace = agent_id
   - 用户私有数据: namespace = {agent_id}:{user_id}
 
-所有调用必须包裹在 trace_embedding span 内 (AGENTS.md 第 10 章, head-based 采样).
+所有调用必须包裹在 trace_embedding span 内 (head-based 采样).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from src.observability.tracing import trace_embedding
 
 logger = logging.getLogger(__name__)
 
-# uuid5 命名空间 (AGENTS.md 第 7 章: 点 id 用 uuid5(NAMESPACE_DNS, ...))
+# uuid5 命名空间 (点 id 用 uuid5(NAMESPACE_DNS, ...))
 NAMESPACE_DNS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 # ========== 进程内 Embedding 缓存 (LRU + TTL) ==========
@@ -165,7 +165,7 @@ class EmbeddingsCircuitOpenError(RuntimeError):
 class EmbeddingsClient:
     """Embeddings 客户端, 调用远程 TEI 服务 (bge-base-zh-v1.5).
 
-    AGENTS.md 第 1/7 章: bge-base-zh-v1.5 固定 768 维, 远程 TEI 服务.
+    bge-base-zh-v1.5 固定 768 维, 远程 TEI 服务.
 
     内置 EmbeddingsCircuitBreaker 熔断器, TEI 连续失败 N 次后短路,
     避免雪崩; 调用方可通过 is_circuit_open() 检查状态做降级 (如 context_manager).
@@ -180,7 +180,7 @@ class EmbeddingsClient:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章): 服务端开启 API_KEY 时,
+        # TEI API_KEY 鉴权: 服务端开启 API_KEY 时,
         # 客户端必须携带 Authorization: Bearer <key> 请求头
         headers: dict[str, str] = {}
         if self.settings.embeddings_api_key:
@@ -465,7 +465,7 @@ class EmbeddingsClient:
     ) -> int:
         """批量嵌入并索引到 Qdrant (embed + upsert 一体化).
 
-        AGENTS.md 第 7 章:
+        namespace 与点 id 约定:
         - namespace = agent_id (共享) 或 {agent_id}:{user_id} (私有)
         - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等
         - payload 含 content + metadata + namespace (用户私有额外含 user_id)
@@ -583,7 +583,7 @@ class EmbeddingsClient:
 
     @staticmethod
     def generate_point_id(namespace: str, content: str) -> str:
-        """幂等生成 Qdrant 点 id (AGENTS.md 第 7 章).
+        """幂等生成 Qdrant 点 id.
 
         uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}")
         """

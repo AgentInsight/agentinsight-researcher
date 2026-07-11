@@ -55,7 +55,7 @@ class QuotaCache:
     def _cache_key(self, engine: str) -> str:
         """生成缓存 key.
 
-        遵循 AGENTS.md 第 7 章 Redis 约定：
+        遵循 Redis 约定：
           {agent_id}:{user_id}:{module}:{type}:{id}
         此处为搜索引擎全局级缓存 (不区分用户)，使用固定前缀。
         """

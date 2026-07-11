@@ -1,4 +1,4 @@
-"""单元测试: 上下文压缩策略 (AGENTS.md 第 6 章).
+"""单元测试: 上下文压缩策略.
 
 验证 src/skills/researcher/context_manager.py:
 - compress_messages: 低于 compression_threshold 不触发 _hybrid_compress
@@ -8,12 +8,11 @@
 - _hybrid_compress: 摘要失败降级仅返回近期原文
 - _hybrid_compress: 消息数不足窗口大小直接返回原文
 
-AGENTS.md 第 6 章:
 - 单会话上下文上限 CONTEXT_MAX_CHARS = 800_000 (约 200K token)
 - 写入会话前应调用 compress_if_needed() 检查阈值
 - 上下文压缩策略: 滑动窗口 + LLM 摘要, 保留最近 25% 消息为原文, 其余摘要化
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (LLMClient/EmbeddingsClient) 全部 mock.
 """
 
@@ -208,7 +207,7 @@ async def test_hybrid_compress_summary_failure_degrades_to_recent_only(
 ) -> None:
     """摘要失败 (返回空字符串) 降级仅返回近期原文.
 
-    AGENTS.md 第 6 章: 压缩应不阻塞用户响应, 摘要失败时降级保留近期原文,
+    压缩应不阻塞用户响应, 摘要失败时降级保留近期原文,
     避免远期噪声 (源码 117-119 行: `if not summary: return recent_messages`).
     """
     messages = _make_messages(count=10, chars_per_msg=50)

@@ -1,6 +1,6 @@
 """Bing Web Search API 搜索器.
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 Bing Web Search API (Microsoft Azure), 适用于全球场景.
 需 BING_API_KEY 环境变量.
 """

@@ -14,7 +14,7 @@
 - chunk_size / chunk_overlap 配置生效
 - 超长无分隔符文本的字符级兜底
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务 (无 ONNX/Redis/HTTP).
+单元测试在构建期执行, 不依赖外部服务 (无 ONNX/Redis/HTTP).
 """
 
 from __future__ import annotations

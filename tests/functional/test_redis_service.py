@@ -1,11 +1,10 @@
 """功能测试: 验证 Redis 服务 (缓存 + 限流 + 短期会话).
 
-AGENTS.md 第 1/6/7 章硬约束:
-- Redis 用途: 热点缓存 + 限流 + 短期会话 (第 1 章)
-- 会话级数据按 agent_id + user_id + session_id 三级分键 (第 6 章)
-- Redis 键格式: {agent_id}:{user_id}:{module}:{type}:{id}, 禁止裸键 (第 7 章)
-- 应设 TTL, 禁止永久键 (配置数据除外) (第 7 章)
-- 测试数据隔离: agent_id=test_* + user_id=test_* (第 13 章)
+- Redis 用途: 热点缓存 + 限流 + 短期会话
+- 会话级数据按 agent_id + user_id + session_id 三级分键
+- Redis 键格式: {agent_id}:{user_id}:{module}:{type}:{id}, 禁止裸键
+- 应设 TTL, 禁止永久键 (配置数据除外)
+- 测试数据隔离: agent_id=test_* + user_id=test_*
 
 执行方式 (宿主机, 容器栈已 healthy):
     set REDIS_HOST=127.0.0.1
@@ -26,7 +25,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_AUTH = os.getenv("REDIS_AUTH", "")
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
-# 测试数据隔离前缀 (AGENTS.md 第 13 章: agent_id=test_* / user_id=test_*)
+# 测试数据隔离前缀 (agent_id=test_* / user_id=test_*)
 TEST_AGENT_ID = f"test_redis_agent_{uuid.uuid4().hex[:8]}"
 TEST_USER_ID = f"test_redis_user_{uuid.uuid4().hex[:8]}"
 
@@ -51,7 +50,7 @@ def _get_redis_client() -> redis.Redis:
 def test_redis_ping() -> None:
     """验证 Redis PING 响应 (redis-cli ping 等价).
 
-    AGENTS.md 第 1 章: Redis 为缓存/限流/短期会话基础设施, 必须 PING → True.
+    Redis 为缓存/限流/短期会话基础设施, 必须 PING → True.
     """
     client = _get_redis_client()
     try:
@@ -67,7 +66,6 @@ def test_redis_ping() -> None:
 def test_redis_set_get_ttl() -> None:
     """验证 SET + GET + TTL, 含 agent_id:user_id: 前缀键格式.
 
-    AGENTS.md 第 7 章:
     - 键格式 {agent_id}:{user_id}:{module}:{type}:{id}
     - 应设 TTL, 禁止永久键
     """
@@ -105,7 +103,6 @@ def test_redis_set_get_ttl() -> None:
 def test_redis_key_prefix_isolation() -> None:
     """验证不同 agent_id/user_id 前缀的键互不干扰 (数据隔离).
 
-    AGENTS.md 第 7 章:
     - 所有键应加前缀 {agent_id}:{user_id}:
     - 会话级数据按 agent_id + user_id + session_id 三级分键, 禁止全局共享
     - 不同 agent/user 的同名 id 键应隔离 (前缀不同即不同键)

@@ -7,10 +7,10 @@
 
 注意: 这些是静态文件检查, 不需要真正构建 Docker 镜像.
 Dockerfile.qa / Dockerfile.offline / docker-compose-qa.yaml / packages/debs/ 均在
-.gitignore 中 (AGENTS.md 第 12 章三套构建模式, 不入仓), 文件不存在时跳过用例
+.gitignore 中 (三套构建模式, 不入仓), 文件不存在时跳过用例
 而非失败 (CI 全新克隆环境可能无这些文件).
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

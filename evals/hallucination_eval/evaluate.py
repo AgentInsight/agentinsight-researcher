@@ -5,7 +5,7 @@
 - 事实性 (factual): 声明是否有来源支持 (supported/unsupported/contradicted)
 - 一致性 (consistency): 报告与来源是否矛盾
 
-LLM 评测复用项目 LLMClient (LiteLLM 网关, AGENTS.md 第 9 章).
+LLM 评测复用项目 LLMClient (LiteLLM 网关).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """ReportGenerator._normalize_markdown 单元测试.
 
-原文件为手动脚本 (run_tests + __main__), 违反 AGENTS.md 第 3 章 "手动调试
+原文件为手动脚本 (run_tests + __main__), 违反 "手动调试
 脚本放在 tests/manual/" 约定. 重构为 pytest 参数化用例, 保留在 unit/ 下
 作为正式测试, 同时支持 `python -m tests.unit.test_normalize_markdown` 独立
 运行 (兼容旧用法).

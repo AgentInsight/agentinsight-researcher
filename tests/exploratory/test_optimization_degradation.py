@@ -1,6 +1,5 @@
 """探索性测试: 8 项优化的降级场景.
 
-AGENTS.md 第 7/9/13 章硬约束:
 - FastEmbed 加载失败时降级到远程 TEI (EmbeddingsClient)
 - Redis 不可用时应降级无缓存, 不阻断检索
 - exa-search timeout=10s 超时降级 (返回空列表)
@@ -109,7 +108,7 @@ async def test_fastembed_failure_degrades_to_bm25_in_rerank(
 async def test_redis_unavailable_search_cache_degrades() -> None:
     """降级: Redis 不可用时 _cached_search 降级为直接搜索.
 
-    AGENTS.md 第 7 章: Redis 不可用时应降级无缓存, 不阻断检索.
+    Redis 不可用时应降级无缓存, 不阻断检索.
     get_redis_client 返回 None 时, _cached_search 跳过缓存直接调用 searcher.
     """
     from src.skills.researcher.research_conductor import ResearchConductor

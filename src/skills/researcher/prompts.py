@@ -430,7 +430,7 @@ class DefaultPromptFamily(PromptFamily):
         max_results: int,
     ) -> str:
         # SourceCurator 评估要点
-        # - 强调 "Quantitative Value" (业界实践出现 5 次)
+        # - 强调 "Quantitative Value" (出现 5 次)
         # - 5 维评估 (Relevance/Credibility/Currency/Objectivity/Quantitative Value)
         # - "Err on the side of inclusion" (宁多勿少)
         # prompt 精简, 仅输出 index+score, 不输出 reason
@@ -583,7 +583,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         max_subtopics: int = 5,
     ) -> str:
         # generate_subtopics
-        # 用 STRATEGIC LLM 拆解子主题, temperature=0.25 (业界实践)
+        # 用 STRATEGIC LLM 拆解子主题, temperature=0.25
         return f"""{role_persona}
 
 请基于以下研究问题与初始上下文, 拆解为 3-{max_subtopics} 个用于分章节深入研究的子主题.
@@ -615,7 +615,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_max: int = 500,
     ) -> str:
         # write_introduction
-        # 用 SMART LLM 写引言, temperature=0.25 (业界实践)
+        # 用 SMART LLM 写引言, temperature=0.25
         return f"""{role_persona}
 
 请基于以下上下文, 为「{query}」研究报告撰写引言部分.
@@ -650,8 +650,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_max: int = 1200,
     ) -> str:
         # write_section
-        # 用 SMART LLM 写章节, temperature=0.35 (业界实践)
-        # 章节字数 500-1000 → 800-1200 对齐业界实践
+        # 用 SMART LLM 写章节, temperature=0.35
+        # 章节字数 500-1000 → 800-1200
         return f"""{role_persona}
 
 请基于以下子主题上下文, 撰写「{topic}」章节内容.
@@ -696,7 +696,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
         word_max: int = 500,
     ) -> str:
         # write_conclusion
-        # 用 SMART LLM 写结论, temperature=0.25 (业界实践)
+        # 用 SMART LLM 写结论, temperature=0.25
         return f"""{role_persona}
 
 请基于以下已写章节内容, 为「{query}」研究报告撰写结论部分.

@@ -8,7 +8,7 @@
 - HTTP 429 抛 QuotaExceededError (含额度重置时间)
 - 其他 HTTP 错误 (500/403) 与网络异常降级返回空列表
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务, 全部 mock httpx.
+单元测试在构建期执行, 不依赖外部服务, 全部 mock httpx.
 """
 
 from __future__ import annotations

@@ -4,11 +4,11 @@ CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN.md P0 核心组件:
 - SHORT_QUERY/OFF_TOPIC 响应从"固定话术"升级为"FAST_LLM + Persona + 三段式"
 - 保留 multi-template 作为兜底 (FAST 失败时降级, 不阻断主流程)
 
-AGENTS.md 合规:
-- 第 5 章: 节点为纯函数, 单一职责无副作用
-- 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连
-- 第 10 章: trace_chain span 包裹 (禁 agentinsight.observe 装饰器)
-- 第 7 章: 不依赖 Qdrant/Embeddings (仅 LLM + 配置)
+架构合规:
+- 节点为纯函数, 单一职责无副作用
+- LLM 调用经 llm/ 网关 (LiteLLM), 禁厂商 SDK 直连
+- trace_chain span 包裹 (禁 agentinsight.observe 装饰器)
+- 不依赖 Qdrant/Embeddings (仅 LLM + 配置)
 
 依赖方向: skills/ → config/ + llm/ + observability/ (单向向内)
 不依赖: agents/ / graph/ (保持架构边界)
@@ -48,10 +48,10 @@ class ChitchatResponder:
     - 失败降级到 multi-template (零成本, 不阻断)
     - 不升级到 SMART (闲聊不值得用 SMART 成本)
 
-    符合 AGENTS.md:
-    - 第 5 章: 节点为纯函数, 单一职责
-    - 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM)
-    - 第 10 章: trace_chain span 包裹
+    符合架构约定:
+    - 节点为纯函数, 单一职责
+    - LLM 调用经 llm/ 网关 (LiteLLM)
+    - trace_chain span 包裹
     """
 
     def __init__(
@@ -93,8 +93,8 @@ class ChitchatResponder:
 
         Args:
             query: 用户输入
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
+            session_id: 会话 ID (隔离键)
+            user_id: 用户 ID (隔离键)
             history: 对话历史 (来自 checkpointer, [{"role":"user","content":...},{"role":"assistant","content":...}])
             stream: 是否流式响应
 

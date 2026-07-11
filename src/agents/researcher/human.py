@@ -1,7 +1,7 @@
 """HumanAgent 人在回路节点.
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点为纯函数.
-AGENTS.md 第 10 章: 用 trace_chain 包裹 (异步上下文管理器).
+LangGraph StateGraph 唯一编排, 节点为纯函数.
+用 trace_chain 包裹 (异步上下文管理器).
 
 流程:
     1. 通过 WebSocket 推送研究计划给前端 (human_feedback_request 消息)
@@ -36,8 +36,8 @@ _ACCEPT_KEYWORDS: frozenset[str] = frozenset(
 class HumanAgent:
     """人在回路 Agent, 审核研究计划/大纲.
 
-    AGENTS.md 第 5 章: 节点为纯函数, 禁止原地修改入参 State, 返回 delta dict.
-    AGENTS.md 第 10 章: 用 trace_chain 包裹 (异步上下文管理器).
+    节点为纯函数, 禁止原地修改入参 State, 返回 delta dict.
+    用 trace_chain 包裹 (异步上下文管理器).
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -51,7 +51,7 @@ class HumanAgent:
         3. 返回 human_feedback (str|None) + revisions_count (int)
 
         Returns:
-            delta dict (由 reducer 合并, AGENTS.md 第 5 章):
+            delta dict (由 reducer 合并):
                 - human_feedback: str | None (None 表示接受/通过)
                 - revisions_count: int (本次要求修订则 +1, 接受则 +0;
                   Annotated[int, operator.add] 累加)
@@ -136,6 +136,6 @@ async def human_node(
 ) -> dict[str, Any]:
     """HumanAgent 节点 (LangGraph 节点包装).
 
-    AGENTS.md 第 5 章: 节点为纯函数 async def node(state) -> dict.
+    节点为纯函数 async def node(state) -> dict.
     """
     return await human_agent.review_plan(state)

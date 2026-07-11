@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # agentinsight-researcher 生产构建脚本 (联网模式)
-# 严格遵循 AGENTS.md 第 12 章: 生产使用联网模式, QA 使用离线模式
+# 生产使用联网模式, QA 使用离线模式
 # 使用方式: bash docker-build.sh
 # 依赖: packages/images/*.tar (基础镜像预下载, 避免构建时拉取失败)
 

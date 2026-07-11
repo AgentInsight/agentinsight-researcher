@@ -1,6 +1,6 @@
 """Qdrant 客户端封装.
 
-AGENTS.md 第 7 章硬约束:
+Qdrant 集合硬约束:
 - 单一集合 agents, distance=Cosine, vector_size=768 (bge-base-zh-v1.5 固定)
 - payload namespace 隔离:
   - 共享知识库: namespace = agent_id (不含 user_id, 所有用户共享)
@@ -36,7 +36,7 @@ _namespace_cache: dict[str, tuple[bool, float]] = {}  # key=namespace, value=(ha
 class QdrantManager:
     """Qdrant 集合管理 + 客户端封装.
 
-    AGENTS.md 第 7 章: 单一集合 agents, payload namespace 隔离.
+    单一集合 agents, payload namespace 隔离.
     """
 
     settings: Settings
@@ -85,7 +85,7 @@ class QdrantManager:
     async def ensure_collection(self) -> None:
         """确保集合存在 (不存在则创建, 含 HNSW 参数调优).
 
-        AGENTS.md 第 7 章: 单一集合 agents, distance=Cosine, vector_size=768.
+        单一集合 agents, distance=Cosine, vector_size=768.
         中文密集检索场景, HNSW m=32/ef_construct=200 提升召回率,
         scalar 量化降低内存 50%.
 
@@ -158,14 +158,14 @@ class QdrantManager:
     def build_shared_namespace(self) -> str:
         """共享知识库 namespace = agent_id (旧版兼容, 推荐用 build_data_shared_namespace).
 
-        AGENTS.md 第 7 章: 共享知识库 namespace = agent_id, 不含 user_id.
+        共享知识库 namespace = agent_id, 不含 user_id.
         """
         return self.settings.agent_name
 
     def build_user_namespace(self, user_id: str) -> str:
         """用户私有数据 namespace = {agent_id}:{user_id} (旧版兼容, 推荐用 build_data_user_namespace).
 
-        AGENTS.md 第 7 章: 用户私有数据 namespace = {agent_id}:{user_id}, payload 含 user_id.
+        用户私有数据 namespace = {agent_id}:{user_id}, payload 含 user_id.
         """
         return f"{self.settings.agent_name}:{user_id}"
 
@@ -177,21 +177,21 @@ class QdrantManager:
     def build_data_shared_namespace(self) -> str:
         """共享研究数据 namespace = {agent_id}-data (新命名, 替代旧 build_shared_namespace).
 
-        AGENTS.md 第 7 章: 共享知识库, 所有用户共享, 不含 user_id.
+        共享知识库, 所有用户共享, 不含 user_id.
         """
         return f"{self.settings.agent_name}-data"
 
     def build_data_user_namespace(self, user_id: str) -> str:
         """用户私有数据 namespace = {agent_id}-data:{user_id}.
 
-        AGENTS.md 第 7 章: 用户私有数据按 user_id 隔离, payload 含 user_id.
+        用户私有数据按 user_id 隔离, payload 含 user_id.
         """
         return f"{self.settings.agent_name}-data:{user_id}"
 
     async def count_points_in_namespace(self, namespace: str) -> int:
         """统计指定 namespace 下的点数.
 
-        AGENTS.md 第 7 章: 按 payload namespace 字段过滤统计.
+        按 payload namespace 字段过滤统计.
         用于"私有数据搜索前先判断有没有数据"的需求.
 
         exact=True → exact=False
@@ -288,7 +288,7 @@ class QdrantManager:
     ) -> None:
         """批量写入点.
 
-        AGENTS.md 第 7 章:
+        点 id 幂等生成约定:
         - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等生成
         - payload 必须含 content + metadata + namespace
         - 用户私有数据额外含 user_id
@@ -342,7 +342,7 @@ class QdrantManager:
     async def delete_by_namespace(self, namespace: str) -> None:
         """删除指定 namespace 下的所有点 (按 payload namespace 字段过滤).
 
-        用于种子模式版本更新时清理旧数据 (AGENTS.md 第 7 章: payload namespace 隔离).
+        用于种子模式版本更新时清理旧数据 (按 payload namespace 隔离).
 
         入口自保 ensure_collection, 避免新环境首次删除 404.
         """
@@ -379,8 +379,8 @@ class QdrantManager:
     ) -> list[dict[str, Any]]:
         """向量检索.
 
-        AGENTS.md 第 7 章: 必须显式传 namespace 列表, 禁止全集合扫描.
-        AGENTS.md 第 7 章: score_threshold 仅 rerank 启用时生效, 向量检索阶段不应套用
+        必须显式传 namespace 列表, 禁止全集合扫描.
+        score_threshold 仅 rerank 启用时生效, 向量检索阶段不应套用
             rerank 的 0.3 阈值 (会提前裁剪 RRF 候选集, 降低召回). 调用方未显式传
             score_threshold 时, 此处不再 fallback 到 settings.score_threshold,
             让 RRF + Rerank 阶段做最终筛选.
@@ -435,7 +435,7 @@ class QdrantManager:
     ) -> list[dict[str, Any]]:
         """scroll 拉取 namespace 内所有点的 content (用于 BM25 语料构建).
 
-        AGENTS.md 第 7 章: 按 payload namespace 字段过滤, 仅返回 content/metadata/
+        按 payload namespace 字段过滤, 仅返回 content/metadata/
         namespace 三键 (与 upsert_points 写入 payload 一致). 不返回向量 (节省网络带宽).
 
         P0 BM25 断点修复: HybridRetriever._ensure_bm25_corpus 调用此方法填充 BM25 语料,

@@ -5,8 +5,8 @@
 - SecurityHeadersMiddleware: 安全响应头注入 + HSTS (prod 环境)
 - 请求上下文 getter: get_request_user_id/get_request_session_id/get_request_agent_id
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
-AGENTS.md 第 8/11 章: JWT 解析 + 安全响应头硬约束.
+单元测试不依赖外部服务.
+JWT 解析 + 安全响应头硬约束.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def test_jwt_no_auth_header_uses_ip_based_user_id(
 ) -> None:
     """无 Authorization 头 → 降级 IP-based UserId (不调用 user_info API).
 
-    AGENTS.md 第 8 章: default_user_id 环境变量已移除, 无 token 时按客户端
+    default_user_id 环境变量已移除, 无 token 时按客户端
     IP 生成确定性 UserId (TestClient 默认 client host 为 "testclient",
     generate_user_id_from_ip("testclient") = "ip_846488f1dc5c07b4cebe5c14").
     """
@@ -185,7 +185,7 @@ def test_jwt_token_call_fails_falls_back_to_ip(
 ) -> None:
     """token 调用失败 (连接错误) → 降级 IP-based UserId + 告警.
 
-    AGENTS.md 第 8 章: 调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
+    调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
     """
     settings = Settings(_env_file=None)
     fake = _FakeAsyncClient(exc=httpx.ConnectError("connection refused"))

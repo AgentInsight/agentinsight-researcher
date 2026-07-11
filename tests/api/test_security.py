@@ -1,8 +1,8 @@
 """API 测试: 安全验证.
 
-AGENTS.md 第 11/13/14 章硬约束:
+测试约定:
 - 安全响应头中间件不可绕过: nosniff / DENY / XSS-Protection / Referrer-Policy
-- CORS 中间件正确响应 OPTIONS 预检请求 (CORS * 限制已移除, 见 AGENTS.md 第 11 章)
+- CORS 中间件正确响应 OPTIONS 预检请求 (CORS * 限制已移除)
 - Agent Discovery Protocol 公开发现端点: GET /.well-known/agent-discovery.json → 200
 
 执行方式 (宿主机, 容器栈已 healthy):
@@ -18,7 +18,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s
@@ -29,7 +29,7 @@ API_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 def test_security_headers() -> None:
     """验证安全响应头: nosniff / DENY / XSS-Protection / Referrer-Policy.
 
-    AGENTS.md 第 11 章: 安全响应头中间件不可绕过.
+    安全响应头中间件不可绕过.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.get(f"{AGENT_URL}/health")
@@ -56,7 +56,7 @@ def test_security_headers() -> None:
 def test_cors_config() -> None:
     """验证 CORS 中间件正确响应 OPTIONS 预检请求.
 
-    AGENTS.md 第 11 章: CORS * 限制已移除, 允许配置 * 或具体白名单.
+    CORS * 限制已移除, 允许配置 * 或具体白名单.
     本测试仅验证 CORS 中间件能正确返回 Access-Control-Allow-Origin 头.
     """
     # 发送带 Origin 的 OPTIONS 预检请求
@@ -100,7 +100,7 @@ def test_cors_allowed_origin() -> None:
 def test_agent_discovery() -> None:
     """验证 Agent Discovery Protocol: GET /.well-known/agent-discovery.json → 200.
 
-    AGENTS.md 第 14 章: 公开发现端点, 无需鉴权.
+    公开发现端点, 无需鉴权.
     返回 Agent 元信息供客户端自动发现与对接.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -118,13 +118,13 @@ def test_agent_discovery() -> None:
     assert "/v1/chat/completions" in service_paths, (
         f"services 缺少 /v1/chat/completions: {service_paths}"
     )
-    # auth 应支持 bearer_jwt 和 none (AGENTS.md 第 8 章: 匿名降级)
+    # auth 应支持 bearer_jwt 和 none (匿名降级)
     assert "bearer_jwt" in data["auth"], f"auth 缺少 bearer_jwt: {data['auth']}"
     assert "none" in data["auth"], f"auth 缺少 none: {data['auth']}"
 
 
 # ============================================================================
-# JWT Token 身份解析安全测试 (AGENTS.md 第 8/11 章硬约束)
+# JWT Token 身份解析安全测试 (安全硬约束)
 # - Bearer JWT Token 有效时调用 GET /api/user 获取 user_id
 # - Token 不存在时降级 (self_host=True → IP-based UserId)
 # - Token 调用失败时降级并告警
@@ -136,7 +136,7 @@ def test_agent_discovery() -> None:
 def test_jwt_token_not_in_response_headers() -> None:
     """验证 JWT Token 不出现在任何响应头中 (PII 安全硬约束).
 
-    AGENTS.md 第 11 章: 禁止将原始 JWT token 写入日志或持久化存储;
+    禁止将原始 JWT token 写入日志或持久化存储;
     API 响应禁止返回密码/密钥原文.
     """
     test_token = f"eyJhbGciOiJIUzI1NiJ9.{uuid.uuid4().hex}.{uuid.uuid4().hex}"
@@ -161,8 +161,8 @@ def test_jwt_token_not_in_response_headers() -> None:
 def test_jwt_token_not_in_response_body_with_org_id() -> None:
     """验证携带 org_id 时 JWT Token 不出现在响应 body 中 (PII 安全硬约束).
 
-    AGENTS.md 第 8 章: SELF_HOST=False 时 org_id 触发点数校验, 需 token.
-    AGENTS.md 第 11 章: 禁止将原始 JWT token 写入持久化存储.
+    SELF_HOST=False 时 org_id 触发点数校验, 需 token.
+    禁止将原始 JWT token 写入持久化存储.
     """
     test_token = f"eyJhbGciOiJIUzI1NiJ9.{uuid.uuid4().hex}.{uuid.uuid4().hex}"
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -186,7 +186,7 @@ def test_jwt_token_not_in_response_body_with_org_id() -> None:
 def test_no_token_degrades_to_ip_based_user_id() -> None:
     """验证无 token 时降级 IP-based UserId (self_host=True 默认模式).
 
-    AGENTS.md 第 8 章: self_host=True 时 token 不存在按 IP 生成确定性 UserId.
+    self_host=True 时 token 不存在按 IP 生成确定性 UserId.
     服务端默认 SELF_HOST=True, 无 token 应返回 200.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -208,7 +208,7 @@ def test_no_token_degrades_to_ip_based_user_id() -> None:
 def test_invalid_bearer_token_degrades_gracefully() -> None:
     """验证无效 Bearer Token 调用失败时优雅降级 (self_host=True).
 
-    AGENTS.md 第 8 章: token 调用失败时降级 IP-based UserId 并告警.
+    token 调用失败时降级 IP-based UserId 并告警.
     test-token-invalid 非合法 JWT, user_info API 会返回 4xx, 应降级.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -232,7 +232,7 @@ def test_invalid_bearer_token_degrades_gracefully() -> None:
 def test_non_bearer_auth_header_treated_as_no_token() -> None:
     """验证非 Bearer 格式的 Authorization 头按无 token 处理.
 
-    AGENTS.md 第 8 章: 仅 Bearer 前缀的 token 被识别.
+    仅 Bearer 前缀的 token 被识别.
     Basic 认证头应被视为无 token, 降级 IP-based UserId.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
@@ -255,7 +255,7 @@ def test_non_bearer_auth_header_treated_as_no_token() -> None:
 def test_empty_bearer_token_treated_as_no_token() -> None:
     """验证 'Bearer ' (空 token) 按无 token 处理.
 
-    AGENTS.md 第 8 章: token 提取后为空字符串时视为无 token.
+    token 提取后为空字符串时视为无 token.
 
     注: httpx 严格校验 header 值, 'Bearer ' (空格后无内容) 会被拒绝.
     使用 http.client 标准库发送原始 HTTP 请求绕过 httpx 校验.
@@ -297,7 +297,7 @@ def test_empty_bearer_token_treated_as_no_token() -> None:
 def test_public_health_endpoint_no_jwt_required() -> None:
     """验证 /health 公开路径无需 JWT (健康检查不应强制鉴权).
 
-    AGENTS.md 第 8/14 章: /health 为公开路径, JWT 中间件应跳过.
+    /health 为公开路径, JWT 中间件应跳过.
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.get(f"{AGENT_URL}/health")
@@ -310,7 +310,7 @@ def test_public_health_endpoint_no_jwt_required() -> None:
 def test_jwt_token_not_in_stream_response_with_org_id() -> None:
     """验证流式响应中 JWT Token 不泄漏 (携带 org_id 场景).
 
-    AGENTS.md 第 11 章: 禁止将原始 JWT token 写入日志或持久化存储.
+    禁止将原始 JWT token 写入日志或持久化存储.
     """
     test_token = f"eyJhbGciOiJIUzI1NiJ9.{uuid.uuid4().hex}.{uuid.uuid4().hex}"
     with httpx.Client(timeout=API_TIMEOUT) as client:

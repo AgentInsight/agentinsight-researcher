@@ -1,6 +1,6 @@
 """agentinsight-researcher FastAPI 入口.
 
-AGENTS.md 第 3/8/14 章: API 入口, JWT 中间件, OpenAI 兼容端点, 前端测试页面.
+API 入口, JWT 中间件, OpenAI 兼容端点, 前端测试页面.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logging.basicConfig(level=settings.log_level)
     logger.info("agentinsight-researcher 启动中 (env=%s)", settings.env)
 
-    # 启动时初始化业务数据 (AGENTS.md 第 6 章):
+    # 启动时初始化业务数据:
     # PostgreSQL 业务表由 Agent 启动时触发 (幂等)
     # 失败不阻断启动 (仅告警), depends_on service_healthy 已保证依赖就绪
     # 注: 行业适配采用 4 层机制 (Prompt/Config/Retriever/MCP), 不再 bootstrap GICS 行业知识库
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await init_database(settings)
 
-    # 显式同步 ensure Qdrant 集合 (AGENTS.md 第 6/7 章)
+    # 显式同步 ensure Qdrant 集合
     # 必须同步等待完成, 避免新环境首请求竞态 (后台任务可能在集合未就绪时被查询)
     # 失败不阻断启动 (仅告警), 后续业务方法自保 _ensure_collection_once 兜底
     async def _ensure_qdrant_collection() -> None:
@@ -185,7 +185,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.env == "dev" else None,
     )
 
-    # CORS (AGENTS.md 第 11 章, * 限制已移除)
+    # CORS (* 限制已移除)
     allow_credentials = "*" not in settings.cors_allow_origins
     app.add_middleware(
         CORSMiddleware,
@@ -195,16 +195,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # JWT 身份解析中间件 (AGENTS.md 第 8 章)
+    # JWT 身份解析中间件
     app.add_middleware(JWTAuthMiddleware, settings=settings)
 
-    # 安全响应头中间件 (AGENTS.md 第 11 章, 不可绕过)
+    # 安全响应头中间件 (不可绕过)
     app.add_middleware(SecurityHeadersMiddleware)
 
     # 统一请求追踪 ID 中间件 (纯 ASGI, 注入 X-Request-ID)
     app.add_middleware(RequestIDMiddleware)
 
-    # 健康检查 (AGENTS.md 第 12 章, 容器健康检查端点)
+    # 健康检查 (容器健康检查端点)
     @app.get("/health")
     async def health() -> JSONResponse:
         return JSONResponse(
@@ -212,7 +212,7 @@ def create_app() -> FastAPI:
             content={"status": "ok", "service": "agentinsight-researcher", "version": "0.1.0"},
         )
 
-    # OpenAI 兼容端点 (AGENTS.md 第 14 章)
+    # OpenAI 兼容端点
     app.include_router(api_router)
 
     # MCP 配置管理端点 (前端 MCP 配置 + Postgres 持久化)
@@ -221,7 +221,7 @@ def create_app() -> FastAPI:
     # Agent Discovery Protocol 公开发现端点 (无需鉴权)
     app.include_router(discovery_router)
 
-    # WebSocket 双向实时通信端点 (AGENTS.md 第 14 章允许端点)
+    # WebSocket 双向实时通信端点
     # SSE 仍是主通道, WebSocket 是增强通道 (人在回路审核请求 + 实时进度)
     if settings.websocket_enabled:
         from src.api.websocket import router as ws_router
@@ -264,7 +264,7 @@ def create_app() -> FastAPI:
             },
         )
 
-    # 前端测试页面 (AGENTS.md 第 14 章)
+    # 前端测试页面
     if settings.enable_test_page:
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():

@@ -1,6 +1,5 @@
 """性能测试: 吞吐量 (Embeddings + Qdrant + 并发短查询).
 
-AGENTS.md 第 7/13 章硬约束:
 - Embeddings: bge-base-zh-v1.5 (固定 768 维), TEI 服务 /embed 接口
 - Qdrant: 单一集合 agents, distance=Cosine, namespace 过滤隔离
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
@@ -52,7 +51,7 @@ VECTOR_DIM = 768
 
 
 def _unique_session_id(prefix: str = "perf_thr") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -62,7 +61,7 @@ def _unique_session_id(prefix: str = "perf_thr") -> str:
 def test_embeddings_single_latency(embeddings_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证单条文本嵌入延迟 < 2s (TEI /embed 单条).
 
-    AGENTS.md 第 7 章: Embeddings bge-base-zh-v1.5, 固定 768 维.
+    Embeddings bge-base-zh-v1.5, 固定 768 维.
     """
     threshold_s = perf_thresholds["embeddings_single_s"]
     headers = embeddings_auth_headers()
@@ -89,7 +88,7 @@ def test_embeddings_batch_10_latency(
 ) -> None:
     """验证批量 10 条文本嵌入延迟 < 5s (TEI /embed 批量).
 
-    AGENTS.md 第 7 章: TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
+    TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
     TEI MAX_BATCH_REQUESTS=4, 10 条文本分 3 批 (4+4+2) 发送.
     """
     threshold_s = perf_thresholds["embeddings_batch_10_s"]
@@ -137,7 +136,6 @@ def test_qdrant_search_latency(
 ) -> None:
     """验证 Qdrant 搜索延迟 < 1s (不含 embedding 时间, 含 namespace 过滤).
 
-    AGENTS.md 第 7 章:
     - 单一集合 agents, distance=Cosine, vector_size=768
     - 检索时显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
     - 测试数据隔离: namespace=test_*
@@ -195,7 +193,7 @@ async def _run_short_query_async(
 ) -> tuple[float, int, str]:
     """执行单个短查询, 返回 (耗时, 状态码, session_id).
 
-    AGENTS.md 第 13 章: 每次用唯一 session_id=test_*.
+    每次用唯一 session_id=test_*.
     """
     sid = _unique_session_id("perf_conc")
     payload = {
@@ -214,7 +212,7 @@ def test_concurrent_short_queries_5(agent_url: str, perf_thresholds: dict[str, f
     """验证 5 个并发短查询全部在 15s 内完成.
 
     短查询不走 graph, 应支持并发.
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
+    每个 Agent 应支持并发多会话.
     """
     threshold_s = perf_thresholds["concurrent_5_s"]
     queries = ["你好", "嗨", "在吗", "你是谁", "能帮我什么"]
@@ -248,7 +246,7 @@ def test_concurrent_short_queries_10(agent_url: str, perf_thresholds: dict[str, 
     """验证 10 个并发短查询全部在 30s 内完成.
 
     短查询不走 graph, 应支持并发.
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
+    每个 Agent 应支持并发多会话.
     """
     threshold_s = perf_thresholds["concurrent_10_s"]
     queries = [

@@ -1,7 +1,7 @@
 """单元测试: ImageGenerator 静态纯函数.
 
 验证 _parse_image_response (dict/对象形式响应) 与 _get_api_key (按路由前缀).
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@
 - revise() 返回修订后报告, revision_count 累加由 reviser_node 节点包装负责
   (见 test_graph_nodes.py::test_reviser_node_increments_count)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM 全部 mock).
+单元测试不依赖外部服务 (LLM 全部 mock).
 """
 
 from __future__ import annotations

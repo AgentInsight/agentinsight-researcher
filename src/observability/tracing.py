@@ -1,6 +1,6 @@
 """AgentInsight SDK 可观测性封装.
 
-AGENTS.md 第 10 章硬约束:
+可观测性硬约束:
 - 统一使用 agentinsight-sdk (pip 名 agentinsight-sdk, 导入名 agentinsight, ≥0.1.5)
 - 追踪调用方式唯一: 异步上下文管理器 async with trace_xxx(...) as span
 - 禁用观察者模式 (无 Subject/Observer, 无 attach/notify)
@@ -10,7 +10,7 @@ AGENTS.md 第 10 章硬约束:
 - SDK 初始化失败或运行时异常时, 所有 trace_xxx yield _NoopSpan (Null Object 模式)
 - 业务代码禁止判断 SDK 是否可用, span.update() 调用永远安全
 
-V5: 恢复单一 AgentInsight 后端 (AGENTS.md 第 4 章禁用清单第 5 条: Langfuse 已由 AgentInsight SDK 替代).
+V5: 恢复单一 AgentInsight 后端 (Langfuse 已由 AgentInsight SDK 替代).
 get_tracer() 工厂仅二路分发: AgentInsight SDK 可用 → AgentInsightTracer / 不可用 → _NoopTracer.
 
 提供 6 类 trace span.
@@ -219,7 +219,7 @@ class AgentInsightTracer:
         """Agent 级根 span, 包裹 graph.ainvoke().
 
         as_type=agent, 必带: name/input/metadata(含 session_id/user_id)/session_id/user_id.
-        AGENTS.md 第 10 章: 编排器入口建立根 span, LangGraph 节点内子 span 自动关联.
+        编排器入口建立根 span, LangGraph 节点内子 span 自动关联.
         """
         client = _get_client()
         if client is None:
@@ -426,7 +426,7 @@ class AgentInsightTracer:
         """Embedding 调用 span (高频, head-based 采样).
 
         as_type=embedding, 必带: name/model/usage_details(含 token_count).
-        AGENTS.md 第 10 章: head-based 采样, 默认 tracing_embedding_sample_rate=0.5.
+        head-based 采样, 默认 tracing_embedding_sample_rate=0.5.
         """
         client = _get_client()
         if client is None:
@@ -471,7 +471,7 @@ _tracer: Any = None
 def get_tracer() -> Any:
     """追踪后端工厂.
 
-    V5: 恢复单一 AgentInsight 后端 (AGENTS.md 第 4 章禁用清单第 5 条).
+    V5: 恢复单一 AgentInsight 后端.
     分发逻辑:
     - AgentInsight SDK 可用 → AgentInsightTracer
     - 不可用 → _NoopTracer (降级)

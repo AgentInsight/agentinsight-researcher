@@ -1,6 +1,5 @@
 """探索性测试: 8 项优化的边界场景.
 
-AGENTS.md 第 7/13 章硬约束:
 - 所有外部输入经 Pydantic 校验
 - 上下文压缩 CONTEXT_MAX_CHARS=800_000
 - 测试数据隔离: namespace=test_* + user_id=test_* + session_id=test_*
@@ -208,7 +207,7 @@ async def test_single_char_query_cached_correctly(
 async def test_ultra_long_text_context_compression() -> None:
     """边界: 超长文本 (>800K chars) 的上下文压缩.
 
-    AGENTS.md 第 6 章: CONTEXT_MAX_CHARS=800_000.
+    CONTEXT_MAX_CHARS=800_000.
     compression_threshold=8000, 超过阈值触发 _hybrid_compress.
     本测试验证 850K 字符消息列表能被正确压缩 (不超时/不崩溃).
     """

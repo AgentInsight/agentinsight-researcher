@@ -6,7 +6,7 @@
 - 二次调用安全 (关闭后再次调用不报错)
 - server.py lifespan shutdown 阶段调用清理
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ async def test_get_shared_http_client_concurrent_safe() -> None:
 async def test_server_lifespan_calls_close_shared_http_client_on_shutdown() -> None:
     """server.py lifespan shutdown 阶段调用 close_shared_http_client.
 
-    AGENTS.md 第 5 章: 释放底层 TCP 连接池, 避免依赖进程退出回收.
+    释放底层 TCP 连接池, 避免依赖进程退出回收.
     验证 lifespan 上下文管理器退出时调用清理函数.
     """
     # 直接 patch close_shared_http_client, 验证 lifespan 调用它

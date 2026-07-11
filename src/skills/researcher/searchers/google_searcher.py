@@ -1,6 +1,6 @@
 """Google 搜索器 (经 SerpApi).
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 通过 SerpApi 代理访问 Google 搜索结果, 适用于全球场景.
 需 SERPAPI_KEY 环境变量.
 """

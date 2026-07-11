@@ -9,8 +9,8 @@
 不含 "revision"/"publish". 修订循环 (revision) 由图级条件边处理 (见 multi_agent_builder),
 发布 (publish) 对应 route() 返回 "publisher".
 
-AGENTS.md 第 5 章: 多 Agent 协作限 Supervisor 模式, max_iterations 硬上限.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+多 Agent 协作限 Supervisor 模式, max_iterations 硬上限.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def test_supervisor_routes_to_end(
 ) -> None:
     """测试 iteration_count >= graph_max_iterations 时强制返回 "END".
 
-    AGENTS.md 第 5 章: max_iterations 为硬上限, 由节点计数器 + 条件边强制,
+    max_iterations 为硬上限, 由节点计数器 + 条件边强制,
     不可软超时. Supervisor.route 首先检查此守卫.
     """
     # 设置 iteration_count 达到上限 (默认 graph_max_iterations=10)

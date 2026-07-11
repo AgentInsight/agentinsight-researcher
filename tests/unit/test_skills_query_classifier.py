@@ -8,7 +8,7 @@ QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md P0/P1/P2 已实施:
 - P1: 引入 Redis 分类结果缓存 (TTL 24h)
 - P2: 强化 LLM prompt few-shot + 删除种子数据
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务 (Redis/Qdrant/LLM 全部 mock).
+单元测试在构建期执行, 不依赖外部服务 (Redis/Qdrant/LLM 全部 mock).
 """
 
 from __future__ import annotations
@@ -318,7 +318,7 @@ def test_rule_classify_tech_query_not_off_topic(classifier: QueryIntentClassifie
 
 
 def test_cache_key_contains_agent_id(classifier: QueryIntentClassifier) -> None:
-    """测试缓存 key 含 agent_id 前缀 (AGENTS.md 第 7 章 Redis 约定)."""
+    """测试缓存 key 含 agent_id 前缀 (Redis 约定)."""
     key = classifier._cache_key("你好", has_report=False)
     assert classifier.settings.agent_name in key
 

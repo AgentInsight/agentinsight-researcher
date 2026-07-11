@@ -1,6 +1,6 @@
 """FastEmbed 本地 Embeddings 客户端 (bge-small-zh-v1.5, 512维).
 
-AGENTS.md 第 7 章: 上下文压缩用本地 FastEmbed (WrittenContentCompressor
+上下文压缩用本地 FastEmbed (WrittenContentCompressor
 跨子主题去重 + ContextManager._embeddings_rerank 精排), 不依赖远程 TEI 服务,
 解决 TEI CPU 部署性能瓶颈.
 

@@ -1,9 +1,9 @@
 """查询意图分类器.
 
-AGENTS.md 第 5 章: 节点纯函数, 无副作用.
-AGENTS.md 第 9 章: LLM 调用经 llm/ 的 LLMClient (LiteLLM), 禁厂商 SDK 直连.
-AGENTS.md 第 10 章: 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器).
-AGENTS.md 第 3 章: skills/ 不应依赖 rag/ (已解除 embeddings/qdrant 依赖).
+节点纯函数, 无副作用.
+LLM 调用经 llm/ 的 LLMClient (LiteLLM), 禁厂商 SDK 直连.
+用 trace_chain 包裹 (禁 agentinsight.observe 装饰器).
+skills/ 不应依赖 rag/ (已解除 embeddings/qdrant 依赖).
 
 两层分类逻辑 (已移除原第二层 Embeddings+Qdrant 语义匹配, 改用 FAST_LLM + Redis 缓存):
 - 第一层(规则): 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
@@ -193,7 +193,7 @@ class QueryIntentClassifier:
     设计原则 (级联降级策略):
     - FAST_LLM 优先 (glm-4-flash, 免费层)
     - Redis 缓存高频 query (24h TTL, 零 LLM 调用)
-    - 不依赖 Embeddings/Qdrant (符合 AGENTS.md 第 3 章 skills/ 不依赖 rag/ 边界)
+    - 不依赖 Embeddings/Qdrant (符合 skills/ 不依赖 rag/ 边界)
     """
 
     settings: Settings
@@ -219,7 +219,7 @@ class QueryIntentClassifier:
         """惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
 
         Redis 不可用时降级为不缓存 (每次走 LLM), 不阻断主流程.
-        遵循 AGENTS.md 第 7 章 Redis 约定: key 加 {agent_id} 前缀.
+        遵循 Redis 约定: key 加 {agent_id} 前缀.
         """
         if not self.settings.query_classify_cache_enabled:
             return None
@@ -233,7 +233,7 @@ class QueryIntentClassifier:
     def _cache_key(self, query: str, has_report: bool) -> str:
         """生成分类结果缓存 key.
 
-        AGENTS.md 第 7 章 Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
+        Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
         此处为全局级分类缓存 (不区分用户), 使用 _global 占位.
         key 含 has_report 维度 (同一 query 在有/无报告上下文下分类可能不同).
         """

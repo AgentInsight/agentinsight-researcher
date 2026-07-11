@@ -161,7 +161,7 @@ def test_chat_completions_empty_query():
 
 
 def test_security_headers():
-    """测试安全响应头 (AGENTS.md 第 11 章)."""
+    """测试安全响应头."""
     client = TestClient(app)
     response = client.get("/health")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"

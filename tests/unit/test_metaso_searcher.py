@@ -7,7 +7,7 @@
 - HTTP 429/402 额度已满抛 QuotaExceededError
 - api_key 未配置返回空列表
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务, 全部 mock httpx.
+单元测试在构建期执行, 不依赖外部服务, 全部 mock httpx.
 """
 
 from __future__ import annotations

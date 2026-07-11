@@ -87,7 +87,7 @@ src/
 │       ├── context_manager.py   # 上下文压缩 (使用 FastEmbed bge-small-zh-v1.5 512维)
 │       ├── image_generator.py   # 报告配图
 │       ├── searchers/           # 22 搜索引擎 (博查/Tavily/Exa/Arxiv/PubMed/GitHub/CrossRef/GDELT/HackerNews ...)
-│       └── scrapers/            # 9 抓取器 (Playwright/Trafilatura/BS_Markdownify/BeautifulSoup/Arxiv/PyMuPDF/Firecrawl/TavilyExtract/MarkItDown)
+│       └── scrapers/            # 9 抓取器 (Playwright/Trafilatura/BS_Markdownify/BeautifulSoup/Arxiv/pypdf/Firecrawl/TavilyExtract/MarkItDown)
 ├── rag/            # 自研 RAG 层
 │   ├── retriever.py        # HybridRetriever (BM25 + Vector + RRF + Rerank)
 │   ├── qdrant_manager.py   # Qdrant 客户端 + namespace 隔离

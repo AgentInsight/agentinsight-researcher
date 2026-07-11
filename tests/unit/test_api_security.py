@@ -1,6 +1,6 @@
 """单元测试: API 安全 (Bearer JWT 处理 + IP-based UserId 降级 + 数据隔离键).
 
-AGENTS.md 第 8/11 章硬约束:
+安全硬约束:
 - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管)
 - self_host=False (云托管): 强制校验 JWT, 不存在/失败时返回 401
 - JWT 验证在 API 入口中间件完成, 禁止业务节点重复解析
@@ -12,7 +12,7 @@ AGENTS.md 第 8/11 章硬约束:
 - test_api_middleware.py 侧重 SecurityHeadersMiddleware + JWTAuthMiddleware 主流程
 - test_api_security.py 侧重安全合规维度: SELF_HOST 模式切换/401 拒绝/数据隔离键注入/公开路径白名单
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务, 全部用 mock.
+单元测试不依赖外部服务, 全部用 mock.
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def _make_test_app(settings: Settings) -> FastAPI:
     return app
 
 
-# ========== SELF_HOST 模式切换 (AGENTS.md 第 8 章核心) ==========
+# ========== SELF_HOST 模式切换 ==========
 
 
 def test_self_host_true_no_token_uses_ip_based_user_id(
@@ -127,7 +127,7 @@ def test_self_host_true_no_token_uses_ip_based_user_id(
 ) -> None:
     """self_host=True: 无 token 时降级 IP-based UserId (自托管模式).
 
-    AGENTS.md 第 8 章: default_user_id 环境变量已移除, 无 token 时按客户端
+    default_user_id 环境变量已移除, 无 token 时按客户端
     IP 生成确定性 UserId (TestClient 默认 client host 为 "testclient",
     generate_user_id_from_ip("testclient") = "ip_846488f1dc5c07b4cebe5c14").
     """
@@ -232,7 +232,7 @@ def test_self_host_true_token_call_fails_falls_back(
 ) -> None:
     """self_host=True: token 调用失败时降级 IP-based UserId + 告警.
 
-    AGENTS.md 第 8 章: 调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
+    调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
     """
     settings = Settings(
         _env_file=None,
@@ -253,14 +253,14 @@ def test_self_host_true_token_call_fails_falls_back(
     assert any("解析失败" in rec.message for rec in caplog.records)
 
 
-# ========== JWT Token 不写入日志 (AGENTS.md 第 11 章硬约束) ==========
+# ========== JWT Token 不写入日志 ==========
 
 
 def test_jwt_token_not_in_logs(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """验证原始 JWT token 不写入日志 (AGENTS.md 第 11 章安全硬约束)."""
+    """验证原始 JWT token 不写入日志."""
     test_token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature-part"
     settings = Settings(
         _env_file=None,
@@ -287,7 +287,7 @@ def test_jwt_token_not_in_logs(
 def test_jwt_token_not_persisted_in_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """验证响应中不含原始 JWT token (AGENTS.md 第 11 章硬约束)."""
+    """验证响应中不含原始 JWT token."""
     test_token = "eyJhbGciOiJIUzI1NiJ9.payload.signature"
     settings = Settings(
         _env_file=None,
@@ -308,7 +308,7 @@ def test_jwt_token_not_persisted_in_response(
         assert test_token not in header_value
 
 
-# ========== 数据隔离键注入 (AGENTS.md 第 7/8 章) ==========
+# ========== 数据隔离键注入 ==========
 
 
 def test_agent_id_injected_to_request_context(
@@ -374,7 +374,7 @@ def test_session_id_auto_generated_when_missing(
     assert session_id.count("-") == 4
 
 
-# ========== 公开路径白名单 (AGENTS.md 第 8/14 章) ==========
+# ========== 公开路径白名单 ==========
 
 
 def test_public_path_health_skips_jwt(
@@ -410,7 +410,7 @@ def test_public_path_agent_discovery_skips_jwt(
 ) -> None:
     """验证 /.well-known/agent-discovery.json 公开路径跳过 JWT 校验.
 
-    AGENTS.md 第 14 章: Agent Discovery Protocol 公开发现端点, 无需鉴权.
+    Agent Discovery Protocol 公开发现端点, 无需鉴权.
     """
     settings = Settings(
         _env_file=None,
@@ -501,7 +501,7 @@ def test_post_request_jwt_authentication(
     assert r.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
 
 
-# ========== P0: SELF_HOST 双模式成功路径 (AGENTS.md 第 8 章核心) ==========
+# ========== P0: SELF_HOST 双模式成功路径 ==========
 
 
 def test_self_host_false_with_valid_token_returns_real_user_id(
@@ -509,7 +509,7 @@ def test_self_host_false_with_valid_token_returns_real_user_id(
 ) -> None:
     """self_host=False + 有效 token: 返回真实 user_id (成功路径).
 
-    AGENTS.md 第 8 章: self_host=False (云托管) 强制校验 JWT,
+    self_host=False (云托管) 强制校验 JWT,
     token 有效时必须返回 user_info API 解析的真实 user_id, 不降级.
     """
     settings = Settings(
@@ -537,7 +537,7 @@ def test_self_host_true_with_valid_token_returns_real_user_id(
 ) -> None:
     """self_host=True + 有效 token: 返回真实 user_id (成功路径).
 
-    AGENTS.md 第 8 章: self_host=True (自托管) token 可选,
+    self_host=True (自托管) token 可选,
     但 token 存在时仍应解析真实 user_id, 不降级到 IP-based UserId.
     """
     settings = Settings(
@@ -565,7 +565,7 @@ def test_user_info_api_returns_500_degrades_to_ip(
 ) -> None:
     """user_info API 返回 500/502/503 时降级 IP-based UserId (self_host=True).
 
-    AGENTS.md 第 8 章: 调用失败按无 token 处理并告警 (self_host=True 降级).
+    调用失败按无 token 处理并告警 (self_host=True 降级).
     验证 5xx 服务端错误触发降级路径, 不向调用方抛异常.
     """
     settings = Settings(
@@ -588,7 +588,7 @@ def test_user_info_api_returns_500_degrades_to_ip(
     assert any("解析失败" in rec.message for rec in caplog.records)
 
 
-# ========== P1: 公开路径白名单扩展 (AGENTS.md 第 8/14 章) ==========
+# ========== P1: 公开路径白名单扩展 ==========
 
 
 def test_public_paths_docs_redoc_openapi(
@@ -596,7 +596,7 @@ def test_public_paths_docs_redoc_openapi(
 ) -> None:
     """公开路径 /docs /redoc /openapi.json /favicon.ico 不需鉴权.
 
-    AGENTS.md 第 8/14 章: 文档与 OpenAPI schema 公开访问, JWT 中间件应跳过.
+    文档与 OpenAPI schema 公开访问, JWT 中间件应跳过.
     验证即使 self_host=False (强制模式), 公开路径也跳过 JWT 校验.
     """
     settings = Settings(
@@ -641,7 +641,7 @@ def test_public_path_static_prefix(
 ) -> None:
     """公开路径 /static/* 前缀匹配不需鉴权.
 
-    AGENTS.md 第 14 章: 前端测试页面静态资源由 FastAPI StaticFiles 挂载到 /,
+    前端测试页面静态资源由 FastAPI StaticFiles 挂载到 /,
     /static/* 前缀路径应跳过 JWT 校验.
     """
     settings = Settings(
@@ -678,7 +678,7 @@ def test_public_path_static_prefix(
     assert len(fake.calls) == 0
 
 
-# ========== P1: session_id 优先级 (AGENTS.md 第 6/8 章) ==========
+# ========== P1: session_id 优先级 ==========
 
 
 def test_session_id_priority_order(
@@ -686,7 +686,7 @@ def test_session_id_priority_order(
 ) -> None:
     """session_id 优先级: query param > X-Session-Id header > 自动生成 UUID.
 
-    AGENTS.md 第 6/8 章: thread_id 从请求上下文注入做会话隔离键.
+    thread_id 从请求上下文注入做会话隔离键.
     验证三种来源的优先级: 查询参数最高, 其次请求头, 最后自动生成.
     """
     settings = Settings(_env_file=None, self_host=True)
@@ -717,13 +717,13 @@ def test_session_id_priority_order(
     assert session_id.count("-") == 4, f"自动生成 session_id 应为 UUID 格式, 实际: {session_id}"
 
 
-# ========== P1: HSTS 生产强制 HTTPS (AGENTS.md 第 11 章硬约束) ==========
+# ========== P1: HSTS 生产强制 HTTPS ==========
 
 
 def test_security_headers_prod_hsts(monkeypatch: pytest.MonkeyPatch) -> None:
     """env='prod' 时注入 HSTS 头 (生产强制 HTTPS).
 
-    AGENTS.md 第 11 章: 生产强制 HTTPS; 安全响应头中间件不可绕过.
+    生产强制 HTTPS; 安全响应头中间件不可绕过.
     Strict-Transport-Security 头应含 max-age + includeSubDomains + preload.
     """
     # 显式 mock prod 环境的 settings (避免受 .env 中 ENV 配置影响)

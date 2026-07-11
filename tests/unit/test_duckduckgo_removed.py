@@ -7,7 +7,7 @@
 4. __init__.py 中 duckduckgo 的 import 与注册块已注释
 5. SearXNG 已替代 DuckDuckGo 在 CN/GLOBAL/AUTO 三区域注册
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 项目记忆: DuckDuckGo 移除策略 - 注释而非删除, 保留代码和 FREE_QUOTA_MAP 条目.
 """
 

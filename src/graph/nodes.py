@@ -1,10 +1,10 @@
 """LangGraph 节点定义 (完整实现).
 
-AGENTS.md 第 5 章硬约束:
+节点硬约束:
 - 节点为纯函数 async def node(state: State) -> dict, 单一职责无副作用
 - 节点禁止原地修改入参 State, 必须返回 delta dict 由 reducer 合并
 - 节点内禁止直连厂商 LLM SDK, 统一走 llm/ 网关 (LiteLLM)
-- 每个节点必须包裹在 AgentInsight trace span 内 (AGENTS.md 第 10 章)
+- 每个节点必须包裹在 AgentInsight trace span 内
 
 流水线 (行业适配采用 4 层机制):
     agent_creator → research_conductor → source_curator → report_generator → publisher
@@ -265,7 +265,7 @@ async def publisher_node(
 
     节点保持纯函数无副作用, 仅生成 report_md/report_formats/file_path 等到 state,
     不直接调用 report_store.save_report. 报告持久化由 API 层 (routes.py) 在
-    graph 完成后异步调用 report_store.save_report 完成 (AGENTS.md 第 5 章节点纯函数约束).
+    graph 完成后异步调用 report_store.save_report 完成 (节点纯函数约束).
 
     报告格式字段统一写入 report_formats dict (key 为 md/html/pdf/docx/json),
     report_md 同步写入兼容旧代码 (deprecated, 兼容期保留).
@@ -310,7 +310,7 @@ async def publisher_node(
             "report_md": report_md,  # deprecated: 同步写入兼容旧代码
         }
         # 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
-        # 节点不直接写 DB (AGENTS.md 第 5 章节点纯函数无副作用约束).
+        # 节点不直接写 DB (节点纯函数无副作用约束).
         return delta
 
 
@@ -341,7 +341,7 @@ async def fact_checker_node(
             session_id=state.get("session_id"),
         )
         # iteration_count 累加 1: fact_checker 为分支节点, 用于 graph_max_iterations 守卫
-        # 防止 fact_checker revise → writer 无限循环 (AGENTS.md 第 5 章 max_iterations 硬上限)
+        # 防止 fact_checker revise → writer 无限循环 (max_iterations 硬上限)
         return {
             "fact_check_accepted": result["fact_check_accepted"],
             "fact_check_issues": result["fact_check_issues"],

@@ -1,6 +1,5 @@
 """功能测试: MCP 服务在研究流程中的端到端调用.
 
-AGENTS.md 第 13 章硬约束:
 - 功能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码
 - 测试用例独立可重复运行, 不依赖执行顺序
@@ -32,7 +31,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 功能测试超时: 研究流程较长, 给足 5 分钟
@@ -43,7 +42,7 @@ MCP_TOOL_TIMEOUT_SECONDS = 30
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_mcp_{uuid.uuid4().hex[:12]}"
 
 
@@ -62,7 +61,7 @@ def _create_mcp_config(
 ) -> dict[str, object]:
     """创建 MCP 配置 (POST /v1/mcp).
 
-    AGENTS.md 第 7 章: 数据隔离键 agent_id + user_id, 由请求上下文自动注入.
+    数据隔离键 agent_id + user_id, 由请求上下文自动注入.
     Returns: 创建的配置 dict (含 id + test_result).
     """
     payload: dict[str, object] = {
@@ -157,7 +156,7 @@ def test_mcp_config_crud_end_to_end() -> None:
 
 @pytest.mark.functional
 def test_mcp_config_data_isolation_per_user() -> None:
-    """数据隔离: 不同 user_id 的 MCP 配置互不可见 (AGENTS.md 第 7 章).
+    """数据隔离: 不同 user_id 的 MCP 配置互不可见.
 
     SELF_HOST 模式下无 JWT 时所有请求使用 IP-based UserId, 无法直接测试多用户隔离.
     本用例验证: 同一用户多次列出 MCP 配置结果一致 (单用户视角数据隔离正确).
@@ -291,7 +290,7 @@ def test_mcp_disabled_strategy_skips_call() -> None:
 def test_mcp_config_update_invalidates_cache() -> None:
     """配置变更 (PUT enabled 切换) 后, 后续研究流程不命中过期缓存.
 
-    AGENTS.md: mcp_routes CRUD 后调用 clear_cache 失效缓存.
+    mcp_routes CRUD 后调用 clear_cache 失效缓存.
     本用例验证: 修改 MCP 配置后, 下次研究流程能感知配置变更 (不崩溃).
     """
     name = _unique_config_name()
@@ -403,7 +402,7 @@ def test_mcp_tool_timeout_does_not_block_research() -> None:
 def test_mcp_clone_system_config() -> None:
     """克隆系统 MCP 配置: POST /v1/mcp/system/{id}/clone.
 
-    AGENTS.md 第 7 章: 系统 MCP (is_system=True) 用户可查看不可编辑,
+    系统 MCP (is_system=True) 用户可查看不可编辑,
     通过 clone 复制为用户私有副本 (is_system=False, enabled=False).
     """
     with httpx.Client(timeout=FUNC_TIMEOUT) as client:

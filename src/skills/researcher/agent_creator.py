@@ -101,8 +101,8 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 
         Args:
             query: 用户研究查询
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
             agent_role: 调用方注入的角色 persona (AGENT_ROLE 配置),
                         优先级高于 LLM 自动生成, 非空时直接使用, 跳过 LLM 调用.
 

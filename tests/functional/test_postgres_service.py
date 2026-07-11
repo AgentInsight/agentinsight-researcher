@@ -1,16 +1,15 @@
 """功能测试: 验证 PostgreSQL 服务 (Checkpointer + 业务元数据).
 
-AGENTS.md 第 6/7 章硬约束:
 - 单一数据库 agents, LangGraph Checkpointer 表由官方管理, 业务表含 agent_id+user_id 双列
 - 业务表应含 created_at; 状态会变更的表还应含 updated_at + BEFORE UPDATE 触发器自动维护
 - 查询应显式 WHERE agent_id = ... AND user_id = ..., 业务表应建 agent_id+user_id 复合索引
 - 表名复数 snake_case; agent_id/user_id/session_id 三列统一 VARCHAR(64)
-- 测试数据隔离: agent_id=test_* + user_id=test_* (第 13 章)
+- 测试数据隔离: agent_id=test_* + user_id=test_*
 
 业务表清单 (scripts/init.sql, 6 张):
 - research_sessions / research_reports / research_search_logs
 - uploaded_files / token_usage_logs / mcp_configs
-注: AGENTS.md 第 7 章示例提及 sessions/messages 命名风格, 实际业务表由 init.sql 定义;
+注: sessions/messages 命名风格仅为示例, 实际业务表由 init.sql 定义;
     LangGraph Checkpointer 表 (checkpoints/writes/migrations) 由 SDK 管理, 非业务表.
 
 执行方式 (宿主机, 容器栈已 healthy):
@@ -50,7 +49,7 @@ BUSINESS_TABLES = [
     "mcp_configs",
 ]
 
-# 测试数据隔离前缀 (AGENTS.md 第 13 章: agent_id=test_* / user_id=test_*)
+# 测试数据隔离前缀 (agent_id=test_* / user_id=test_*)
 TEST_AGENT_ID = f"test_pg_agent_{uuid.uuid4().hex[:8]}"
 TEST_USER_ID = f"test_pg_user_{uuid.uuid4().hex[:8]}"
 
@@ -74,7 +73,7 @@ def _connect() -> psycopg.Connection:
 def test_postgres_connection() -> None:
     """验证 PostgreSQL 连接成功: SELECT 1 + version() 非空.
 
-    AGENTS.md 第 1 章: PostgreSQL ≥16 为 Checkpointer + 业务元数据存储.
+    PostgreSQL ≥16 为 Checkpointer + 业务元数据存储.
     """
     import psycopg  # type: ignore[import-not-found]
 
@@ -85,7 +84,7 @@ def test_postgres_connection() -> None:
         result = cur.fetchone()
         assert result is not None and result[0] == 1, f"SELECT 1 返回异常: {result}"
 
-        # 验证版本 ≥16 (AGENTS.md 要求 ≥16, 项目实际要求 ≥17)
+        # 验证版本 ≥16 (要求 ≥16, 项目实际要求 ≥17)
         cur.execute("SELECT current_setting('server_version_num')")
         version_num = int(cur.fetchone()[0])
         assert version_num >= 160000, f"PostgreSQL 版本低于 16: version_num={version_num}"
@@ -99,7 +98,7 @@ def test_postgres_connection() -> None:
 def test_business_tables_exist() -> None:
     """验证 init.sql 定义的业务表全部存在 (Agent 启动时 init_database 执行).
 
-    AGENTS.md 第 6 章: Agent 容器启动时应执行 scripts/init.sql 初始化业务表 (幂等).
+    Agent 容器启动时应执行 scripts/init.sql 初始化业务表 (幂等).
     检查 information_schema.tables, 6 张业务表必须全部存在.
     """
     import psycopg  # type: ignore[import-not-found]
@@ -132,7 +131,6 @@ def test_business_tables_exist() -> None:
 def test_agent_id_user_id_composite_index() -> None:
     """验证业务表含 agent_id + user_id 复合索引 (数据隔离查询性能保证).
 
-    AGENTS.md 第 7 章:
     - 业务表应含 agent_id + user_id 双列, 建复合索引
     - 查询应显式 WHERE agent_id = ... AND user_id = ..., 禁止全表扫描
     - scripts/init.sql 为每张业务表创建 idx_<table>_agent_user 索引
@@ -171,7 +169,6 @@ def test_agent_id_user_id_composite_index() -> None:
 def test_updated_at_trigger() -> None:
     """验证 updated_at 触发器自动维护 (BEFORE UPDATE 触发器).
 
-    AGENTS.md 第 7 章:
     - 状态会变更的表 (research_sessions/research_reports/uploaded_files/mcp_configs)
       应含 updated_at + BEFORE UPDATE 触发器 (update_updated_at_column()) 自动维护
     - 不推荐业务代码手动赋值 updated_at

@@ -24,12 +24,12 @@
     注: routes.py 的 upload_file 端点接入由调用方负责, 本模块仅保证工厂可用.
 
 依赖说明 (不在 requirements.txt 中的可选依赖):
-- PyMuPDF (fitz): 已在 requirements.txt (PDF 解析).
+- pypdf: 已在 requirements.txt (PDF 解析, BSD-3-Clause 纯 Python 实现).
 - python-docx / openpyxl / python-pptx: 已在 requirements.txt.
 - azure-storage-blob: 不在 requirements.txt, 需手动 pip install azure-storage-blob.
 - markitdown: 已在 requirements.txt (Office 文档兜底).
 
-AGENTS.md 第 9 章: 工具调用必须经 trace_xxx span 包裹; 本模块属文档加载,
+工具调用必须经 trace_xxx span 包裹; 本模块属文档加载,
 非 MCP 工具, 不强制 trace_tool; 调用方如需可在 chain span 内包裹.
 """
 
@@ -133,7 +133,7 @@ class LocalDocumentLoader(DocumentLoader):
     """从本地文件路径加载文档.
 
     按扩展名路由:
-    - .pdf       → PyMuPDF (fitz)
+    - .pdf       → pypdf (PdfReader)
     - .docx      → python-docx
     - .xlsx/.xls → openpyxl
     - .pptx      → python-pptx
@@ -215,17 +215,14 @@ class LocalDocumentLoader(DocumentLoader):
 
     @staticmethod
     def _extract_pdf(path: str) -> str:
-        """用 PyMuPDF (fitz) 提取 PDF 文本."""
+        """用 pypdf 提取 PDF 文本."""
         try:
-            import fitz  # PyMuPDF
+            from pypdf import PdfReader
         except ImportError:
-            logger.warning("PyMuPDF (fitz) 未安装, 无法解析 PDF: %s", path)
+            logger.warning("pypdf 未安装, 无法解析 PDF: %s", path)
             return ""
-        doc = fitz.open(path)
-        try:
-            return "\n\n".join(page.get_text() for page in doc)
-        finally:
-            doc.close()
+        reader = PdfReader(path)
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
 
     @staticmethod
     def _extract_docx(path: str) -> str:

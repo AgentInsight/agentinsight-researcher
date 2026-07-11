@@ -1,4 +1,4 @@
-"""单元测试: RAG 降级链集成 (AGENTS.md 第 7 章).
+"""单元测试: RAG 降级链集成.
 
 验证 src/rag/retriever.py + src/rag/embeddings.py + src/rag/bm25_filter.py 的降级链:
 - Qdrant 不可用降级 (ENV=dev 限定, 检索不抛异常, 降级返回空/BM25 失败路径)
@@ -7,14 +7,13 @@
 - BM25 + jieba 中文分词边界 (rank-bm25 + jieba)
 - vector_weight=0.7 / bm25_weight=0.3 配置变化对 RRF 融合分数的影响
 
-AGENTS.md 第 7 章:
 - Qdrant 不可用时降级内存检索仅限 ENV=dev; 生产应告警并失败转移
 - Embeddings/Rerank TEI 服务通过环境变量 API_KEY 开启鉴权,
   客户端通过 embeddings_api_key/rerank_api_key 配置传递 Authorization: Bearer <key>
 - BM25 用 rank-bm25+jieba (中文分词 + IDF)
 - 检索必须混合 BM25 + 向量, 默认 vector_weight=0.7 / bm25_weight=0.3
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (Qdrant/Redis/TEI) 全部 mock.
 """
 
@@ -64,7 +63,7 @@ def _make_retriever(settings: Settings) -> HybridRetriever:
 async def test_qdrant_unavailable_degrades_to_memory_dev_only() -> None:
     """Qdrant 不可用时降级 (ENV=dev), 检索不抛异常, 降级返回空结果.
 
-    AGENTS.md 第 7 章: Qdrant 不可用时降级内存检索仅限 ENV=dev;
+    Qdrant 不可用时降级内存检索仅限 ENV=dev;
     生产应告警并失败转移. 本测试验证 dev 环境下 Qdrant 异常时:
     - _ensure_bm25_corpus 不抛异常 (BM25 路径降级返回空)
     - _vector_search 不抛异常 (向量路径降级返回空)
@@ -104,7 +103,7 @@ async def test_qdrant_unavailable_degrades_to_memory_dev_only() -> None:
 def test_embeddings_api_key_auth_header() -> None:
     """Embeddings API key 鉴权: 客户端注入 Authorization: Bearer <key>.
 
-    AGENTS.md 第 7/12 章: TEI 服务通过环境变量 API_KEY 开启鉴权,
+    TEI 服务通过环境变量 API_KEY 开启鉴权,
     客户端通过 embeddings_api_key 配置传递 Authorization: Bearer 请求头.
     验证:
     - embeddings_api_key 非空时, httpx.AsyncClient headers 含 Bearer
@@ -127,7 +126,7 @@ def test_embeddings_api_key_auth_header() -> None:
 def test_rerank_api_key_auth_header() -> None:
     """Rerank API key 鉴权: 客户端注入 Authorization: Bearer <key>.
 
-    AGENTS.md 第 7/12 章: Rerank TEI 服务通过 API_KEY 开启鉴权,
+    Rerank TEI 服务通过 API_KEY 开启鉴权,
     客户端通过 rerank_api_key 配置传递 Authorization: Bearer 请求头.
     验证 HybridRetriever 的 _rerank_client 在构造时正确注入鉴权头.
     """
@@ -148,7 +147,7 @@ def test_rerank_api_key_auth_header() -> None:
 async def test_bm25_chinese_tokenization_with_jieba() -> None:
     """BM25 + jieba 中文分词边界: 中文短语/复合词正确分词与召回.
 
-    AGENTS.md 第 7 章: BM25 用 rank-bm25+jieba (中文分词 + IDF).
+    BM25 用 rank-bm25+jieba (中文分词 + IDF).
     验证:
     - jieba 正确切分中文复合词 (如 "量子计算" → ["量子", "计算"])
     - BM25Okapi 对中文分词后的语料能正确打分 (相关文档 score > 0,
@@ -203,7 +202,7 @@ async def test_bm25_chinese_tokenization_with_jieba() -> None:
 def test_vector_weight_bm25_weight_config_variation() -> None:
     """vector_weight=0.7 / bm25_weight=0.3 配置变化对 RRF 融合分数与排序的影响.
 
-    AGENTS.md 第 7 章: 默认 vector_weight=0.7 / bm25_weight=0.3, RRF k=60.
+    默认 vector_weight=0.7 / bm25_weight=0.3, RRF k=60.
     验证:
     - 文档在向量与 BM25 中排名不同时, 权重变化影响融合分数
     - 高 vector_weight 偏向向量排名高的文档; 高 bm25_weight 偏向 BM25 排名高的文档

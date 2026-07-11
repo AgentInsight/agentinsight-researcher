@@ -2,7 +2,7 @@
 
 验证 DefaultPromptFamily / EnglishPromptFamily 所有方法返回非空字符串,
 get_prompt_family 工厂路由正确, register_prompt_family 自定义注册.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

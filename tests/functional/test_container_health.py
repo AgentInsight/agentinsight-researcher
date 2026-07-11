@@ -1,6 +1,5 @@
 """功能测试: 验证容器栈各服务健康.
 
-AGENTS.md 第 13 章硬约束:
 - 功能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入 (默认 http://127.0.0.1:8066)
 - 测试用例独立可重复运行, 不依赖执行顺序
@@ -20,7 +19,7 @@ import os
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
 EMBEDDINGS_URL = os.getenv("EMBEDDINGS_URL", "http://127.0.0.1:8088").rstrip("/")

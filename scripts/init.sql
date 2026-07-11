@@ -1,5 +1,5 @@
 -- agentinsight-researcher 数据库初始化
--- 严格遵循 AGENTS.md 第 7 章: 单库 agents, 业务表含 agent_id+user_id 双列复合索引
+-- 单库 agents, 业务表含 agent_id+user_id 双列复合索引
 -- LangGraph PostgresSaver 表由官方 SDK 管理 (thread_id 已含会话隔离)
 
 -- 启用扩展
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS research_reports (
 CREATE INDEX IF NOT EXISTS idx_research_reports_session ON research_reports(session_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_user ON research_reports(user_id);
 CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
--- 复合索引 (agent_id + user_id), 符合 AGENTS.md 第 7 章多 Agent 数据隔离约定
+-- 复合索引 (agent_id + user_id), 多 Agent 数据隔离约定
 CREATE INDEX IF NOT EXISTS idx_research_reports_agent_user ON research_reports(agent_id, user_id);
 -- session + agent + user 三列复合索引, 加速按会话检索报告
 CREATE INDEX IF NOT EXISTS idx_research_reports_session_agent_user ON research_reports(session_id, agent_id, user_id);

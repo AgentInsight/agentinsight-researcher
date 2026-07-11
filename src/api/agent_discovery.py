@@ -3,8 +3,8 @@
 提供 GET /.well-known/agent-discovery.json 公开发现端点,
 声明 Agent 元信息、服务清单、能力列表与鉴权方式.
 
-AGENTS.md 第 11 章: 安全合规 (公开发现端点, 无需鉴权).
-AGENTS.md 第 8 章: auth 含 bearer_jwt (可选) 与 none (匿名降级 IP-based UserId).
+安全合规 (公开发现端点, 无需鉴权).
+auth 含 bearer_jwt (可选) 与 none (匿名降级 IP-based UserId).
 """
 
 from __future__ import annotations

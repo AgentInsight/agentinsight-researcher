@@ -6,8 +6,8 @@
 - 单例快路径: 第二次调用忽略 settings 参数
 - 连接池创建失败时抛出 RuntimeError (fail fast, 不再降级 MemorySaver)
 
-AGENTS.md 第 6 章: StateGraph 必须挂 PostgresSaver.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock psycopg_pool/AsyncPostgresSaver).
+StateGraph 必须挂 PostgresSaver.
+单元测试不依赖外部服务 (mock psycopg_pool/AsyncPostgresSaver).
 """
 
 from __future__ import annotations

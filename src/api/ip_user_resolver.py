@@ -1,6 +1,6 @@
 """IP-based 用户身份解析 + 每日报告限额控制.
 
-AGENTS.md 第 8 章: 无 JWT Token 时, 按 IP 生成唯一且不变的 UserId.
+无 JWT Token 时, 按 IP 生成唯一且不变的 UserId.
 - 1 个 IP 对应 1 个 UserId (确定性: SHA256 哈希, 不存储原始 IP)
 - 每日报告生成限额 (默认 3, 环境变量 IP_DAILY_REPORT_LIMIT 控制)
 - 仅报告生成成功才计数
@@ -28,7 +28,7 @@ def generate_user_id_from_ip(ip: str) -> str:
     SHA256 哈希, 优先取前 24 位 (96 bit, 碰撞概率远低于 16 位);
     若前 24 位无法保证唯一性 (理论上极小概率), 则使用完整 64 位哈希.
     加 "ip_" 前缀标识匿名用户.
-    不存储原始 IP, 仅存储哈希 (PII 保护, AGENTS.md 第 11 章).
+    不存储原始 IP, 仅存储哈希 (PII 保护).
 
     Args:
         ip: 客户端 IP 地址

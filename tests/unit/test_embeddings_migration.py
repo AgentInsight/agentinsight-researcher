@@ -4,12 +4,11 @@
 1. settings.py SSOT: qdrant_vector_size=768 / embeddings_model="BAAI/bge-base-zh-v1.5"
 2. Docker Compose 三套构建文件: MODEL_ID/bind mount 注释均含 bge-base-zh-v1.5
 3. requirements.txt: 含 bge-base-zh-v1.5 引用 (无 bge-large-zh-v1.5 残留)
-4. AGENTS.md: 含 bge-base-zh-v1.5 引用 (技术栈表 + Qdrant 约定)
-5. fastembed_client.py: FastEmbed 仍用 bge-small-zh-v1.5 (上下文压缩专用, 与 TEI 隔离)
-6. 源码无 bge-large-zh-v1.5 残留 (排除 requirements.in 等历史文件)
+4. fastembed_client.py: FastEmbed 仍用 bge-small-zh-v1.5 (上下文压缩专用, 与 TEI 隔离)
+5. 源码无 bge-large-zh-v1.5 残留 (排除 requirements.in 等历史文件)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
-AGENTS.md 第 7 章硬约束:
+单元测试在构建期执行, 不依赖外部服务.
+硬约束:
 - 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
 - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """
@@ -28,7 +27,6 @@ _COMPOSE_QA = _PROJECT_ROOT / "docker-compose-qa.yaml"
 _COMPOSE_ONLINE = _PROJECT_ROOT / "docker-compose.yml"
 _COMPOSE_OFFLINE = _PROJECT_ROOT / "docker-compose-offline.yaml"
 _REQUIREMENTS = _PROJECT_ROOT / "requirements.txt"
-_AGENTS_MD = _PROJECT_ROOT / "AGENTS.md"
 _FASTEMBED_CLIENT = _PROJECT_ROOT / "src" / "rag" / "fastembed_client.py"
 
 
@@ -64,7 +62,7 @@ def test_settings_embeddings_model_is_bge_base(monkeypatch: pytest.MonkeyPatch) 
 def test_settings_fastembed_uses_bge_small(monkeypatch: pytest.MonkeyPatch) -> None:
     """settings.py: fastembed_model_name 仍为 bge-small-zh-v1.5 (上下文压缩专用).
 
-    AGENTS.md 第 7 章硬约束: FastEmbed (bge-small-zh-v1.5, 512维) 与远程 TEI
+    FastEmbed (bge-small-zh-v1.5, 512维) 与远程 TEI
     (bge-base-zh-v1.5, 768维) 完全隔离, 不应被本次迁移影响.
     """
     for key in ("FASTEMBED_MODEL_NAME", "FASTEMBED_DIMENSION"):
@@ -169,35 +167,13 @@ def test_requirements_mentions_bge_base() -> None:
     )
 
 
-# ========== AGENTS.md 验证 ==========
-
-
-def test_agents_md_mentions_bge_base() -> None:
-    """AGENTS.md 含 bge-base-zh-v1.5 引用 (技术栈表 + Qdrant 约定)."""
-    if not _AGENTS_MD.exists():
-        pytest.skip("AGENTS.md 不存在")
-    content = _AGENTS_MD.read_text(encoding="utf-8")
-    assert "bge-base-zh-v1.5" in content, (
-        "AGENTS.md 应含 bge-base-zh-v1.5 引用 (技术栈表/Qdrant 约定)"
-    )
-
-
-def test_agents_md_qdrant_vector_size_768() -> None:
-    """AGENTS.md Qdrant 集合约定: vector_size=1024 → 768 (bge-base-zh-v1.5)."""
-    if not _AGENTS_MD.exists():
-        pytest.skip("AGENTS.md 不存在")
-    content = _AGENTS_MD.read_text(encoding="utf-8")
-    # AGENTS.md 第 7 章 Qdrant 集合约定应更新为 768
-    assert "768" in content, "AGENTS.md 应含 768 维度 (Qdrant 集合约定)"
-
-
 # ========== FastEmbed 隔离验证 (不应被迁移影响) ==========
 
 
 def test_fastembed_client_still_uses_bge_small() -> None:
     """fastembed_client.py 仍使用 bge-small-zh-v1.5 (上下文压缩专用).
 
-    AGENTS.md 第 7 章硬约束: FastEmbed 与远程 TEI 完全隔离.
+    FastEmbed 与远程 TEI 完全隔离.
     本次迁移仅影响远程 TEI (bge-large → bge-base), 不应影响 FastEmbed.
     """
     if not _FASTEMBED_CLIENT.exists():

@@ -1,6 +1,6 @@
 """LangGraph 图构建器.
 
-AGENTS.md 第 5 章硬约束:
+硬约束:
 - 生产 StateGraph 必须挂 PostgresSaver (PostgreSQL ≥16); 内存 Checkpoint 仅 ENV=dev
 - 路由必须显式 add_conditional_edges, 禁止隐式跳转
 - 每个图必须有终止节点; max_iterations 为硬上限
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def _route_after_agent_creator(state: ResearcherState) -> str:
     """动态角色生成后路由 (DeepResearch 条件边).
 
-    AGENTS.md 第 5 章: 路由必须显式 add_conditional_edges.
+    路由必须显式 add_conditional_edges.
     - research_mode == "deep" → deep_research 节点 (递归深度研究)
     - 否则 → research_conductor 节点 (常规并行检索)
     """
@@ -41,7 +41,7 @@ async def build_researcher_graph(
 ) -> Any:
     """构建研究智能体 LangGraph 图.
 
-    AGENTS.md 第 5 章: StateGraph + PostgresSaver.
+    StateGraph + PostgresSaver.
     图结构 (行业适配采用 4 层机制):
 
         START
@@ -78,7 +78,7 @@ async def build_researcher_graph(
     # 构建图
     graph = StateGraph(ResearcherState)
 
-    # 添加节点 (functools.partial 注入 settings, AGENTS.md 第 5 章)
+    # 添加节点 (functools.partial 注入 settings)
     graph.add_node("agent_creator", partial(agent_creator_node, settings=settings))
     graph.add_node("deep_research", partial(deep_research_node, settings=settings))
     graph.add_node("research_conductor", partial(research_conductor_node, settings=settings))
@@ -104,7 +104,7 @@ async def build_researcher_graph(
     # 注: 当前为线性流水线图, 无循环, 不需要迭代守卫.
     # 未来若引入循环图 (如 multi_agent/subtopics 迭代), 应使用
     # create_iteration_guard(settings.graph_max_iterations) 作为条件边守卫,
-    # 达到上限时强制跳转 publisher 终止 (AGENTS.md 第 5 章: max_iterations 硬上限).
+    # 达到上限时强制跳转 publisher 终止 (max_iterations 硬上限).
 
     # 编译图 (可选挂 Checkpointer)
     # get_checkpointer 失败时降级为无 checkpointer (不阻断图构建)

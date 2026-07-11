@@ -8,7 +8,7 @@
 - record_failure: 失败计数 +1, 达阈值开启熔断
 - EmbeddingsCircuitOpenError: 熔断开启时 embed_texts 直接抛异常
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""评测门禁 (AGENTS.md 第 10 章, CI 强制).
+"""评测门禁 (CI 强制).
 
 RAGAS: faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7
 DeepEval: 任务完成率 ≥0.9 / 工具调用正确率 ≥0.95 / 幻觉率 ≤0.1
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class ResearcherClient:
     """研究器 HTTP API 客户端 (通过 OpenAI 兼容端点调用, 不直接 import src/).
 
-    AGENTS.md 第 13 章: 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码.
+    测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码.
     统一调用 POST /v1/chat/completions (非流式), 获取研究报告 + 来源.
     """
 

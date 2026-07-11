@@ -8,7 +8,7 @@
 2. BS + markdownify (HTML→Markdown, 纯本地)
 3. Playwright (JS 渲染兜底, 输出 HTML)
 
-AGENTS.md 第 4 章: 抓取栈未列入硬选型, 属 "Ask first" 范畴.
+抓取栈未列入硬选型, 属 "Ask first" 范畴.
 """
 
 from __future__ import annotations

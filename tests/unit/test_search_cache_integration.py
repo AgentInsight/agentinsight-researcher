@@ -7,9 +7,9 @@
 - 缓存 TTL 过期后重新搜索 (Redis 返回 None → 重新调用 searcher)
 - Redis 连接失败时不阻断搜索 (get_redis_client 返回 None → 直接搜索, 不写缓存)
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (Redis / Searchers / LLM / ContextManager) 全部 mock.
-AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
+Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
 """
 
 from __future__ import annotations

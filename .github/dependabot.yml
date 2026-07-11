@@ -21,7 +21,7 @@ updates:
     commit-message:
       prefix: "deps(pip)"
       include: scope
-    # 仅开发依赖可自动合并, 运行时依赖需人工审查 (涉及 AGENTS.md 第 1 章技术栈选型)
+    # 仅开发依赖可自动合并, 运行时依赖需人工审查 (涉及技术栈选型)
     groups:
       development-dependencies:
         dependency-type: development

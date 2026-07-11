@@ -11,7 +11,7 @@
 - 降级策略 (ONNX 初始化失败)
 - get_fastembed_client() 单例工厂
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务 (ONNX 模型/Redis/LLM).
+单元测试在构建期执行, 不依赖外部服务 (ONNX 模型/Redis/LLM).
 所有 fastembed.TextEmbedding 调用均通过 sys.modules 注入 mock, 不加载真实 ONNX 模型.
 """
 

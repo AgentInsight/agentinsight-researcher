@@ -1,6 +1,6 @@
 """Semantic Scholar Graph API 学术搜索器.
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 Semantic Scholar Graph API 学术论文搜索, 适用于学术场景.
 可选配置 SEMANTIC_SCHOLAR_API_KEY 提升配额.
 

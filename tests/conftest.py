@@ -1,6 +1,5 @@
 """测试全局配置: 加载 .env 文件 (如果存在).
 
-AGENTS.md 第 11/13 章:
 - 密钥仅环境变量注入, 禁止硬编码/入仓
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 测试数据隔离: namespace=test_* + user_id=test_* + session_id=test_*
@@ -13,7 +12,7 @@ AGENTS.md 第 11/13 章:
 (如 http://qdrant:6333), 宿主机无法解析. 宿主机运行测试时需覆盖为 127.0.0.1.
 通过 *_HOST 环境变量允许 CI 注入自定义宿主机地址.
 
-AGENTS.md 第 13 章: 功能/回归/API/e2e 测试应在 docker compose up -d 且全部容器
+功能/回归/API/e2e 测试应在 docker compose up -d 且全部容器
 service_healthy 后执行. 当容器栈未运行时, 这些测试应自动跳过而非失败.
 通过 pytest_collection_modifyitems 钩子检测 agent 服务可达性, 不可达时自动跳过.
 """
@@ -80,7 +79,7 @@ def _is_agent_reachable() -> bool:
         return False
 
 
-# 需要容器栈运行的测试 marker (AGENTS.md 第 13 章)
+# 需要容器栈运行的测试 marker
 # exploratory: 探索性测试 (边界/降级场景), 同样依赖容器栈
 _SERVICE_DEPENDENT_MARKS = {
     "functional",
@@ -95,7 +94,7 @@ _SERVICE_DEPENDENT_MARKS = {
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """收集后: 若 agent 服务不可达, 自动跳过依赖容器栈的测试.
 
-    AGENTS.md 第 13 章: 功能/回归/API/e2e 测试应在 docker compose up -d 后执行.
+    功能/回归/API/e2e 测试应在 docker compose up -d 后执行.
     本地无容器栈时自动跳过, 避免大量连接失败噪声.
     """
     if _is_agent_reachable():

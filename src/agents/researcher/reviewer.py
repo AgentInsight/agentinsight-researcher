@@ -1,13 +1,13 @@
 """Reviewer 报告评审 Agent (多维度评分).
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点纯函数.
+LangGraph StateGraph 唯一编排, 节点纯函数.
 
 Reviewer 职责:
 - 评审报告质量, 按 4 维度打分 (事实性/结构性/语言性/完整性)
 - 返回 review_decision ("accept"|"revise") + review_feedback + review_scores
 - 用 LLMClient tier=SMART 调用 (评分用 SMART 层)
 - 用 safe_json_parse 解析 LLM 返回的 JSON
-- 用 trace_chain 包裹 (AGENTS.md 第 10 章, 禁 agentinsight.observe 装饰器)
+- 用 trace_chain 包裹 (禁 agentinsight.observe 装饰器)
 
 行业适配采用 4 层机制, agent_role 注入角色 persona.
 
@@ -88,8 +88,8 @@ class Reviewer:
 
         Args:
             state: 研究状态, 含 report_md / contexts / query
-            user_id: 用户 ID (隔离键, AGENTS.md 第 8 章)
-            session_id: 会话 ID (隔离键, AGENTS.md 第 6 章)
+            user_id: 用户 ID (隔离键)
+            session_id: 会话 ID (隔离键)
 
         Returns:
             {

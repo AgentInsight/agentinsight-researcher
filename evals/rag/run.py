@@ -1,9 +1,9 @@
-"""RAGAS 评测运行器 (AGENTS.md 第 10 章, CI 门禁).
+"""RAGAS 评测运行器 (CI 门禁).
 
 从 JSON 加载查询集 (含 question + ground_truth), 对每个查询:
   调用 researcher → 获取报告+来源 → 调用 RAGASEvaluator → 输出汇总报告 + 门禁判定.
 
-门禁阈值 (AGENTS.md 第 10 章):
+门禁阈值:
 - faithfulness ≥ 0.8
 - answer_relevancy ≥ 0.8
 - context_precision ≥ 0.7
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
 _DEFAULT_OUTPUT = Path(__file__).parent / "results"
 
-# AGENTS.md 第 10 章门禁阈值
+# 门禁阈值
 GATE_FAITHFULNESS = 0.8
 GATE_ANSWER_RELEVANCY = 0.8
 GATE_CONTEXT_PRECISION = 0.7
@@ -68,7 +68,7 @@ def load_dataset(json_path: str | Path) -> list[dict[str, Any]]:
 def _build_evaluator_llm() -> Any:
     """构建 RAGAS 评估器 LLM (LangchainLLMWrapper + langchain_openai.ChatOpenAI).
 
-    AGENTS.md 第 4 章: 例外允许 langchain_openai (仅 RAGAS 评测内部使用).
+    例外允许 langchain_openai (仅 RAGAS 评测内部使用).
     """
     # 保存原始 asyncio (import ragas 会触发 nest_asyncio.apply(), 与 Python 3.14 冲突)
     from evals.rag._asyncio_fix import restore_original_asyncio, save_original_asyncio

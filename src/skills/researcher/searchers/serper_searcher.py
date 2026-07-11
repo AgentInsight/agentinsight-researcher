@@ -1,6 +1,6 @@
 """Serper.dev Google Search API 搜索器.
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 Serper.dev Google Search API, 适用于全球场景.
 需 SERPER_API_KEY 环境变量.
 """

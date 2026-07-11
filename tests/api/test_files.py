@@ -1,10 +1,10 @@
 """API 测试: 文件上传端点 /v1/files.
 
-AGENTS.md 第 13 章硬约束:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 
-AGENTS.md 第 7/11 章约束 (文件上传):
+文件上传约束:
 - 用户私有数据按 agent_id + user_id 隔离
 - 校验文件大小 (max_upload_size_mb, 默认 50MB) → 超限 413
 - 校验扩展名白名单 (pdf/docx/md/txt/html/csv/xlsx/pptx) → 不支持 415
@@ -22,7 +22,7 @@ import os
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s
@@ -66,7 +66,7 @@ def test_upload_md() -> None:
 def test_upload_too_large() -> None:
     """验证超大文件上传: 超过 max_upload_size_mb → 413.
 
-    AGENTS.md 第 11 章: 安全约束 (大小限制).
+    安全约束 (大小限制).
     默认限制 50MB, 发送 51MB 触发 413.
     """
     # 构造略超限制的文件内容 (51MB)
@@ -90,7 +90,7 @@ def test_upload_too_large() -> None:
 def test_upload_invalid_ext() -> None:
     """验证不支持扩展名: .exe → 415.
 
-    AGENTS.md 第 11 章: 扩展名白名单 (pdf/docx/md/txt/html/csv/xlsx/pptx).
+    扩展名白名单 (pdf/docx/md/txt/html/csv/xlsx/pptx).
     """
     content = b"MZ\x90\x00"  # PE 文件头伪造成 exe
     files = {"file": ("malicious.exe", io.BytesIO(content), "application/octet-stream")}

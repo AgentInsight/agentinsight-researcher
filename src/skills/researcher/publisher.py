@@ -1,6 +1,6 @@
 """Publisher 发布器.
 
-AGENTS.md 用户需求 6: 输出报告格式需支持 Markdown/HTML/PDF, 默认 Markdown.
+输出报告格式需支持 Markdown/HTML/PDF, 默认 Markdown.
 """
 
 from __future__ import annotations

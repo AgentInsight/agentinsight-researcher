@@ -1,6 +1,6 @@
 """三级 JSON 容错解析工具.
 
-AGENTS.md 第 3 章: common/ 公用基础模块, 不得依赖 agents/ 或业务模块.
+common/ 公用基础模块, 不得依赖 agents/ 或业务模块.
 
 解析链:
 1. json.loads (标准解析)

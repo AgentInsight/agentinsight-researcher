@@ -1,6 +1,6 @@
 """MCP Coordinator MCP 协调器.
 
-AGENTS.md 用户需求 9: 支持用户配置 MCP 作为数据源.
+支持用户配置 MCP 作为数据源.
 
 三策略:
 - fast (默认): 仅对原始查询运行一次, 缓存复用
@@ -67,7 +67,7 @@ def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> st
 async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, Any]]:
     """从 postgres 获取用户的启用 MCP 配置.
 
-    AGENTS.md 第 7 章: 数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
+    数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
     Agent 初始化时调用, 合并到 MCP_SERVERS (动态工具注册).
 
     Args:
@@ -84,7 +84,7 @@ async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, An
         pool = await get_pool()
         async with pool.acquire() as conn:
             # 仅获取用户私有的启用 MCP (不含系统公用 MCP, is_system=FALSE)
-            # AGENTS.md: Agent 只调用用户自己启用且不属于系统的 MCP
+            # Agent 只调用用户自己启用且不属于系统的 MCP
             rows = await conn.fetch(
                 "SELECT name, server_url, transport_type, command, args, env_vars "
                 "FROM mcp_configs WHERE agent_id=$1 AND user_id=$2 AND enabled=TRUE AND is_system=FALSE",

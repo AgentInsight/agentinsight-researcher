@@ -6,7 +6,7 @@
 - summary/subtopics 模式与私有数据检索并行
 - 并行执行不影响结果正确性 (上下文合并顺序正确)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/Searchers/Retriever 全部 mock).
+单元测试不依赖外部服务 (LLM/Searchers/Retriever 全部 mock).
 """
 
 from __future__ import annotations

@@ -13,8 +13,8 @@
 - 否则 → 走 researcher graph (新研究)
 
 复用同一 PostgresSaver (同 thread_id 隔离), 支持多会话并发.
-AGENTS.md 第 5/6 章: 生产 StateGraph 必须挂 PostgresSaver, thread_id 从请求上下文注入.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (Postgres 全部 mock).
+生产 StateGraph 必须挂 PostgresSaver, thread_id 从请求上下文注入.
+单元测试不依赖外部服务 (Postgres 全部 mock).
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class TestBuildChatGraph:
     async def test_build_chat_graph_checkpointer_attached(self) -> None:
         """验证 use_checkpointer=True 时挂载 PostgresSaver (mock).
 
-        AGENTS.md 第 5/6 章: 生产 StateGraph 必须挂 PostgresSaver (同 thread_id 隔离).
+        生产 StateGraph 必须挂 PostgresSaver (同 thread_id 隔离).
         用 langgraph MemorySaver 作为真实 BaseCheckpointSaver 实例
         (graph.compile 会校验 checkpointer 类型, MagicMock 不通过).
         """

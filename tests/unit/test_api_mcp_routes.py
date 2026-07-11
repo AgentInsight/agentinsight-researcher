@@ -9,8 +9,8 @@
 - DELETE /v1/mcp/{id}: 删除用户 MCP 配置
 - 数据隔离: agent_id + user_id
 
-AGENTS.md 第 7/9 章: 数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务, mock 数据库池.
+数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
+单元测试不依赖外部服务, mock 数据库池.
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def mock_db():
 def mock_request_context():
     """Mock 请求上下文 (agent_id + user_id).
 
-    AGENTS.md 第 8 章: 请求上下文用 contextvars, 测试中 patch 模块级引用.
+    请求上下文用 contextvars, 测试中 patch 模块级引用.
     """
     with (
         patch.object(mcp_routes, "get_request_agent_id", return_value="test-agent"),

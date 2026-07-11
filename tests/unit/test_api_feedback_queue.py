@@ -9,7 +9,7 @@
 - FeedbackQueue.cleanup: 清理后 has_pending=False
 - get_feedback_queue 单例
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations

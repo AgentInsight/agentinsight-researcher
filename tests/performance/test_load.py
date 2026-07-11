@@ -1,6 +1,5 @@
 """性能测试: 负载/压力测试 (持续请求 + 并发会话隔离 + 内存稳定性).
 
-AGENTS.md 第 6/13 章硬约束:
 - 每个 Agent 应支持并发多会话; 会话间状态通过 Postgres Checkpointer 隔离
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试数据隔离: session_id=test_perf_*
@@ -39,7 +38,7 @@ CONCURRENT_SESSION_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, 
 
 
 def _unique_session_id(prefix: str = "perf_load") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -105,7 +104,7 @@ async def _run_session_query(
 ) -> tuple[float, int, str, str]:
     """执行单会话短查询, 返回 (耗时, 状态码, 请求 sid, 响应 sid).
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键, X-Session-Id 头应匹配.
+    thread_id 做会话隔离键, X-Session-Id 头应匹配.
     """
     payload = _chat_payload(query, expected_sid)
     start = time.perf_counter()
@@ -119,7 +118,6 @@ async def _run_session_query(
 def test_concurrent_5_sessions_isolation(agent_url: str, perf_thresholds: dict[str, float]) -> None:
     """验证 5 个并发会话不同主题, 会话隔离 + 全部在 60s 内完成.
 
-    AGENTS.md 第 6 章:
     - 每个 Agent 应支持并发多会话
     - 会话隔离键为 thread_id (session_id), 由请求上下文注入
     - 会话间状态通过 Postgres Checkpointer 隔离
@@ -180,7 +178,7 @@ def test_concurrent_5_sessions_isolation(agent_url: str, perf_thresholds: dict[s
 def test_memory_stable_under_load(agent_url: str) -> None:
     """验证 20 次顺序短查询无 OOM/错误 (内存稳定性).
 
-    AGENTS.md 第 6 章: 会话级数据按 agent_id + user_id + session_id 三级分键.
+    会话级数据按 agent_id + user_id + session_id 三级分键.
     大量会话不应导致内存泄漏或 OOM.
 
     验证:

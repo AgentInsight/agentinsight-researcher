@@ -1,6 +1,5 @@
 """功能测试: 验证 Qdrant 向量库服务.
 
-AGENTS.md 第 7 章硬约束:
 - 单一集合 agents, distance=Cosine, vector_size=768 (bge-base-zh-v1.5 固定)
 - payload namespace 隔离: 共享知识库 namespace=agent_id, 用户私有 namespace={agent_id}:{user_id}
 - 点 id 用 uuid5(NAMESPACE_DNS, f"{namespace}:{content_hash}") 幂等生成
@@ -43,7 +42,7 @@ EMBEDDINGS_API_KEY = os.getenv("EMBEDDINGS_API_KEY", "")
 # uuid5 命名空间 (与 src/rag/embeddings.py 一致)
 NAMESPACE_DNS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
-# 测试 namespace 前缀 (AGENTS.md 第 13 章: 测试数据隔离 namespace=test_*)
+# 测试 namespace 前缀 (测试数据隔离 namespace=test_*)
 TEST_NAMESPACE = f"test_{uuid.uuid4().hex[:8]}"
 
 
@@ -82,7 +81,7 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
 def test_collection_exists() -> None:
     """验证 Qdrant 集合 agents 存在: GET /collections/agents → 200.
 
-    AGENTS.md 第 7 章: 单一集合 agents. Agent 启动时应通过 ensure_collection() 创建.
+    单一集合 agents. Agent 启动时应通过 ensure_collection() 创建.
     """
     client = _get_qdrant_client()
     try:
@@ -105,7 +104,6 @@ def test_collection_exists() -> None:
 def test_upsert_and_search() -> None:
     """验证 Qdrant upsert + 搜索 + 清理 (namespace=test_*).
 
-    AGENTS.md 第 7/13 章:
     - 测试数据隔离: namespace=test_*
     - 点 id 用 uuid5 幂等生成
     - payload 含 content + metadata + namespace
@@ -186,7 +184,7 @@ def test_upsert_and_search() -> None:
 def test_namespace_filter_isolation() -> None:
     """验证 namespace 过滤隔离: 不存在的 namespace 搜索应返回空.
 
-    AGENTS.md 第 7 章: 检索时必须显式传目标 namespace 列表.
+    检索时必须显式传目标 namespace 列表.
     """
     client = _get_qdrant_client()
     try:

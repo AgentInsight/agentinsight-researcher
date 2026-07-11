@@ -9,7 +9,7 @@
 
 补充 tests/unit/test_skills_source_curator.py (仅测 _score_credibility 纯函数).
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/PromptFamily 全部 mock).
+单元测试不依赖外部服务 (LLM/PromptFamily 全部 mock).
 """
 
 from __future__ import annotations

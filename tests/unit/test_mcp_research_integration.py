@@ -9,8 +9,8 @@
 - MCP 工具调用失败降级 (LLM 失败/工具异常/超时)
 - MCP 工具调用 trace span 记录 (trace_tool 包裹)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (LLM/MCP Server/Postgres 全部 mock).
-AGENTS.md 第 7/9 章: MCP 工具配置按 agent_id + user_id 隔离.
+单元测试不依赖外部服务 (LLM/MCP Server/Postgres 全部 mock).
+MCP 工具配置按 agent_id + user_id 隔离.
 """
 
 from __future__ import annotations

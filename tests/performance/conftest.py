@@ -1,6 +1,5 @@
 """性能测试 fixtures: 延迟阈值 + 服务地址.
 
-AGENTS.md 第 13 章硬约束:
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码
 - 测试数据隔离: namespace=test_* + user_id=test_* + session_id=test_*
@@ -19,7 +18,7 @@ import os
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # TEI Embeddings 服务 (宿主机直连 127.0.0.1:8088)
@@ -54,7 +53,7 @@ def qdrant_url() -> str:
 def perf_thresholds() -> dict[str, float]:
     """可配置的延迟阈值 (秒), 经 PERF_* 环境变量覆盖.
 
-    默认值参考 AGENTS.md 性能要求与现有 regression/test_short_query.py 的 10s 上限.
+    默认值参考性能要求与现有 regression/test_short_query.py 的 10s 上限.
     阈值宽松 enough 容忍 CI 环境抖动, 严格 enough 捕获性能退化.
     """
     return {
@@ -84,7 +83,7 @@ def perf_thresholds() -> dict[str, float]:
 def make_http_client(timeout: httpx.Timeout | None = None) -> httpx.Client:
     """构造 httpx.Client (trust_env=False 绕过系统 HTTP 代理).
 
-    AGENTS.md 第 13 章: localhost 不应走系统代理 (Clash/V2Ray 等).
+    localhost 不应走系统代理 (Clash/V2Ray 等).
     """
     if timeout is None:
         timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)

@@ -1,6 +1,5 @@
 """性能测试: 基线性能 (单次 chat completions + 并发 P95 + LLM 调用耗时分布).
 
-AGENTS.md 第 6/13 章硬约束:
 - 每个 Agent 应支持并发多会话; 会话间状态通过 Postgres Checkpointer 隔离
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码
@@ -41,7 +40,7 @@ CONCURRENT_TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.
 
 
 def _unique_session_id(prefix: str = "perf_baseline") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -66,7 +65,7 @@ def _chat_payload(
 def test_single_chat_completions_under_30s(agent_url: str) -> None:
     """验证单次 chat completions 响应时间 < 30s (短查询, 不走 graph).
 
-    AGENTS.md 性能基线: 单次 chat completions 短查询响应时间 < 30s.
+    性能基线: 单次 chat completions 短查询响应时间 < 30s.
     短查询保护直接返回 reply, 不走任何 graph, 应在数秒内完成.
     """
     threshold_s = 30.0
@@ -148,7 +147,7 @@ def _percentile(sorted_values: list[float], p: float) -> float:
 def test_concurrent_10_p95_under_60s(agent_url: str) -> None:
     """验证并发 10 请求的 P95 延迟 < 60s.
 
-    AGENTS.md 性能基线: 并发 10 请求的 P95 < 60s.
+    性能基线: 并发 10 请求的 P95 < 60s.
     10 个并发短查询, 每个用不同 session_id (会话隔离).
     """
     threshold_p95_s = 60.0
@@ -201,7 +200,7 @@ def test_concurrent_10_p95_under_60s(agent_url: str) -> None:
 def test_sampling_latency_distribution(agent_url: str) -> None:
     """验证 10 次顺序短查询的耗时分布 (基线无退化).
 
-    AGENTS.md 性能基线: 多次采样 P95 / P50 / max 应稳定.
+    性能基线: 多次采样 P95 / P50 / max 应稳定.
     验证 P95 不显著高于 P50 (无显著尾延迟).
     """
     sample_count = 10
@@ -247,7 +246,7 @@ def test_sampling_latency_distribution(agent_url: str) -> None:
 def test_llm_token_usage_within_budget(agent_url: str) -> None:
     """验证单次 chat completions 的 token 用量在合理范围内.
 
-    AGENTS.md 第 9 章: max_total_tokens=128000 (单次研究流程总 token 预算上限).
+    max_total_tokens=128000 (单次研究流程总 token 预算上限).
     短查询不走 graph, token 用量应远低于此上限.
     通过 usage.total_tokens 间接验证 LLM 调用成本可控.
     """

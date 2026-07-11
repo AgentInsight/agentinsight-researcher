@@ -5,8 +5,8 @@
 - create_revision_guard: 修订循环守卫 (revision_count >= max → accept)
 - create_fact_check_guard: 事实核查守卫 (iteration_count >= max → accept)
 
-AGENTS.md 第 5 章: max_iterations 为硬上限, 达到上限时强制终止.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+max_iterations 为硬上限, 达到上限时强制终止.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations

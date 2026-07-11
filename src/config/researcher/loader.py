@@ -1,6 +1,6 @@
 """闲聊响应配置加载器.
 
-AGENTS.md 第 1/3 章: 配置 SSOT, 业务代码禁止硬编码.
+配置 SSOT, 业务代码禁止硬编码.
 闲聊响应所需的正则模式/种子/短语/模板/兜底话术统一从 YAML + Jinja2 加载.
 
 Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail 的配置化思路:

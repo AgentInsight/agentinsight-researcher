@@ -1,6 +1,6 @@
 """混合检索器: BM25 + 向量 + RRF + Rerank.
 
-AGENTS.md 第 7 章硬约束:
+检索层硬约束:
 - 检索必须混合 BM25 + 向量 (bge-base-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
 - 重排序默认不启用; 当 rerank_enabled=True 时经 bge-reranker-v2-m3, Top-K 召回后 rerank
 - score_threshold 默认 0.3, 低于阈值丢弃 (仅 rerank 启用时生效, 向量检索阶段不套用)
@@ -38,7 +38,7 @@ from src.rag.qdrant_manager import QdrantManager
 logger = logging.getLogger(__name__)
 
 # 匿名用户 ID (用于共享 namespace 缓存键 / 无 user_id 降级)
-# AGENTS.md 第 8 章: default_user_id 环境变量已移除, 改为 IP-based UserId;
+# default_user_id 环境变量已移除, 改为 IP-based UserId;
 # RAG 层可能在 CLI/批处理场景无 HTTP 上下文, 用固定常量作共享缓存维度.
 _ANONYMOUS_USER_ID = "anonymous"
 
@@ -46,7 +46,7 @@ _ANONYMOUS_USER_ID = "anonymous"
 class HybridRetriever:
     """混合检索器: BM25 + 向量 + RRF 融合 + Rerank (可选).
 
-    AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量; rerank 默认不启用,
+    检索必须混合 BM25 + 向量; rerank 默认不启用,
     rerank_enabled=True 时经 bge-reranker-v2-m3.
 
     BM25 断点修复: retrieve 入口调用 _ensure_bm25_corpus 从 Qdrant 拉取 namespace
@@ -86,7 +86,7 @@ class HybridRetriever:
         self.settings = settings or get_settings()
         self._embeddings = get_embeddings_client()
         self._qdrant = QdrantManager(self.settings)
-        # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章): rerank 服务端开启 API_KEY 时,
+        # TEI API_KEY 鉴权: rerank 服务端开启 API_KEY 时,
         # 客户端必须携带 Authorization: Bearer <key> 请求头
         headers: dict[str, str] = {}
         if self.settings.rerank_api_key:
@@ -96,8 +96,8 @@ class HybridRetriever:
             timeout=30.0,
             headers=headers,
         )
-        # Redis 缓存客户端改用统一工厂 get_redis_client() (AGENTS.md 第 7 章:
-        # 键格式 {agent_id}:{user_id}:{module}:{type}:{id}, 键前缀由本类管理).
+        # Redis 缓存客户端改用统一工厂 get_redis_client():
+        # 键格式 {agent_id}:{user_id}:{module}:{type}:{id}, 键前缀由本类管理.
         # __init__ 是同步方法, 故惰性到首次 _get_cache/_set_cache 时初始化 (避免阻塞).
         # Redis 不可用时降级为无缓存, 不阻断检索.
         self._redis: Any = None
@@ -167,7 +167,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """混合检索: BM25 + 向量 + RRF + Rerank.
 
-        AGENTS.md 第 7 章: 默认 vector_weight=0.7 / bm25_weight=0.3, RRF k=60.
+        默认 vector_weight=0.7 / bm25_weight=0.3, RRF k=60.
         """
         k = top_k or self.settings.rerank_top_k
         # 新 API: 含私有数据存在性检查, 仅当用户有私有数据时才加入私有 namespace
@@ -254,7 +254,7 @@ class HybridRetriever:
                 # 按内容 hash 去重 (相同内容不同来源的文档)
                 fused = self._deduplicate_by_content_hash(fused)
 
-                # Rerank (AGENTS.md 第 7 章: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3)
+                # Rerank: 默认不启用, rerank_enabled=True 时经 bge-reranker-v2-m3
                 if self.settings.rerank_enabled:
                     reranked = await self._rerank(query, fused, k)
                 else:
@@ -301,7 +301,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """BM25 检索 (基于内存语料, jieba 中文分词).
 
-        AGENTS.md 第 7 章: rank-bm25 + jieba, 中文分词 + IDF.
+        rank-bm25 + jieba, 中文分词 + IDF.
         query 分词结果缓存 (重复 query 命中缓存, 避免重复 jieba.cut).
         """
         if not self._bm25 or not self._bm25_docs:
@@ -342,7 +342,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """倒数排名融合 (RRF).
 
-        AGENTS.md 第 7 章: RRF k=60 (业界标准).
+        RRF k=60 (业界标准).
         """
         k = self.settings.rrf_k
         scores: dict[str, float] = {}
@@ -383,14 +383,14 @@ class HybridRetriever:
         return deduped
 
     def _cache_key(self, query: str, user_id: str | None) -> str:
-        """构建 Redis 缓存键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:{module}:{type}:{id})."""
+        """构建 Redis 缓存键 (格式: {agent_id}:{user_id}:{module}:{type}:{id})."""
         agent_id = self.settings.agent_name
         uid = user_id or _ANONYMOUS_USER_ID
         query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
         return f"{agent_id}:{uid}:rag:retriever:{query_hash}"
 
     def _lru_key(self, user_id: str | None = None) -> str:
-        """构建 LRU 访问时间 Sorted Set 键 (AGENTS.md 第 7 章: {agent_id}:{user_id}:cache_access_times)."""
+        """构建 LRU 访问时间 Sorted Set 键 (格式: {agent_id}:{user_id}:cache_access_times)."""
         agent_id = self.settings.agent_name
         uid = user_id or _ANONYMOUS_USER_ID
         return f"{agent_id}:{uid}:cache_access_times"
@@ -495,7 +495,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """重排序 (bge-reranker-v2-m3).
 
-        AGENTS.md 第 7 章: rerank 默认不启用; rerank_enabled=True 时,
+        rerank 默认不启用; rerank_enabled=True 时,
         Top-K 召回后 rerank, 禁止直接用向量分数作最终排序.
         """
         if not docs:
@@ -524,7 +524,7 @@ class HybridRetriever:
                 doc = candidates[idx]
                 reranked.append({**doc, "score": float(score)})
 
-            # 低于阈值丢弃 (AGENTS.md 第 7 章: score_threshold 默认 0.3)
+            # 低于阈值丢弃 (score_threshold 默认 0.3)
             threshold = self.settings.score_threshold
             return [d for d in reranked if d["score"] >= threshold]
         except Exception as e:  # noqa: BLE001
@@ -580,7 +580,7 @@ class HybridRetriever:
         共享 namespace ({agent_id}-data) 跨用户共享, 使用 anonymous 作为缓存键
         (所有用户共享同一份缓存); 用户私有 namespace 使用实际 user_id 隔离.
 
-        AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:.
+        Redis 键应加前缀 {agent_id}:{user_id}:.
         """
         shared_ns = self._qdrant.build_data_shared_namespace()
         if namespace == shared_ns:
@@ -713,7 +713,7 @@ class HybridRetriever:
     ) -> None:
         """检索前确保 BM25 语料已加载 (按 namespace 维度, 含版本号校验).
 
-        AGENTS.md 第 7 章: 检索必须混合 BM25 + 向量. 本方法替代旧版
+        检索必须混合 BM25 + 向量. 本方法替代旧版
         update_bm25_corpus "无业务调用方" 的断点路径, 在 retrieve 入口自动调用.
 
         流程 (对每个 namespace):

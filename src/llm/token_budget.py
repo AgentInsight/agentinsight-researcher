@@ -6,7 +6,7 @@ add_costs() 按步骤归因成本的设计, 升级为:
 - 模型级成本拆分 (LLM + Embedding)
 - US 区域倍率 (1.1x)
 
-AGENTS.md 第 5 章: max_iterations 为硬上限, 由节点计数器 + 条件边强制.
+max_iterations 为硬上限, 由节点计数器 + 条件边强制.
 本模块在此基础上增加 token 预算硬上限, 避免单节点超支导致整体失败.
 """
 
@@ -139,7 +139,7 @@ class TokenBudgetAllocator:
     ) -> None:
         """累加一次调用的成本到指定节点 (add_costs).
 
-        AGENTS.md 第 10 章: 成本归因通过 trace span 自动传播, 不需手动传递.
+        成本归因通过 trace span 自动传播, 不需手动传递.
 
         Args:
             node: 节点名.

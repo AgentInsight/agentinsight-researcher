@@ -1,6 +1,6 @@
 """ResearcherState 定义.
 
-AGENTS.md 第 5 章: State 必须为 TypedDict; 跨节点共享字段用 Annotated[T, reducer].
+State 必须为 TypedDict; 跨节点共享字段用 Annotated[T, reducer].
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ class ResearcherState(TypedDict, total=False):
     """研究智能体状态.
 
     所有字段可选(total=False), 节点纯函数化只返回 update dict 由 reducer 合并.
-    AGENTS.md 第 5 章: 跨节点共享字段用 Annotated[T, reducer] (messages 用 add_messages).
+    跨节点共享字段用 Annotated[T, reducer] (messages 用 add_messages).
     """
 
-    # ========== 请求上下文 (AGENTS.md 第 6/8 章) ==========
+    # ========== 请求上下文 ==========
     query: str  # 用户原始研究请求
     session_id: str  # 即 thread_id, 会话隔离键
     agent_id: str  # agent_name, 数据隔离键
@@ -37,7 +37,7 @@ class ResearcherState(TypedDict, total=False):
     # ========== 查询意图 ==========
     query_intent: str  # 查询意图: "research" | "chat" | "short_query"
 
-    # ========== 动态角色 (AGENTS.md 第 5 章) ==========
+    # ========== 动态角色 ==========
     # 行业适配采用 4 层机制 (无行业分类器):
     #   1. Prompt 层: AgentCreator.AUTO_AGENT_INSTRUCTIONS few-shot → LLM 动态生成角色
     #   2. Config 层: settings.agent_role 静态注入 (优先级高于 LLM)

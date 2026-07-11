@@ -8,8 +8,8 @@
 - check_daily_report_limit: limit<=0/Redis 不可用/Redis 异常/未超限/已超限/首次
 - increment_daily_report_count: Redis 不可用/首次计数/非首次/Redis 异常
 
-AGENTS.md 第 8 章: 无 JWT Token 时按 IP 生成确定性 UserId (SHA256, 不存储原始 IP).
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (Redis 全部 mock).
+无 JWT Token 时按 IP 生成确定性 UserId (SHA256, 不存储原始 IP).
+单元测试不依赖外部服务 (Redis 全部 mock).
 """
 
 from __future__ import annotations

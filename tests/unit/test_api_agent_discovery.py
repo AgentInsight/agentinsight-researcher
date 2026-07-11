@@ -7,8 +7,8 @@
 - capabilities 数组含 7 项能力
 - auth 数组含 bearer_jwt + none
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
-AGENTS.md 第 8/11 章: 公开发现端点, 无需鉴权, auth 含 bearer_jwt (可选) 与 none (匿名降级).
+单元测试不依赖外部服务.
+公开发现端点, 无需鉴权, auth 含 bearer_jwt (可选) 与 none (匿名降级).
 """
 
 from __future__ import annotations

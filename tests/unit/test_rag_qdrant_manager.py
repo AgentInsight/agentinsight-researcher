@@ -7,7 +7,7 @@
 - search: should OR 过滤, score_threshold, 返回字段映射
 - get_qdrant_manager 单例
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations
@@ -282,7 +282,7 @@ async def test_search_returns_mapped_fields() -> None:
 async def test_search_no_threshold_when_score_threshold_none() -> None:
     """search: score_threshold=None 时不应用阈值 (P0 阈值误用修复).
 
-    AGENTS.md 第 7 章: score_threshold 仅 rerank 启用时生效, 向量检索阶段不应套用
+    score_threshold 仅 rerank 启用时生效, 向量检索阶段不应套用
     rerank 的 0.3 阈值. 调用方未显式传 score_threshold 时, 不再 fallback 到
     settings.score_threshold, 让 RRF + Rerank 阶段做最终筛选.
     """

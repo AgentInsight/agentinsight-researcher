@@ -7,8 +7,8 @@
 - _create_postgres_checkpointer 直接调用 (内部实现契约)
 - 连接池 kwargs 透传 (autocommit/prepare_threshold/row_factory)
 
-AGENTS.md 第 5/6 章: StateGraph 必须挂 PostgresSaver, 移除 dev/prod 分支与 MemorySaver 降级.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (mock psycopg_pool/AsyncPostgresSaver).
+StateGraph 必须挂 PostgresSaver, 移除 dev/prod 分支与 MemorySaver 降级.
+单元测试不依赖外部服务 (mock psycopg_pool/AsyncPostgresSaver).
 """
 
 from __future__ import annotations

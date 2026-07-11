@@ -1,6 +1,5 @@
 """性能测试: FastEmbed 本地 Embeddings 性能 (8 项优化之 FastEmbed).
 
-AGENTS.md 第 7/13 章硬约束:
 - FastEmbed (bge-small-zh-v1.5, 512维) 用于上下文压缩, 不依赖远程 TEI
 - 性能测试以单元测试为主 (mock + time.perf_counter), 不依赖容器栈
 

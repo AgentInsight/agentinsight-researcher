@@ -1,6 +1,6 @@
 """端到端测试: API 层完整研究链路 (非浏览器).
 
-AGENTS.md 第 13 章硬约束:
+测试约定:
 - e2e 必须在容器栈 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 必须覆盖完整链路: 提问 → 检索 → 工具调用 → 流式响应 → 会话持久化
@@ -36,7 +36,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # e2e 测试超时 600s (完整研究 5-10 分钟)
@@ -47,7 +47,7 @@ QUICK_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (测试数据隔离: session_id=test_*)."""
     return f"test_e2e_{uuid.uuid4().hex[:12]}"
 
 
@@ -65,7 +65,7 @@ async def _stream_research(
 ) -> tuple[str, list[dict[str, object]], str | None]:
     """发起流式研究请求, 返回 (完整 content, 全部 chunks, finish_reason).
 
-    AGENTS.md 第 14 章: 统一调用 POST /v1/chat/completions, 请求体带 stream: true.
+    统一调用 POST /v1/chat/completions, 请求体带 stream: true.
     返回 chunks 供调用方断言 SSE 帧结构 (首块 role / 末块 finish_reason).
 
     Args:
@@ -132,8 +132,8 @@ async def _stream_research(
 async def test_full_research_chain_non_stream() -> None:
     """完整研究流程 (非流式): 提问 → 200 → 验证响应包含报告结构.
 
-    AGENTS.md 第 13 章: e2e 必须覆盖完整链路.
-    AGENTS.md 第 14 章: OpenAI 兼容非流式响应.
+    e2e 必须覆盖完整链路.
+    OpenAI 兼容非流式响应.
     验证响应体关键字段: object/choices/message/content/finish_reason/usage.
     """
     sid = _unique_session_id()
@@ -191,8 +191,8 @@ async def test_full_research_chain_non_stream() -> None:
 async def test_full_research_chain_stream() -> None:
     """完整研究流程 (流式 SSE): 提问 → 200 → 验证 SSE chunks → 验证 finish_reason=stop.
 
-    AGENTS.md 第 13 章: e2e 必须覆盖完整链路.
-    AGENTS.md 第 14 章: 流式 SSE 响应.
+    e2e 必须覆盖完整链路.
+    流式 SSE 响应.
     验证: 首块 role=assistant + 末块 finish_reason=stop + content 非空.
     """
     sid = _unique_session_id()
@@ -209,7 +209,7 @@ async def test_full_research_chain_stream() -> None:
     first_delta = chunks[0]["choices"][0]["delta"]
     assert first_delta.get("role") == "assistant", f"首块 role 非 assistant: {first_delta}"
 
-    # 末块应含 finish_reason=stop (AGENTS.md 第 14 章: SSE 末块标记)
+    # 末块应含 finish_reason=stop (SSE 末块标记)
     assert finish_reason == "stop", f"finish_reason 非 stop: {finish_reason}\n末块: {chunks[-1]}"
 
     # content 非空且有实质长度
@@ -230,8 +230,8 @@ async def test_full_research_chain_stream() -> None:
 async def test_multi_session_concurrent_isolation() -> None:
     """多会话并发隔离: 3 个不同 session_id 并发请求 → 验证响应不串扰.
 
-    AGENTS.md 第 6 章: 会话间状态通过 Postgres Checkpointer 隔离.
-    AGENTS.md 第 13 章: e2e 应覆盖完整链路.
+    会话间状态通过 Postgres Checkpointer 隔离.
+    e2e 应覆盖完整链路.
 
     3 个会话并发研究不同主题, 验证:
     1. 3 个会话都能独立完成
@@ -299,9 +299,9 @@ async def test_multi_session_concurrent_isolation() -> None:
 async def test_file_upload_then_chat() -> None:
     """文件上传 + Chat 联动: 上传文件 → 用 file_id 提问 → 验证响应.
 
-    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离.
-    AGENTS.md 第 13 章: e2e 应覆盖完整链路.
-    AGENTS.md 第 14 章: 测试页面应能上传文件作为研究数据源.
+    用户私有数据按 agent_id + user_id 隔离.
+    e2e 应覆盖完整链路.
+    测试页面应能上传文件作为研究数据源.
 
     流程:
     1. POST /v1/files 上传 .txt 文件 → 201 + file_id
@@ -370,8 +370,8 @@ async def test_file_upload_then_chat() -> None:
 async def test_models_endpoint() -> None:
     """模型列表: GET /v1/models → 200 + 返回 agentinsight-researcher.
 
-    AGENTS.md 第 13 章: e2e 应覆盖完整链路 (含静态端点契约).
-    AGENTS.md 第 14 章: OpenAI 兼容端点.
+    e2e 应覆盖完整链路 (含静态端点契约).
+    OpenAI 兼容端点.
     """
     async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
         r = await client.get(f"{AGENT_URL}/v1/models")
@@ -404,9 +404,9 @@ async def test_models_endpoint() -> None:
 async def test_agent_discovery() -> None:
     """Agent 发现: GET /.well-known/agent-discovery.json → 200 + schema 完整.
 
-    AGENTS.md 第 8 章: auth 含 bearer_jwt (可选) 与 none (匿名降级).
-    AGENTS.md 第 11 章: 公开发现端点, 无需鉴权.
-    AGENTS.md 第 14 章: Agent Discovery Protocol 公开发现端点.
+    auth 含 bearer_jwt (可选) 与 none (匿名降级).
+    公开发现端点, 无需鉴权.
+    Agent Discovery Protocol 公开发现端点.
     """
     async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
         r = await client.get(f"{AGENT_URL}/.well-known/agent-discovery.json")
@@ -443,7 +443,7 @@ async def test_agent_discovery() -> None:
     )
     assert len(data["capabilities"]) > 0, "capabilities 列表为空"
 
-    # auth 应支持 bearer_jwt 和 none (AGENTS.md 第 8 章: 匿名降级)
+    # auth 应支持 bearer_jwt 和 none (匿名降级)
     assert isinstance(data["auth"], list), f"auth 非列表: {type(data['auth'])}"
     assert "bearer_jwt" in data["auth"], f"auth 缺少 bearer_jwt: {data['auth']}"
     assert "none" in data["auth"], f"auth 缺少 none: {data['auth']}"
@@ -457,8 +457,8 @@ async def test_agent_discovery() -> None:
 async def test_health_endpoint() -> None:
     """健康检查: GET /health → 200 + status=ok + service=agentinsight-researcher.
 
-    AGENTS.md 第 13 章: e2e 前置依赖容器栈 service_healthy.
-    AGENTS.md 第 11 章: 安全响应头中间件不可绕过 (附带验证).
+    e2e 前置依赖容器栈 service_healthy.
+    安全响应头中间件不可绕过 (附带验证).
     """
     async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
         r = await client.get(f"{AGENT_URL}/health")
@@ -472,7 +472,7 @@ async def test_health_endpoint() -> None:
     assert "version" in body, f"/health 缺少 version 字段: {body}"
     _log(f"/health 验证通过: {body}")
 
-    # 附带验证安全响应头 (AGENTS.md 第 11 章: 不可绕过)
+    # 附带验证安全响应头 (不可绕过)
     assert r.headers.get("x-content-type-options") == "nosniff", (
         f"X-Content-Type-Options 非 nosniff: {r.headers.get('x-content-type-options')}"
     )
@@ -488,9 +488,9 @@ async def test_health_endpoint() -> None:
 async def test_error_handling_invalid_json_and_404() -> None:
     """错误处理: 无效 JSON → 422 + 不存在端点 → 404.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
-    AGENTS.md 第 13 章: API 测试应覆盖错误码.
-    AGENTS.md 第 14 章: 错误处理应在页面显式提示, 不推荐静默失败.
+    所有外部输入经 Pydantic 校验.
+    API 测试应覆盖错误码.
+    错误处理应在页面显式提示, 不推荐静默失败.
     """
     async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
         # 子场景 1: 无效 JSON body → 422 (Pydantic 校验失败)
@@ -531,16 +531,16 @@ async def test_error_handling_invalid_json_and_404() -> None:
     _log("错误处理验证通过: 无效 JSON → 422, 缺字段 → 422, 不存在端点 → 404, 不存在报告 → 404")
 
 
-# ========== 场景 9: 带 Bearer JWT Token 的完整研究链路 (AGENTS.md 第 13 章) ==========
+# ========== 场景 9: 带 Bearer JWT Token 的完整研究链路 ==========
 
 
 @pytest.mark.e2e
 async def test_research_with_bearer_token() -> None:
     """验证带 Bearer JWT Token 的完整研究链路.
 
-    AGENTS.md 第 8 章: token 存在时调用 /api/user 获取 user_id,
+    token 存在时调用 /api/user 获取 user_id,
     调用失败降级 IP-based UserId.
-    AGENTS.md 第 13 章: API 测试应包含携带 Bearer JWT Token 场景.
+    API 测试应包含携带 Bearer JWT Token 场景.
     """
     sid = _unique_session_id()
     query = "用 200 字简述中文检索增强生成技术的核心原理"

@@ -1,6 +1,6 @@
 """全局 Settings SSOT.
 
-AGENTS.md 第 1/3 章: pydantic-settings Settings SSOT, 配置只经 config/ + 环境变量.
+pydantic-settings Settings SSOT, 配置只经 config/ + 环境变量.
 业务代码禁止硬编码 URL/密钥.
 """
 
@@ -26,12 +26,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ========== 环境与部署 (AGENTS.md 第 12 章) ==========
-    env: Literal["dev", "prod"] = "prod"
+    # ========== 环境与部署 ==========
+    env: Literal["dev", "prod"] = "dev"
     enable_test_page: bool = True
     log_level: str = "INFO"
 
-    # ========== LLM 网关 (AGENTS.md 第 9 章, LiteLLM) ==========
+    # ========== LLM 网关 (LiteLLM) ==========
     # 三级 LLM 分层 (FAST/SMART/STRATEGIC):
     # - FAST: 快速任务 (摘要/分类/JSON 解析)
     # - SMART: 复杂推理 (报告写作/章节生成/来源策展)
@@ -83,13 +83,13 @@ class Settings(BaseSettings):
     # ========== 图像生成 (报告配图, deepseek-v4-flash) ==========
     # 用户明确要求: 用 deepseek-v4-flash (非 gemini). 通过 LiteLLM aimage_generation 调用.
     # 注意: deepseek-v4-flash 图像生成能力假设支持, 实际以官方文档为准.
-    image_generation_enabled: bool = False  # 默认不启用, 报告生成配图
+    image_generation_enabled: bool = True  # 启用报告生成配图
     image_model: str = "deepseek/deepseek-v4-flash"  # LiteLLM 路由前缀 (复用 deepseek_api_key)
     image_size: str = "1024x1024"
     image_quality: str = "standard"
     image_api_key: str | None = None  # 单独 Key (可选, 留空则复用 deepseek_api_key)
 
-    # ========== Qdrant (AGENTS.md 第 7/12 章) ==========
+    # ========== Qdrant ==========
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "agents"
@@ -101,10 +101,10 @@ class Settings(BaseSettings):
     qdrant_hnsw_full_scan_threshold: int = 10000  # 全扫描阈值
     qdrant_quantization: str = "scalar"  # 量化方式 (scalar/int8/binary, 默认 scalar)
 
-    # ========== Embeddings (AGENTS.md 第 1/7 章, 远程 TEI) ==========
+    # ========== Embeddings (远程 TEI) ==========
     embeddings_base_url: str = "http://embeddings:8088"
     embeddings_model: str = "BAAI/bge-base-zh-v1.5"
-    embeddings_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
+    embeddings_api_key: str | None = None  # TEI API_KEY 鉴权
     embeddings_max_client_batch_size: int = (
         4  # 客户端单次 TEI 请求上限 (匹配 TEI CPU max_batch_requests=4)
     )
@@ -118,15 +118,15 @@ class Settings(BaseSettings):
     embeddings_max_retries: int = 3
     embeddings_retry_base_delay: float = 0.5  # 基础延迟 (秒), 实际 = base * 2^attempt
 
-    # ========== Rerank (AGENTS.md 第 7 章) ==========
+    # ========== Rerank ==========
     rerank_enabled: bool = False  # 默认不启用, rerank_enabled=True 时启用 bge-reranker-v2-m3
     rerank_base_url: str = "http://rerank:8089"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_top_k: int = 5
-    rerank_api_key: str | None = None  # TEI API_KEY 鉴权 (AGENTS.md 第 7/12 章)
+    rerank_api_key: str | None = None  # TEI API_KEY 鉴权
 
-    # ========== PostgreSQL (AGENTS.md 第 6/12 章) ==========
-    postgres_host: str = "agentinsight.goldebridge.com"
+    # ========== PostgreSQL ==========
+    postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_db: str = "agents"
     postgres_user: str = "agis"
@@ -154,7 +154,7 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
-    # ========== Redis (AGENTS.md 第 1/6 章) ==========
+    # ========== Redis ==========
     redis_url: str = "redis://redis:6379/0"
     redis_auth: str | None = None  # Redis 鉴权密码 (与 docker-compose REDIS_AUTH 对齐)
     # Redis 连接池调优 (socket_timeout/max_connections 从 .env 暴露, 业务代码读取)
@@ -164,13 +164,13 @@ class Settings(BaseSettings):
     redis_cache_max_size: int = 1000  # LRU 最大缓存条目数 (超过时淘汰最久未访问)
     redis_cache_lru_enabled: bool = True  # 是否启用 LRU 淘汰 (默认 True, 关闭则仅 TTL)
 
-    # ========== 可观测性 (AGENTS.md 第 10 章) ==========
+    # ========== 可观测性 ==========
     agentinsight_public_key: str | None = None
     agentinsight_secret_key: str | None = None
     agentinsight_host: str = "https://agent.goldebridge.com"
     tracing_embedding_sample_rate: float = 0.5
 
-    # ========== 用户身份解析 (AGENTS.md 第 8 章) ==========
+    # ========== 用户身份解析 ==========
     # 无 JWT Token 时, 按 IP 生成确定性 UserId (SHA256 哈希, 不存储原始 IP)
     user_info_api_url: str = "https://agentinsight.goldebridge.com/api/user"
     user_info_api_timeout: int = 5
@@ -179,11 +179,11 @@ class Settings(BaseSettings):
     ip_daily_report_limit: int = 3
 
     # ========== 自托管模式 (SELF_HOST) ==========
-    # True (默认): 自托管模式, JWT Token 可选, 不存在时走匿名用户路径 (现有逻辑),
+    # True (默认): 自托管模式, JWT Token 可选, 不存在时走 IP-based 用户身份解析,
     #   且跳过 AgentInsightService 点数校验/扣除 (独立部署不依赖 SaaS 后端)
     # False: 云托管模式, 强制校验 JWT Token, 不存在或取不到 User 信息时直接返回错误,
     #   且复用 AgentInsightService 的点数校验/扣除 API (见下方 agent_privilege_*)
-    self_host: bool = False
+    self_host: bool = True
 
     # ========== Agent 点数校验/扣除 (SELF_HOST=False 时启用) ==========
     # 仅在 self_host=False 时生效; self_host=True 时跳过校验/扣除
@@ -195,17 +195,17 @@ class Settings(BaseSettings):
     agent_privilege_api_timeout: int = 5
     agent_privilege_fail_open: bool = True  # API 失败时放行 (降级策略)
 
-    # ========== 会话与上下文 (AGENTS.md 第 6 章) ==========
+    # ========== 会话与上下文 ==========
     context_max_chars: int = 800_000
     context_compressed_target: int = 200_000
     context_session_ttl: int = 2_592_000
     debounce_seconds: float = 1.0
     flush_interval_seconds: float = 0.5
 
-    # ========== 数据隔离 (AGENTS.md 第 7 章) ==========
+    # ========== 数据隔离 ==========
     agent_name: str = "agentinsight-researcher"
 
-    # ========== RAG 检索 (AGENTS.md 第 7 章) ==========
+    # ========== RAG 检索 ==========
     vector_weight: float = 0.7
     bm25_weight: float = 0.3
     score_threshold: float = 0.3
@@ -325,7 +325,7 @@ class Settings(BaseSettings):
     context_sliding_window: int = 5  # 滑动窗口大小: 保留最近 N 条原文
     max_context_words: int = 25_000
     max_iterations: int = 3  # Planner 拆解子查询数量 (非图迭代上限)
-    graph_max_iterations: int = 10  # 图迭代硬上限 (AGENTS.md 第 5 章守卫用)
+    graph_max_iterations: int = 10  # 图迭代硬上限 (守卫用)
     max_subtopics: int = 3
     deep_research_breadth: int = 3
     deep_research_depth: int = 2
@@ -522,8 +522,8 @@ class Settings(BaseSettings):
     # ========== AG2 框架 (可选) ==========
     ag2_enabled: bool = False  # AG2 框架开关 (默认关闭, 启用后可用 AG2 替代 LangGraph)
 
-    # ========== CORS (AGENTS.md 第 11 章, 禁 *) ==========
-    cors_allow_origins: str = "*"
+    # ========== CORS (禁 *) ==========
+    cors_allow_origins: str = "http://localhost:3000,http://localhost:8066"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -544,7 +544,7 @@ class Settings(BaseSettings):
         return v
 
     def validate_production(self) -> None:
-        """生产环境强制校验 (AGENTS.md 第 10/11 章).
+        """生产环境强制校验.
 
         - 密钥必须存在
         - 生产关闭 Debug

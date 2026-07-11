@@ -1,9 +1,9 @@
-"""PyMuPDF 抓取器 - PDF 文档.
+"""PDF 抓取器 - PDF 文档.
 
 适用于 PDF URL 与本地路径.
 
-所有 fitz 同步调用经 asyncio.to_thread; 流式下载避免 OOM;
-同步文件写入/删除经 asyncio.to_thread 包裹.
+使用 pypdf (BSD-3-Clause) 提取 PDF 文本; 所有同步调用经 asyncio.to_thread;
+流式下载避免 OOM; 同步文件写入/删除经 asyncio.to_thread 包裹.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ _DOWNLOAD_TIMEOUT = 30.0
 
 
 class PyMuPDFScraper(BaseScraper):
-    """PyMuPDF 抓取器 (PDF)."""
+    """PDF 抓取器 (基于 pypdf)."""
 
     name = "pdf"
 
@@ -40,7 +40,7 @@ class PyMuPDFScraper(BaseScraper):
                 "content_type": "pdf",
             }
         except Exception as e:  # noqa: BLE001
-            logger.warning("PyMuPDF 抓取失败 %s: %s", self.url, e)
+            logger.warning("PDF 抓取失败 %s: %s", self.url, e)
             return {"url": self.url, "content": "", "title": "", "image_urls": []}
 
     async def _extract_pdf_content(self) -> str:
@@ -100,20 +100,20 @@ class PyMuPDFScraper(BaseScraper):
     def _extract_from_file(file_path: str) -> str:
         """从本地 PDF 文件提取文本 (同步, 用 asyncio.to_thread 包装).
 
-        PyMuPDF (fitz.Document) 不是线程安全, 整个解析逻辑作为单一同步
-        函数在线程中执行, 避免跨线程共享 Document 对象.
+        使用 pypdf.PdfReader 逐页提取文本; pypdf 为纯 Python 实现,
+        无原生 C 扩展依赖, 无线程安全约束; 整个解析逻辑作为单一同步
+        函数在线程中执行, 避免阻塞事件循环.
         """
         try:
-            import fitz  # PyMuPDF
+            from pypdf import PdfReader
 
-            doc = fitz.open(file_path)
+            reader = PdfReader(file_path)
             text_parts: list[str] = []
-            for page in doc:
-                text_parts.append(page.get_text())
-            doc.close()
+            for page in reader.pages:
+                text_parts.append(page.extract_text() or "")
             return "\n\n".join(text_parts)
         except ImportError:
-            logger.warning("PyMuPDF (fitz) 未安装, 无法解析 PDF")
+            logger.warning("pypdf 未安装, 无法解析 PDF")
             return ""
         except Exception as e:  # noqa: BLE001
             logger.warning("PDF 解析失败 %s: %s", file_path, e)

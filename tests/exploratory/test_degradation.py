@@ -1,6 +1,5 @@
 """探索性测试: 降级路径 (Qdrant/Redis/LLM/TEI 不可用时的服务行为).
 
-AGENTS.md 第 7/9/13 章硬约束:
 - Qdrant 不可用时降级内存检索仅限 ENV=dev; 生产应告警并失败转移
 - LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链 (strategic → smart → fast)
 - Embeddings/Rerank TEI 服务通过 API_KEY 鉴权, 客户端重试与降级
@@ -27,7 +26,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
 EMBEDDINGS_URL = os.getenv("EMBEDDINGS_URL", "http://127.0.0.1:8088").rstrip("/")
@@ -41,7 +40,7 @@ DIRECT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id(prefix: str = "degrade") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -75,7 +74,7 @@ def _embeddings_auth_headers() -> dict[str, str]:
 def test_qdrant_nonexistent_namespace_returns_empty() -> None:
     """降级: 查询不存在的 namespace 应返回空结果, 不应崩溃.
 
-    AGENTS.md 第 7 章: 检索时必须显式传目标 namespace 列表,
+    检索时必须显式传目标 namespace 列表,
     无命中时应返回空列表, 不应抛异常.
     """
     nonexistent_ns = f"test_nonexistent_{uuid.uuid4().hex}"
@@ -113,7 +112,7 @@ def test_qdrant_nonexistent_namespace_returns_empty() -> None:
 def test_qdrant_invalid_vector_dimension_handled() -> None:
     """降级: 无效向量维度 (非 768) 应被 Qdrant 拒绝 (400), 不应崩溃.
 
-    AGENTS.md 第 7 章: bge-base-zh-v1.5 固定 768 维.
+    bge-base-zh-v1.5 固定 768 维.
     """
     invalid_vector = [0.1] * 512  # 错误维度
     payload = {
@@ -143,7 +142,7 @@ def test_qdrant_invalid_vector_dimension_handled() -> None:
 def test_embeddings_empty_input_handled() -> None:
     """降级: TEI /embed 空输入 → 200 (空列表) 或 400 (校验), 不应 5xx.
 
-    AGENTS.md 第 7 章: Embeddings 调用统一走 rag/embeddings.py,
+    Embeddings 调用统一走 rag/embeddings.py,
     空输入应直接返回 [], 不应调用 TEI 服务.
     """
     with httpx.Client(timeout=DIRECT_TIMEOUT) as client:
@@ -163,7 +162,7 @@ def test_embeddings_empty_input_handled() -> None:
 def test_embeddings_large_batch_handled() -> None:
     """降级: 超大 batch (100 条) 应被 TEI 处理或限流, 不应 5xx 崩溃.
 
-    AGENTS.md 第 7 章: 客户端按 embeddings_max_client_batch_size 分批,
+    客户端按 embeddings_max_client_batch_size 分批,
     但 TEI 服务端也应能处理或拒绝超大请求 (429/413), 不应崩溃.
     """
     large_batch = [f"测试文本 {i}" for i in range(100)]
@@ -190,7 +189,7 @@ def test_embeddings_large_batch_handled() -> None:
 def test_short_query_does_not_invoke_llm_graph() -> None:
     """降级: 短查询 (你好) 应触发 short_query 保护, 不走完整研究图.
 
-    AGENTS.md 第 5 章: 短查询保护直接返回 reply, 不走任何 graph,
+    短查询保护直接返回 reply, 不走任何 graph,
     避免 LLM 调用耗时而影响用户体验.
     """
     sid = _unique_session_id("degrade_short")
@@ -213,7 +212,7 @@ def test_short_query_does_not_invoke_llm_graph() -> None:
 def test_repeated_query_returns_success() -> None:
     """降级: 同一查询重复请求应正常返回 (即使缓存失效, 也应重新生成).
 
-    AGENTS.md 第 6/7 章: Redis 缓存不可用时应降级无缓存, 不阻断检索.
+    Redis 缓存不可用时应降级无缓存, 不阻断检索.
     """
     sid1 = _unique_session_id("degrade_rep_1")
     sid2 = _unique_session_id("degrade_rep_2")
@@ -237,7 +236,7 @@ def test_repeated_query_returns_success() -> None:
 def test_stream_client_disconnect_does_not_crash() -> None:
     """降级: 流式响应中客户端提前断开, 服务应正常处理 (不崩溃).
 
-    AGENTS.md 第 6 章: 流式响应应支持客户端随时断开,
+    流式响应应支持客户端随时断开,
     服务端应通过 asyncio.CancelledError 正常清理资源.
     """
     sid = _unique_session_id("degrade_disconnect")
@@ -267,7 +266,7 @@ def test_stream_client_disconnect_does_not_crash() -> None:
 
 # ========== 探索性单元测试 (mock-based, 不依赖容器栈) ==========
 # 以下测试用 mock 模拟异常场景, 标记为 unit 以便构建期执行 (不依赖容器栈健康).
-# AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+# 单元测试在构建期执行, 不依赖外部服务.
 
 import asyncio  # noqa: E402
 import sys  # noqa: E402
@@ -313,7 +312,7 @@ class _FakeHttpxResponse:
 async def test_tei_429_rate_limit_retry() -> None:
     """降级: TEI 返回 429 限流应触发指数退避重试, 第二次成功.
 
-    AGENTS.md 第 7 章: Embeddings 调用统一走 rag/embeddings.py.
+    Embeddings 调用统一走 rag/embeddings.py.
     EmbeddingsClient._embed_texts_single 对 429/5xx 执行指数退避重试
     (base_delay * 2^attempt), 成功后重置熔断器.
     注: 当前实现未解析 Retry-After 头, 使用固定指数退避.
@@ -371,7 +370,7 @@ async def test_tei_429_rate_limit_retry() -> None:
 async def test_qdrant_timeout_degrades_gracefully() -> None:
     """降级: Qdrant 超时时 count_points_in_namespace 应返回 0, namespace_has_data 返回 False.
 
-    AGENTS.md 第 7 章: Qdrant 不可用时降级内存检索仅限 ENV=dev; 生产应告警并失败转移.
+    Qdrant 不可用时降级内存检索仅限 ENV=dev; 生产应告警并失败转移.
     count_points_in_namespace 内部 try/except 捕获异常返回 0 (降级, 不阻断检索).
     namespace_has_data 通过 count=0 降级返回 False (跳过该 namespace).
     """
@@ -417,7 +416,7 @@ async def test_qdrant_timeout_degrades_gracefully() -> None:
 async def test_llm_timeout_fallback_strategy() -> None:
     """降级: LLM 超时应触发降级链 (strategic → smart → fast), 最终在 fast 成功.
 
-    AGENTS.md 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链.
+    LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链.
     LLMClient.achat 在 tier 调用失败时按 _FALLBACK_TIER 逐级降级.
     """
     settings = _make_unit_settings(
@@ -470,7 +469,7 @@ async def test_llm_timeout_fallback_strategy() -> None:
 async def test_redis_unavailable_no_cache_direct_compute() -> None:
     """降级: Redis 不可用时应降级无缓存, 直接调用 LLM (不阻断).
 
-    AGENTS.md 第 7 章: Redis 不可用时应降级无缓存, 不阻断检索.
+    Redis 不可用时应降级无缓存, 不阻断检索.
     LLMClient._get_llm_cache 在 get_redis_client 返回 None 时降级返回 None,
     achat 跳过缓存直接调用 litellm; _set_llm_cache 同样跳过 (不阻断).
     """
@@ -529,7 +528,7 @@ async def test_postgres_connection_pool_exhausted(
 ) -> None:
     """降级: PostgreSQL 连接池耗尽应抛出 RuntimeError (fail fast, 不降级 MemorySaver).
 
-    AGENTS.md 第 6 章: 生产 StateGraph 必须挂 PostgresSaver.
+    生产 StateGraph 必须挂 PostgresSaver.
     分支优化 P-Checkpointer: 移除 MemorySaver 降级, 连接池创建失败时抛出
     RuntimeError (fail fast), 由调用方决定是否阻断启动.
     """

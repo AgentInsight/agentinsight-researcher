@@ -1,6 +1,5 @@
 """性能测试: RAG 性能 (检索耗时 + Embedding batch 吞吐).
 
-AGENTS.md 第 7/13 章硬约束:
 - 检索必须混合 BM25 + 向量 (bge-base-zh-v1.5), 默认 vector_weight=0.7 / bm25_weight=0.3
 - Embeddings: bge-base-zh-v1.5 (固定 768 维), TEI 服务 /embed 接口
 - 性能测试在 docker compose up -d 且全部容器 service_healthy 后执行
@@ -45,7 +44,7 @@ VECTOR_DIM = 768
 
 
 def _unique_namespace(prefix: str = "perf_rag") -> str:
-    """生成唯一 namespace (AGENTS.md 第 13 章: namespace=test_*)."""
+    """生成唯一 namespace (namespace=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:8]}"
 
 
@@ -57,7 +56,7 @@ def test_embeddings_batch_throughput_10_texts(
 ) -> None:
     """验证 Embedding batch 10 条文本的吞吐量 (吞吐 = texts/秒).
 
-    AGENTS.md 第 7 章: TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
+    TEI 支持批量嵌入, 客户端按 embeddings_max_client_batch_size 分批.
     TEI MAX_BATCH_REQUESTS=4, 10 条文本分 3 批 (4+4+2) 发送.
     阈值: 10 条文本应在 5s 内完成 (吞吐 ≥ 2 texts/s).
     """
@@ -150,7 +149,7 @@ def test_embeddings_concurrent_3_batches(
 ) -> None:
     """验证 3 个并发 batch 请求 (各 4 条) 的吞吐量.
 
-    AGENTS.md 第 7 章: 客户端并发限流 embeddings_max_concurrent=3,
+    客户端并发限流 embeddings_max_concurrent=3,
     TEI MAX_BATCH_REQUESTS=4, 每批 4 条.
     3 个并发 batch 应在限流范围内, 不应触发 429.
     """
@@ -197,7 +196,6 @@ def test_qdrant_search_under_5s(
 ) -> None:
     """验证 Qdrant 检索耗时 < 5s (含 namespace 过滤, 不含 embedding 时间).
 
-    AGENTS.md 第 7 章:
     - 单一集合 agents, distance=Cosine, vector_size=768
     - 检索时显式传目标 namespace 列表, 禁止无 namespace 过滤的全集合扫描
     - 测试数据隔离: namespace=test_*
@@ -256,7 +254,7 @@ def test_qdrant_search_with_large_namespace_filter(
 ) -> None:
     """验证 Qdrant 多 namespace 过滤检索耗时 (should OR 多命名空间).
 
-    AGENTS.md 第 7 章: 检索时显式传目标 namespace 列表,
+    检索时显式传目标 namespace 列表,
     多 namespace 用 should OR 过滤 (共享 + 当前用户私有).
     """
     embed_headers = embeddings_auth_headers()
@@ -321,7 +319,7 @@ def test_rag_retrieval_relevance(
     2. 用相似查询向量搜索
     3. 验证 top-1 相似度 > 0.5 (Cosine 相似度)
 
-    AGENTS.md 第 7 章: distance=Cosine, score_threshold=0.3 (默认).
+    distance=Cosine, score_threshold=0.3 (默认).
     相似查询应能召回写入的文档, 相似度 > 0.5 (远高于阈值).
     """
     embed_headers = embeddings_auth_headers()
@@ -422,7 +420,7 @@ def test_rag_retrieval_relevance(
         )
 
     finally:
-        # 清理: 删除测试 namespace 数据 (AGENTS.md 第 13 章: 测试数据隔离)
+        # 清理: 删除测试 namespace 数据 (测试数据隔离)
         try:
             with make_http_client(timeout=QDRANT_TIMEOUT) as client:
                 client.post(

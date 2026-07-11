@@ -1,7 +1,7 @@
 """agentinsight-researcher 根包.
 
 中文优先的研究分析智能体.
-严格遵循 AGENTS.md 第 3/5/9/10 章架构约束.
+架构约束: 目录分层单向向内, LangGraph 编排内核, LiteLLM 网关, AgentInsight 可观测性.
 """
 
 __version__ = "0.1.0"

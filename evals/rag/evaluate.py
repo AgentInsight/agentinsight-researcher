@@ -1,12 +1,12 @@
-"""RAGAS 评测器 (AGENTS.md 第 10 章, CI 门禁).
+"""RAGAS 评测器 (CI 门禁).
 
 用 RAGAS 库评估 researcher 的 RAG 质量, 核心指标:
 - faithfulness (忠实度 ≥0.8): 答案是否忠于检索上下文
 - answer_relevancy (答案相关性 ≥0.8): 答案是否回应了问题
 - context_precision (上下文精度 ≥0.7): 检索到的上下文是否相关
 
-AGENTS.md 第 4 章: 例外允许 langchain_openai (仅 RAGAS 评测内部使用, 不侵入业务代码).
-AGENTS.md 第 10 章: 门禁 faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7.
+例外允许 langchain_openai (仅 RAGAS 评测内部使用, 不侵入业务代码).
+门禁 faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7.
 
 RAGAS 0.2+ API:
 - ragas.evaluate() (模块级函数, 非 dataset.evaluate())

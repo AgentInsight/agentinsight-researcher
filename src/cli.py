@@ -8,12 +8,12 @@
     python -m src.cli --query "..." --mode deep --breadth 4 --depth 3 --format html
     python -m src.cli --help
 
-AGENTS.md 硬约束:
-- 第 4 章: 禁用 langchain 全家桶 (仅 langchain-core), 禁用 AgentExecutor
-- 第 5 章: 唯一编排范式为 LangGraph StateGraph, 直接 await graph.ainvoke
-- 第 9 章: 所有 LLM 调用经 LLMClient (LiteLLM), 禁止厂商 SDK
-- 第 10 章: trace_agent 包裹 graph.ainvoke 作为根 span
-- 第 8 章: CLI 无 HTTP 中间件, user_id 取固定 "cli-user" (无 IP 上下文)
+架构约束:
+- 禁用 langchain 全家桶 (仅 langchain-core), 禁用 AgentExecutor
+- 唯一编排范式为 LangGraph StateGraph, 直接 await graph.ainvoke
+- 所有 LLM 调用经 LLMClient (LiteLLM), 禁止厂商 SDK
+- trace_agent 包裹 graph.ainvoke 作为根 span
+- CLI 无 HTTP 中间件, user_id 取固定 "cli-user" (无 IP 上下文)
 """
 
 from __future__ import annotations
@@ -132,8 +132,8 @@ def _build_initial_state(
     """构造 LangGraph 初始 State.
 
     参考 src/api/routes.py 中 ChatRequest → initial_state 的转换逻辑.
-    AGENTS.md 第 5 章: State 为 TypedDict, 节点返回 delta 由 reducer 合并.
-    AGENTS.md 第 8 章: CLI 无 HTTP 中间件, user_id 取固定 "cli-user".
+    State 为 TypedDict, 节点返回 delta 由 reducer 合并.
+    CLI 无 HTTP 中间件, user_id 取固定 "cli-user".
     """
     session_id = str(uuid.uuid4())
     report_type = _MODE_TO_REPORT_TYPE[mode]
@@ -239,8 +239,8 @@ def _emit_result(
 async def main() -> int:
     """CLI 异步入口.
 
-    AGENTS.md 第 10 章: 用 trace_agent 包裹 graph.ainvoke 作为根 span.
-    AGENTS.md 第 5 章: 直接 await graph.ainvoke, 不走 HTTP.
+    用 trace_agent 包裹 graph.ainvoke 作为根 span.
+    直接 await graph.ainvoke, 不走 HTTP.
     """
     parser = _build_parser()
     args = parser.parse_args()

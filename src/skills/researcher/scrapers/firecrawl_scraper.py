@@ -5,7 +5,7 @@ Firecrawl 是商业 LLM 友好抓取服务, 输出已为 LLM 优化的 Markdown/
 依赖说明:
 - firecrawl-py: 不在 requirements.txt, 需手动 pip install firecrawl-py.
   缺失时降级为直接 HTTP API 调用 (需 httpx, 已在 requirements.txt).
-- API Key 从 settings.firecrawl_api_key 注入 (AGENTS.md 第 4/11 章: 禁硬编码).
+- API Key 从 settings.firecrawl_api_key 注入 (禁硬编码).
 - API URL 从 settings.firecrawl_api_url 注入 (默认 https://api.firecrawl.dev).
 """
 

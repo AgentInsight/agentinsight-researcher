@@ -1,5 +1,5 @@
 # agentinsight-researcher Dockerfile (联网模式)
-# 严格遵循 AGENTS.md 第 12 章: 多阶段构建 + 非 root + python:3.12-slim
+# 多阶段构建 + 非 root + python:3.12-slim
 # 联网模式: 构建时从 PyPI 下载 Python 依赖, apt-get 安装系统依赖
 # 适用于开源社区贡献者快速起栈
 
@@ -69,7 +69,7 @@ RUN pip install playwright>=1.49 \
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 创建非 root 用户 (AGENTS.md 第 12 章)
+# 创建非 root 用户
 RUN groupadd -r agent && useradd -r -g agent -d /app -s /sbin/nologin agent \
     && mkdir -p /app/data/sessions /tmp/uploads \
     && chown -R agent:agent /app /tmp/uploads

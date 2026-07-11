@@ -1,6 +1,5 @@
 """功能测试: 容器栈健康后冒烟测试 (端到端冒烟).
 
-AGENTS.md 第 13 章硬约束:
 - 功能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入, 禁止硬编码
 - 测试用例独立可重复运行, 不依赖执行顺序
@@ -27,7 +26,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 冒烟测试超时 (短查询 + 端点响应)
@@ -35,7 +34,7 @@ SMOKE_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_smoke_{uuid.uuid4().hex[:12]}"
 
 
@@ -80,7 +79,7 @@ def test_models_endpoint_smoke() -> None:
 def test_agent_discovery_smoke() -> None:
     """冒烟: GET /.well-known/agent-discovery.json → 200 + 元信息完整.
 
-    AGENTS.md 第 14 章: Agent Discovery Protocol 公开发现端点.
+    Agent Discovery Protocol 公开发现端点.
     """
     with httpx.Client(timeout=SMOKE_TIMEOUT) as client:
         r = client.get(f"{AGENT_URL}/.well-known/agent-discovery.json")
@@ -240,7 +239,7 @@ def test_redis_service_smoke() -> None:
 
 @pytest.mark.functional
 def test_security_headers_smoke() -> None:
-    """冒烟: 安全响应头中间件注入正确 (AGENTS.md 第 11 章硬约束).
+    """冒烟: 安全响应头中间件注入正确.
 
     验证: nosniff / DENY / XSS-Protection / Referrer-Policy.
     """

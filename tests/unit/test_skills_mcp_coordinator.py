@@ -2,7 +2,7 @@
 
 验证 _make_cache_key 输出 sha256(query + tool_name + json(args)) 格式,
 相同输入生成相同 key, 不同输入生成不同 key.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

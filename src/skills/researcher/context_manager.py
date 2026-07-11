@@ -1,6 +1,6 @@
 """ContextManager 上下文管理者.
 
-AGENTS.md 用户需求 10: Token 优化核心.
+Token 优化核心.
 
 核心优化:
 1. 两层路由: Fast Path (<8K) 跳过压缩 | BM25Filter (>=8K) 本地分词过滤
@@ -8,7 +8,7 @@ AGENTS.md 用户需求 10: Token 优化核心.
 3. 跨子主题去重: WrittenContentCompressor 已写章节相似度过滤 (FastEmbed, 本地)
 4. Word Limit: MAX_CONTEXT_WORDS (25000) 截断
 
-AGENTS.md 第 7 章硬约束:
+Embeddings 分层硬约束:
 - 远程 TEI Embeddings (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
 - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """
@@ -60,7 +60,7 @@ class ContextManager:
     ) -> list[dict[str, Any]]:
         """滑动窗口 + LLM 摘要压缩消息列表.
 
-        AGENTS.md 第 6 章: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
+        保留最近 25% 消息为原文, 其余 LLM 摘要化.
         供后续节点 (writer/proofreader 等) 在写入会话前调用.
 
         3.6.1 死代码修复: 本方法实现完整可用, 供 chat_agent.py 的 chat 方法
@@ -70,7 +70,7 @@ class ContextManager:
             from src.skills.researcher.context_manager import ContextManager
 
             cm = ContextManager(settings)
-            # 写入 Checkpointer 前检查阈值 (AGENTS.md 第 6 章 CONTEXT_MAX_CHARS)
+            # 写入 Checkpointer 前检查阈值 (CONTEXT_MAX_CHARS)
             if total_chars > settings.compression_threshold:
                 messages = await cm.compress_messages(messages)
 
@@ -621,7 +621,7 @@ class ContextManager:
 
 
 class SlidingWindowCompressor:
-    """滑动窗口 + LLM 摘要压缩器 (AGENTS.md 第 6 章).
+    """滑动窗口 + LLM 摘要压缩器.
 
     策略: 保留最近 25% 消息为原文, 其余 LLM 摘要化.
     增强 LLM 摘要能力.
@@ -748,7 +748,7 @@ class WrittenContentCompressor:
         退化为串行 (P50=176s). 现将 embed_texts 移到锁外, 锁仅保护
         _written_embeddings / _written_chunks 的并发修改.
 
-        AGENTS.md 第 7/10 章硬约束:
+        Embeddings 与追踪硬约束:
         - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 禁用远程 TEI
         - 高频 embedding 调用必带 trace_embedding span (含 model/usage_details)
 
@@ -1057,7 +1057,7 @@ class WrittenContentCompressor:
 
         chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
         相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
-        与业界实践 WrittenContentCompressor 对齐.
+        与 WrittenContentCompressor 对齐.
 
         内部拆分为 compute_embedding (锁外 I/O) + check_and_update
         (锁内 numpy 比对). 单调用方可直接用此方法; 并行场景应分别调用两步

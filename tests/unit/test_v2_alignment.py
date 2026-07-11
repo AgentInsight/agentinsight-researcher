@@ -11,7 +11,7 @@
 6. source_curator.py: _score_quantitative_value 方法 (百分比/金额/CAGR/数字密度)
 7. report_generator.py: 4 个内联 prompt 提取到 PromptFamily + 章节字数 800-1200
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ class TestV2Settings:
         assert s.embeddings_filter_top_k == 20
 
     def test_detailed_section_word_min_max(self) -> None:
-        """章节字数 500-1000 → 800-1200 对齐业界实践."""
+        """章节字数 500-1000 → 800-1200."""
         s = Settings()
         assert s.detailed_section_word_min == 800
         assert s.detailed_section_word_max == 1200
@@ -136,7 +136,7 @@ class TestV2Prompts:
         assert isinstance(conc, str) and "Conclusion" in conc
 
     def test_section_prompt_word_count_800_1200(self) -> None:
-        """section_prompt 默认字数 800-1200 对齐业界实践."""
+        """section_prompt 默认字数 800-1200."""
         family = DefaultPromptFamily()
         prompt = family.section_prompt("topic", "ctx", "refs", "role", "objective", "academic")
         assert "800" in prompt
@@ -288,7 +288,7 @@ class TestWrittenContentCompressorV2:
 
 
 class TestAgentCreatorV2:
-    """AgentCreator tier/temperature 对齐业界实践."""
+    """AgentCreator tier/temperature 配置."""
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_smart_tier(self) -> None:

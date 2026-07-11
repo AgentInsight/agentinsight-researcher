@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-# 确保 src/ 可导入 (复用 LLMClient, AGENTS.md 第 9 章 LiteLLM 网关)
+# 确保 src/ 可导入 (复用 LLMClient, LiteLLM 网关)
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from evals import ResearcherClient  # noqa: E402

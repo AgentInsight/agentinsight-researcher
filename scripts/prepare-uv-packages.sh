@@ -2,7 +2,7 @@
 # ============================================================================
 # Prepare uv/uvx binary for QA/Offline Docker builds
 # ----------------------------------------------------------------------------
-# Follows AGENTS.md chapter 12: QA/Offline mode, all deps pre-downloaded to packages/
+# QA/Offline mode, all deps pre-downloaded to packages/
 # Downloads uv binary tarball (x86_64-linux) to packages/uv/uv-x86_64-linux.tar.gz
 # Dockerfile.qa / Dockerfile.offline COPY packages/uv/ and install uv/uvx to /usr/local/bin
 #

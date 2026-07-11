@@ -1,4 +1,4 @@
-"""单元测试: Prompt Injection 防护 + 工具权限隔离 (AGENTS.md 第 11 章硬约束).
+"""单元测试: Prompt Injection 防护 + 工具权限隔离.
 
 覆盖场景:
 - 所有外部输入经 Pydantic 校验 (ChatCompletionRequest 字段类型校验)
@@ -6,14 +6,14 @@
 - LLM 输出经结构化校验后再入工具 (MCP 工具调用结果校验)
 - 工具调用权限隔离 (read/write/execute/network 显式授权)
 
-AGENTS.md 第 11 章安全合规红线:
+安全合规红线:
 - 所有外部输入经 Pydantic 校验
 - 工具调用权限隔离 (read/write/execute/network 显式授权)
 - 禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束)
 - LLM 输出经结构化校验后再入工具
 - 敏感工具 (写文件/执行命令) 应显式声明权限, 由中间件校验
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务, 全部用 mock.
+单元测试不依赖外部服务, 全部用 mock.
 """
 
 from __future__ import annotations
@@ -31,14 +31,14 @@ pytestmark = pytest.mark.unit
 
 
 # ============================================================================
-# 场景 1: 所有外部输入经 Pydantic 校验 (AGENTS.md 第 11 章硬约束)
+# 场景 1: 所有外部输入经 Pydantic 校验
 # ============================================================================
 
 
 class TestPydanticValidationExternalInput:
     """验证 ChatCompletionRequest 外部输入经 Pydantic 校验.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     """
 
     def test_valid_request_accepted(self) -> None:
@@ -103,7 +103,7 @@ class TestPydanticValidationExternalInput:
     def test_injection_query_accepted_by_pydantic_but_safe(self) -> None:
         """注入查询被 Pydantic 接受 (字符串), 但不会被 eval/exec 执行.
 
-        AGENTS.md 第 11 章: 外部输入经 Pydantic 校验类型, 内容不执行.
+        外部输入经 Pydantic 校验类型, 内容不执行.
         注入字符串 "eval('hacked')" 作为 content 是合法字符串, 但不会被执行.
         """
         injection = "eval('print(\"hacked\")')"
@@ -118,14 +118,14 @@ class TestPydanticValidationExternalInput:
 
 
 # ============================================================================
-# 场景 2: 禁止 eval/exec 求值用户输入 (AGENTS.md 第 11 章硬约束)
+# 场景 2: 禁止 eval/exec 求值用户输入
 # ============================================================================
 
 
 class TestEvalExecBlocked:
     """验证 eval/exec 求值用户输入被阻断.
 
-    AGENTS.md 第 11 章: 禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束).
+    禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束).
     """
 
     def test_eval_payload_not_executed(self) -> None:
@@ -174,7 +174,7 @@ class TestEvalExecBlocked:
     def test_no_eval_in_source_code(self) -> None:
         """验证 routes.py 源码中不存在 eval/exec 调用用户输入.
 
-        AGENTS.md 第 11 章: 禁止 eval/exec 求值用户输入.
+        禁止 eval/exec 求值用户输入.
         通过源码扫描确保业务代码不使用 eval/exec.
         """
         import src.api.routes as routes_module
@@ -205,7 +205,7 @@ def _get_module_source(module: Any) -> str:
 
 # ============================================================================
 # 场景 3: API 路由 Pydantic 校验集成测试 (422 错误码)
-# AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验
+# 所有外部输入经 Pydantic 校验
 # ============================================================================
 
 
@@ -333,22 +333,22 @@ class TestApiPydanticValidation:
 
 # ============================================================================
 # 场景 4: 工具调用权限隔离 (read/write/execute/network 显式授权)
-# AGENTS.md 第 11 章: 工具调用权限隔离
+# 工具调用权限隔离
 # ============================================================================
 
 
 class TestToolPermissionIsolation:
     """验证工具调用权限隔离机制.
 
-    AGENTS.md 第 11 章: 工具调用权限隔离 (read/write/execute/network 显式授权);
+    工具调用权限隔离 (read/write/execute/network 显式授权);
     敏感工具 (写文件/执行命令) 应显式声明权限, 由中间件校验.
     """
 
     def test_mcp_coordinator_uses_trace_tool_span(self) -> None:
         """验证 MCP 工具调用经 trace_tool span 包裹 (可观测性).
 
-        AGENTS.md 第 10 章: 工具调用应经 AgentInsight trace_tool span 包裹.
-        AGENTS.md 第 11 章: 工具调用权限隔离, 参数与结果入 span.
+        工具调用应经 AgentInsight trace_tool span 包裹.
+        工具调用权限隔离, 参数与结果入 span.
         """
         import src.skills.researcher.mcp_coordinator as mcp_module
 
@@ -359,7 +359,7 @@ class TestToolPermissionIsolation:
     def test_no_direct_os_system_call(self) -> None:
         """验证 mcp_coordinator 不直接调用 os.system (敏感操作经 MCP 协议).
 
-        AGENTS.md 第 11 章: 敏感工具 (执行命令) 应显式声明权限, 由中间件校验.
+        敏感工具 (执行命令) 应显式声明权限, 由中间件校验.
         业务代码不应直接调用 os.system.
         """
         import src.skills.researcher.mcp_coordinator as mcp_module
@@ -378,7 +378,7 @@ class TestToolPermissionIsolation:
         assert "subprocess.run(" not in source, "mcp_coordinator 直接调用 subprocess.run"
 
     def test_no_direct_eval_exec_in_mcp(self) -> None:
-        """验证 mcp_coordinator 不使用 eval/exec (AGENTS.md 第 11 章硬约束)."""
+        """验证 mcp_coordinator 不使用 eval/exec."""
         import src.skills.researcher.mcp_coordinator as mcp_module
 
         source = _get_module_source(mcp_module)
@@ -388,7 +388,7 @@ class TestToolPermissionIsolation:
     def test_routes_no_direct_file_write(self) -> None:
         """验证 routes.py 不直接调用 open() 写文件 (经 UploadFile 端点).
 
-        AGENTS.md 第 11 章: 敏感工具 (写文件) 应显式声明权限.
+        敏感工具 (写文件) 应显式声明权限.
         文件写入应经 /v1/files 端点 (含大小/扩展名校验), 不在业务逻辑中直接写.
         """
         import src.api.routes as routes_module
@@ -402,14 +402,14 @@ class TestToolPermissionIsolation:
 
 
 # ============================================================================
-# 场景 5: 安全响应头中间件不可绕过 (AGENTS.md 第 11 章硬约束)
+# 场景 5: 安全响应头中间件不可绕过
 # ============================================================================
 
 
 class TestSecurityHeadersMiddleware:
     """验证安全响应头中间件不可绕过.
 
-    AGENTS.md 第 11 章: 安全响应头中间件不可绕过.
+    安全响应头中间件不可绕过.
     - X-Content-Type-Options: nosniff
     - X-Frame-Options: DENY
     - Strict-Transport-Security: HSTS (生产强制 HTTPS)
@@ -471,14 +471,14 @@ class TestSecurityHeadersMiddleware:
 
 
 # ============================================================================
-# 场景 6: 密钥不硬编码 (AGENTS.md 第 11 章硬约束)
+# 场景 6: 密钥不硬编码
 # ============================================================================
 
 
 class TestNoHardcodedSecrets:
     """验证源码中不存在硬编码密钥.
 
-    AGENTS.md 第 11 章: 密钥仅环境变量注入, 禁止入仓/硬编码/日志;
+    密钥仅环境变量注入, 禁止入仓/硬编码/日志;
     发现硬编码密钥即 P0 暂停并人工介入.
     """
 
@@ -527,15 +527,15 @@ class TestNoHardcodedSecrets:
 
 
 # ============================================================================
-# 场景 7: 文件上传安全 (AGENTS.md 第 11 章: 大小/扩展名白名单)
+# 场景 7: 文件上传安全 (大小/扩展名白名单)
 # ============================================================================
 
 
 class TestFileUploadSecurity:
     """验证文件上传安全校验.
 
-    AGENTS.md 第 11 章: 安全约束 (大小/扩展名白名单).
-    AGENTS.md 第 7 章: 用户私有数据按 agent_id + user_id 隔离.
+    安全约束 (大小/扩展名白名单).
+    用户私有数据按 agent_id + user_id 隔离.
     """
 
     def test_max_upload_size_configurable(self) -> None:
@@ -565,14 +565,14 @@ class TestFileUploadSecurity:
 
 
 # ============================================================================
-# 场景 8: 路径穿越防护 (AGENTS.md 第 11 章)
+# 场景 8: 路径穿越防护
 # ============================================================================
 
 
 class TestPathTraversalProtection:
     """验证路径穿越防护.
 
-    AGENTS.md 第 11 章: Prompt Injection 防护; 敏感工具需权限隔离.
+    Prompt Injection 防护; 敏感工具需权限隔离.
     """
 
     def test_path_traversal_in_query_not_executed(self) -> None:
@@ -591,7 +591,7 @@ class TestPathTraversalProtection:
     def test_file_id_traversal_rejected_by_routes(self) -> None:
         """验证 uploaded_files 的 file_id 路径穿越被拒绝.
 
-        AGENTS.md 第 7 章: file_id 三级分键 (agent_id:user_id:uuid),
+        file_id 三级分键 (agent_id:user_id:uuid),
         routes.py _load_uploaded_files_context 校验 file_id 前缀归属.
         """
         import src.api.routes as routes_module

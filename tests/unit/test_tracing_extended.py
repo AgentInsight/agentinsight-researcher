@@ -6,7 +6,7 @@
 - get_tracer 工厂单例
 - _get_client 降级路径
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务.
+单元测试不依赖外部服务.
 """
 
 from __future__ import annotations

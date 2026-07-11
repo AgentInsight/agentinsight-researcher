@@ -5,7 +5,7 @@
 - 预热失败不阻断启动
 - 预热成功日志输出
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有 lifespan 依赖 (PostgreSQL/Qdrant/Redis/Embeddings/FastEmbed) 均通过 mock 替换.
 """
 

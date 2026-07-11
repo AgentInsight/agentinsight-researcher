@@ -1,6 +1,6 @@
 """WebSocket 双向实时通信.
 
-AGENTS.md 第 14 章: 新增 /v1/ws/{session_id} 为允许调用的端点 (人在回路审核请求通道).
+新增 /v1/ws/{session_id} 为允许调用的端点 (人在回路审核请求通道).
 
 WebSocket 消息类型 (8 类):
     1. logs: 日志信息
@@ -85,7 +85,7 @@ async def close_verify_client() -> None:
 async def _verify_token(token: str, settings: Settings) -> bool:
     """验证 JWT token 有效性 (复用 JWTAuthMiddleware 的验证逻辑).
 
-    AGENTS.md 第 8 章: 调用 GET /api/user 获取 user_id 验证 token.
+    调用 GET /api/user 获取 user_id 验证 token.
     禁止将原始 token 写入日志.
 
     返回 True 表示 token 有效, False 表示无效或验证失败.
@@ -276,13 +276,13 @@ def get_websocket_manager() -> WebSocketManager:
 async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     """WebSocket 双向通信端点.
 
-    AGENTS.md 第 14 章: /v1/ws/{session_id} 为允许调用的端点 (人在回路通道).
+    /v1/ws/{session_id} 为允许调用的端点 (人在回路通道).
 
     接收消息:
         - {"type": "ping"} → 回 {"type": "pong"}
         - {"type": "human_feedback", "feedback": "..."} → 提交到 feedback_queue
 
-    session_id 即 thread_id, 做会话隔离键 (AGENTS.md 第 6 章).
+    session_id 即 thread_id, 做会话隔离键.
     """
     settings = get_settings()
     if not settings.websocket_enabled:

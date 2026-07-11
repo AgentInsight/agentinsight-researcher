@@ -2,7 +2,7 @@
 
 验证 detect_region / BaseSearcher._normalize_result /
 _filter_by_domains / get_registered_searchers / register_searcher.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

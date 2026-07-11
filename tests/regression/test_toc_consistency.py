@@ -8,7 +8,6 @@
 5. 一致性校验 (防御性编程)
 6. _conduct_subtopics 失败跳过时同步移除 subtopics
 
-AGENTS.md 第 13 章硬约束:
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 回归测试为合并 main 前门禁, 不推荐跳过
 - 测试目标地址从环境变量 AGENT_URL 注入
@@ -34,7 +33,7 @@ import pytest
 from src.skills.researcher.context_manager import WrittenContentCompressor
 from src.skills.researcher.report_generator import _SECTION_FAILURE_PLACEHOLDER, ReportGenerator
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # detailed_report 可能需要 400s+ (多子主题研究 + 章节生成)
@@ -47,7 +46,7 @@ _NON_SECTION_KEYWORDS = ("目录", "参考来源", "参考文献", "References",
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_regression_*)."""
+    """生成唯一 session_id (session_id=test_regression_*)."""
     return f"test_regression_toc_{uuid.uuid4().hex[:12]}"
 
 
@@ -151,7 +150,7 @@ async def test_detailed_report_toc_matches_body() -> None:
     """优化 1: detailed_report TOC 每个条目都有对应的正文标题.
 
     验证 TOC 后置生成: TOC 条目与实际正文章节一一对应.
-    AGENTS.md 第 14 章: OpenAI 兼容端点非流式响应.
+    OpenAI 兼容端点非流式响应.
     """
     sid = _unique_session_id()
     query = "简述人工智能的核心概念与应用"
@@ -324,7 +323,7 @@ def test_detailed_report_skipped_count_logged() -> None:
 async def test_basic_report_has_references() -> None:
     """验证 basic_report 报告包含参考文献章节 (## 参考文献 / ## 参考来源 / ## References).
 
-    AGENTS.md 第 14 章: OpenAI 兼容端点非流式响应.
+    OpenAI 兼容端点非流式响应.
     """
     sid = _unique_session_id()
     query = "简述 Python 异步编程的核心优势"

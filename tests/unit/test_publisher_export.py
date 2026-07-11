@@ -7,7 +7,7 @@
 - 未知格式跳过 (warning, 不影响其他格式)
 - 单格式异常隔离 (不阻断其他格式导出)
 
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (PDF/EPUB 用 mock 验证调用).
+单元测试不依赖外部服务 (PDF/EPUB 用 mock 验证调用).
 """
 
 from __future__ import annotations

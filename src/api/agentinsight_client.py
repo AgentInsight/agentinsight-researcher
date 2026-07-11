@@ -1,7 +1,7 @@
 """AgentInsight Service API 客户端.
 
 SELF_HOST=False 时复用 AgentInsightService 的点数校验/扣除 API.
-AGENTS.md 第 8 章: JWT 验证与 user_id 获取在 API 入口中间件完成.
+JWT 验证与 user_id 获取在 API 入口中间件完成.
 
 AgentType 枚举:
 - Research = 2: 研究型 Agent, 校验/扣除 MonthlyResearchRate, 服务端从 JWT Token

@@ -1,6 +1,5 @@
 """功能测试: 验证 Embeddings TEI 服务 (bge-base-zh-v1.5).
 
-AGENTS.md 第 7 章硬约束:
 - Embeddings: bge-base-zh-v1.5 (固定 768 维)
 - TEI 服务通过 API_KEY 环境变量开启鉴权, 客户端须携带 Authorization: Bearer <key>
 - Embedding 调用统一走 rag/embeddings.py, 但本测试直连 TEI 验证服务可用性

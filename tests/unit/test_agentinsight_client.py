@@ -6,9 +6,9 @@
 - Authorization 头透传 / 超时配置 / fail_open 降级策略
 - close() 关闭 httpx 客户端
 
-AGENTS.md 第 8 章: JWT 验证与 user_id 获取在 API 入口中间件完成, 本客户端负责点数校验/扣除.
-AGENTS.md 第 11 章: 密钥仅环境变量注入, 禁止硬编码/日志.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (httpx 全部 mock).
+JWT 验证与 user_id 获取在 API 入口中间件完成, 本客户端负责点数校验/扣除.
+密钥仅环境变量注入, 禁止硬编码/日志.
+单元测试不依赖外部服务 (httpx 全部 mock).
 
 注: 本客户端不含 get_user_id() 方法 (身份解析在 src/api/middleware.py 的 JWTAuthMiddleware).
 任务描述中的 "token 存在/为空/超时/连接错误降级" 场景在此适配为 validate/deduct 的对应路径.

@@ -1,6 +1,6 @@
 """API 测试: 报告下载端点 /v1/reports/{report_id}/download.
 
-AGENTS.md 第 13/14 章硬约束:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 测试用例独立可重复运行, 不依赖执行顺序
@@ -31,7 +31,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 快速端点超时 (404/400 校验, 不走研究)
@@ -77,7 +77,7 @@ def generated_report_id() -> str:
 def test_download_report_markdown(generated_report_id: str) -> None:
     """下载 Markdown 报告: GET /v1/reports/{report_id}/download?format=markdown → 200.
 
-    AGENTS.md 第 7/14 章: 报告按 report_id 下载, 支持多格式.
+    报告按 report_id 下载, 支持多格式.
     验证: 200 + content-type 含 text/markdown + Content-Disposition 附件头.
     """
     with httpx.Client(timeout=QUICK_TIMEOUT) as client:
@@ -104,7 +104,7 @@ def test_download_report_markdown(generated_report_id: str) -> None:
 def test_download_report_not_found_404() -> None:
     """报告 ID 不存在返回 404: GET /v1/reports/{nonexistent_uuid}/download → 404.
 
-    AGENTS.md 第 13 章: API 测试应覆盖错误码.
+    API 测试应覆盖错误码.
     routes.py: report_id 合法 UUID 但 DB 中不存在 → deprecated session_id fallback →
     仍无匹配 → 404.
     """
@@ -124,7 +124,7 @@ def test_download_report_not_found_404() -> None:
 def test_download_report_invalid_id_400(generated_report_id: str) -> None:
     """无效格式参数返回 400: GET /v1/reports/{report_id}/download?format=xml → 400.
 
-    AGENTS.md 第 13 章: API 测试应覆盖错误码.
+    API 测试应覆盖错误码.
     routes.py: format 不在 [markdown/html/pdf/docx/json] 白名单 → 400.
     注意: "无效报告 ID" (非 UUID 格式) 实际走 deprecated session_id 兼容分支,
     不匹配时返回 404 而非 400; 真正返回 400 的场景是 format 参数不合法.

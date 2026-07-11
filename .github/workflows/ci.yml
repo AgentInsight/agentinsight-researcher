@@ -1,11 +1,11 @@
 # agentinsight-researcher CI 流水线
-# 严格遵循 AGENTS.md 第 13 章 CI 流水线顺序:
+# CI 流水线顺序:
 #   1. 构建镜像 + 单元测试 (失败即终止)
 #   2. docker compose up -d + 等待全部健康检查通过
 #   3. 功能测试 → API 测试 → 回归测试 → e2e 测试 (按序, 前者失败后者不执行)
 #   4. 任一环节失败阻断合并; 全部通过后 docker compose down -v 清理
 #
-# 容器编排使用 -p agentinsight-cicd 项目名 (AGENTS.md 第 12 章容器命名约定, CI 专用后缀避免与本地冲突)
+# 容器编排使用 -p agentinsight-cicd 项目名 (CI 专用后缀避免与本地冲突)
 
 name: CI
 
@@ -79,7 +79,7 @@ jobs:
           retention-days: 7
 
   # ==========================================================================
-  # Job 2: integration-test (容器栈集成测试, AGENTS.md 第 13 章部署后测试)
+  # Job 2: integration-test (容器栈集成测试, 部署后测试)
   # ==========================================================================
   integration-test:
     name: Integration Test (Container Stack)
@@ -105,7 +105,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Create minimal .env for container stack
-        # AGENTS.md 第 11 章: 密钥仅环境变量注入, 禁止入仓
+        # 密钥仅环境变量注入, 禁止入仓
         # CI 中使用占位符; 如需真实 LLM 调用, 在 GitHub Secrets 配置后引用
         run: |
           cat > .env <<'ENVEOF'
@@ -197,12 +197,12 @@ jobs:
           ENVEOF
 
       - name: Start container stack
-        # AGENTS.md 第 12 章: -p agentinsight 项目名; CI 用 -cicd 后缀避免与本地冲突
+        # -p agentinsight 项目名; CI 用 -cicd 后缀避免与本地冲突
         # --wait 等待所有服务健康检查通过, --build 构建 agent 镜像
         run: docker compose -p ${{ env.COMPOSE_PROJECT }} up -d --wait --build
 
       - name: Wait for agent health check
-        # AGENTS.md 第 13 章: 容器栈健康后执行测试
+        # 容器栈健康后执行测试
         # 双重保险: --wait 已等待健康检查, 再用 retry 循环确认 /health 端点
         run: |
           echo "等待 agent /health 端点就绪..."
@@ -225,25 +225,25 @@ jobs:
         run: docker compose -p ${{ env.COMPOSE_PROJECT }} ps
 
       - name: Functional tests
-        # AGENTS.md 第 13 章: 功能测试在容器栈健康后执行
+        # 功能测试在容器栈健康后执行
         env:
           AGENT_URL: http://localhost:8066
         run: pytest tests/functional/ -q -m functional
 
       - name: API tests
-        # AGENTS.md 第 13 章: API 测试覆盖 OpenAI 兼容端点
+        # API 测试覆盖 OpenAI 兼容端点
         env:
           AGENT_URL: http://localhost:8066
         run: pytest tests/api/ -q -m api
 
       - name: Regression tests
-        # AGENTS.md 第 13 章: 回归测试为合并门禁, 不推荐跳过
+        # 回归测试为合并门禁, 不推荐跳过
         env:
           AGENT_URL: http://localhost:8066
         run: pytest tests/regression/ -q -m regression
 
       - name: E2E tests
-        # AGENTS.md 第 13 章: e2e 覆盖完整链路 提问→检索→工具调用→流式响应→会话持久化
+        # e2e 覆盖完整链路 提问→检索→工具调用→流式响应→会话持久化
         env:
           AGENT_URL: http://localhost:8066
         run: pytest tests/e2e/ -q -m e2e
@@ -261,12 +261,12 @@ jobs:
           docker compose -p ${{ env.COMPOSE_PROJECT }} logs embeddings --tail 50 || true
 
       - name: Cleanup container stack
-        # AGENTS.md 第 13 章: 全部通过后 docker compose down -v 清理
+        # 全部通过后 docker compose down -v 清理
         if: always()
         run: docker compose -p ${{ env.COMPOSE_PROJECT }} down -v
 
   # ==========================================================================
-  # Job 3: evaluation (评测门禁, AGENTS.md 第 10 章)
+  # Job 3: evaluation (评测门禁)
   # 仅 push 到 main 触发 (PR 不跑评测, 太慢); 支持 workflow_dispatch 手动触发
   # 评测需要真实 LLM API Key, 需在 GitHub Secrets 配置 EVAL_LLM_API_KEY 等
   # ==========================================================================
@@ -297,7 +297,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Create .env for evaluation
-        # 评测需要真实 LLM API Key, 从 GitHub Secrets 注入 (AGENTS.md 第 11 章)
+        # 评测需要真实 LLM API Key, 从 GitHub Secrets 注入
         env:
           EVAL_LLM_API_KEY: ${{ secrets.EVAL_LLM_API_KEY }}
           EVAL_EMBEDDING_API_KEY: ${{ secrets.EVAL_EMBEDDING_API_KEY }}
@@ -333,14 +333,14 @@ jobs:
           exit 1
 
       - name: RAGAS evaluation
-        # AGENTS.md 第 10 章门禁: faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7
+        # 门禁: faithfulness ≥0.8 / answer_relevancy ≥0.8 / context_precision ≥0.7
         # evals/rag/run.py 存在, 直接运行
         env:
           AGENT_URL: http://localhost:8066
         run: python -m evals.rag.run --dataset evals/rag/dataset.json
 
       - name: DeepEval evaluation
-        # AGENTS.md 第 10 章门禁: 任务完成率 ≥0.9 / 工具调用正确率 ≥0.95 / 幻觉率 ≤0.1
+        # 门禁: 任务完成率 ≥0.9 / 工具调用正确率 ≥0.95 / 幻觉率 ≤0.1
         # evals/agent/run.py 可能尚未实现, 条件执行
         run: |
           if [ -f evals/agent/run.py ]; then

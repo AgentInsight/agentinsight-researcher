@@ -1,6 +1,6 @@
 """PubMed NCBI E-utilities 学术搜索器.
 
-AGENTS.md 第 9 章: 统一 httpx 异步.
+统一 httpx 异步.
 PubMed (NCBI E-utilities) 学术论文搜索, 适用于学术场景.
 两步检索: esearch 获取 PMID 列表 -> esummary 获取摘要.
 无需 API Key, 建议配置 PUBMED_EMAIL 邮箱.

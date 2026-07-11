@@ -170,7 +170,7 @@ async def test_build_data_namespaces_empty_when_no_data():
 def test_bm25_cache_uid_shared_namespace_uses_anonymous():
     """共享 namespace 使用 anonymous 常量作为缓存键 (跨用户共享).
 
-    AGENTS.md 第 8 章: default_user_id 环境变量已移除, RAG 层共享 namespace
+    default_user_id 环境变量已移除, RAG 层共享 namespace
     缓存键用 _ANONYMOUS_USER_ID = "anonymous" 常量替代.
     """
     settings = Settings(agent_name="test-agent", _env_file=None)

@@ -1,6 +1,6 @@
 """LiteLLM 网关封装.
 
-AGENTS.md 第 9 章硬约束:
+硬约束:
 - 全部 LLM 调用经 llm/ 的 LLMClient (底层 LiteLLM ≥1.6)
 - 禁止直接 openai/anthropic 等 SDK
 - 模型名以 LiteLLM 路由前缀声明 (如 deepseek/deepseek-chat), 由配置注入, 禁止硬编码
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # ========== 模块级定价表 (USD per 1K tokens, 参考 2026 年公开定价) ==========
 # 支持模型名前缀匹配: 如 "deepseek/deepseek-chat-2026-01-01" 命中 "deepseek/deepseek-chat".
 # 命中失败时 _compute_cost 返回 0.0 并记录 warning 日志 (不再用兜底费率避免误算,
-# 详见 AGENTS.md 第 4 章避免静默错误).
+# 详见避免静默错误).
 LITELLM_PRICING_TABLE: dict[str, dict[str, float]] = {
     # ========== DeepSeek ==========
     "deepseek/deepseek-chat": {"input": 0.0014, "output": 0.0028},
@@ -119,8 +119,8 @@ class LLMResponse:
 class LLMClient:
     """LiteLLM 网关客户端.
 
-    AGENTS.md 第 9 章: 全部 LLM 调用经此客户端, 禁厂商 SDK 直连.
-    所有调用必须包裹在 trace_generation span 内 (AGENTS.md 第 10 章).
+    全部 LLM 调用经此客户端, 禁厂商 SDK 直连.
+    所有调用必须包裹在 trace_generation span 内.
 
     _step_costs 按业务步骤累计成本, get_session_cost 返回分布.
     achat/achat_stream 支持 tier 降级链 (strategic → smart → fast).
@@ -376,7 +376,7 @@ class LLMClient:
     ) -> str:
         """构建 LLM 响应缓存键.
 
-        AGENTS.md 第 7 章 Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
+        Redis 约定: {agent_id}:{user_id}:{module}:{type}:{id}
         LLM 响应缓存为全局级 (不区分用户/会话, 因 temp=0 时 LLM 输出确定性),
         使用 _global 占位. 缓存维度: model + messages + temperature + max_tokens + stop.
 
@@ -488,7 +488,7 @@ class LLMClient:
     ) -> LLMResponse:
         """异步 LLM 调用 (非流式), 含降级链 (strategic → smart → fast).
 
-        AGENTS.md 第 10 章: 必须包裹在 trace_generation span 内.
+        必须包裹在 trace_generation span 内.
         step 标识业务步骤, 计入 step_costs 分布.
         tier 调用失败时按 _FALLBACK_TIER 逐级降级, FAST 失败则抛出原异常.
         外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
@@ -647,7 +647,7 @@ class LLMClient:
     ) -> AsyncIterator[str]:
         """异步流式 LLM 调用 (SSE 流式统一入口), 含降级链.
 
-        AGENTS.md 第 9 章: 流式统一 achat_stream.
+        流式统一 achat_stream.
         yield 逐块文本 (delta content).
         step 标识业务步骤, 计入 step_costs 分布.
         流式连接建立失败时按 _FALLBACK_TIER 逐级降级;

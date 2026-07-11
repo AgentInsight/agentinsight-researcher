@@ -6,9 +6,9 @@
   单例 (双重检查锁) / 并发安全
 - close_redis_client: aclose + 置 None / 幂等 / aclose 异常仍重置 / 关闭后重建
 
-AGENTS.md 第 7 章: Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
+Redis 键应加前缀 {agent_id}:{user_id}:, 应设 TTL.
   本模块仅负责客户端创建, 键前缀由调用方管理 (retriever.py/query_classifier.py/quota_cache.py).
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (aioredis 全部 mock).
+单元测试不依赖外部服务 (aioredis 全部 mock).
 
 注: 任务描述中 "键前缀格式/TTL/get-set-delete/JSON 序列化" 由调用方实现,
 本测试覆盖客户端工厂的创建参数 (encoding/decode_responses 支持字符串键操作)、

@@ -4,7 +4,7 @@
 _basic_report_structure / _detailed_report_structure /
 _build_references / _format_sources / _get_language_instruction,
 不依赖 LLM / 文件系统.
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 """
 
 from __future__ import annotations

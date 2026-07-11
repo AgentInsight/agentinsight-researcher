@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 准备 Node.js 22 LTS 二进制和 MCP npm 包 (QA/Offline 离线模式)
 #
-# 严格遵循 AGENTS.md 第 12 章: QA/Offline 离线模式, 所有依赖预下载到 packages/
+# QA/Offline 离线模式, 所有依赖预下载到 packages/
 # 本脚本完成两件事:
 # 1. 下载 Node.js 22 LTS 二进制 tarball 到 packages/nodejs/
 # 2. 用 Docker 容器 (node:22-slim) 预装 40 个 MCP npm 包到全局, 导出为 tarball 到 packages/npm-pkgs/

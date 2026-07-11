@@ -3,7 +3,7 @@
 保留的 `_recursive_split` / `_merge_parts` / `_char_level_split` 为纯文本切分工具,
 被 `BM25Filter` 与 `WrittenContentCompressor` 复用, 保证 chunk 级一致性.
 
-AGENTS.md 第 7 章: Embedding 调用统一走 rag/embeddings.py (私有数据) 或
+Embedding 调用统一走 rag/embeddings.py (私有数据) 或
 rag/fastembed_client.py (上下文压缩), 禁止业务代码直连 API.
 """
 

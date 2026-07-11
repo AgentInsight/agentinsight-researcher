@@ -11,7 +11,7 @@ L2 后处理压缩链的串联行为, 以及降级策略:
 - BM25Filter 超时 → 关键词匹配降级
 - EmbeddingsFilter 熔断 → 关键词匹配降级
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 所有外部依赖 (EmbeddingsClient/LLMClient) 全部 mock.
 """
 

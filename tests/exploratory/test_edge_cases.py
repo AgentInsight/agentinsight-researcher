@@ -1,6 +1,5 @@
 """探索性测试: 边界条件 (空查询/超长查询/特殊字符/并发请求).
 
-AGENTS.md 第 11/13 章硬约束:
 - 所有外部输入经 Pydantic 校验
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 测试数据隔离: session_id=test_explore_*
@@ -19,7 +18,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 边界测试超时 (短查询响应快; 超长查询可能走研究图, 给宽松超时)
@@ -30,7 +29,7 @@ CONCURRENT_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.
 
 
 def _unique_session_id(prefix: str = "explore") -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_{prefix}_{uuid.uuid4().hex[:12]}"
 
 
@@ -100,7 +99,7 @@ def test_only_punctuation_content_returns_200() -> None:
 def test_very_long_query_returns_200() -> None:
     """边界: 超长查询 (10K 字符) → 200 (服务端不应崩溃).
 
-    AGENTS.md 第 6 章: 单会话上下文上限 800K 字符, 10K 应在范围内.
+    单会话上下文上限 800K 字符, 10K 应在范围内.
     """
     long_query = "请分析人工智能在医疗领域的应用前景。" * 200  # ~10K 字符
     with httpx.Client(timeout=EDGE_TIMEOUT) as client:
@@ -151,7 +150,7 @@ def test_extremely_long_query_handled_gracefully() -> None:
 def test_special_characters_handled_gracefully(query: str, description: str) -> None:
     """边界: 各种特殊字符查询不应导致服务端 5xx 崩溃.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     """
     with httpx.Client(timeout=EDGE_TIMEOUT) as client:
         r = client.post(
@@ -169,7 +168,7 @@ def test_special_characters_handled_gracefully(query: str, description: str) -> 
 def test_concurrent_3_requests_isolation() -> None:
     """边界: 3 个并发请求 (不同 session_id) 应全部成功.
 
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话; 会话间状态通过 Postgres Checkpointer 隔离.
+    每个 Agent 应支持并发多会话; 会话间状态通过 Postgres Checkpointer 隔离.
     """
     queries = [
         ("你好", _unique_session_id("explore_conc_0")),
@@ -198,7 +197,7 @@ def test_concurrent_3_requests_isolation() -> None:
 def test_concurrent_same_session_id_handled() -> None:
     """边界: 同一 session_id 并发请求不应导致数据损坏.
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键, 同一 thread_id 的并发请求
+    thread_id 做会话隔离键, 同一 thread_id 的并发请求
     应由 Checkpointer 串行化处理 (不出现状态损坏).
     """
     sid = _unique_session_id("explore_same_sid")
@@ -302,7 +301,7 @@ def test_method_not_allowed_returns_405() -> None:
 
 # ========== 探索性单元测试 (mock-based, 不依赖容器栈) ==========
 # 以下测试用 mock 模拟异常场景, 标记为 unit 以便构建期执行 (不依赖容器栈健康).
-# AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+# 单元测试在构建期执行, 不依赖外部服务.
 
 import types  # noqa: E402
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
@@ -362,8 +361,8 @@ class _FakeAsyncHttpxClient:
 async def test_extremely_long_query_100k_chars() -> None:
     """边界: 超长查询 (100K 字符) 不应导致 BM25Filter 或 EmbeddingsClient 崩溃.
 
-    AGENTS.md 第 6 章: 单会话上下文上限 800K 字符, 100K 应在范围内.
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验, 不应 eval/exec 用户输入.
+    单会话上下文上限 800K 字符, 100K 应在范围内.
+    所有外部输入经 Pydantic 校验, 不应 eval/exec 用户输入.
     """
     # 1. BM25Filter: 100K 字符查询 (本地 jieba 分词, 零网络调用)
     settings = _make_unit_settings()
@@ -398,7 +397,7 @@ async def test_extremely_long_query_100k_chars() -> None:
 async def test_unicode_emoji_mixed_query() -> None:
     """边界: Unicode + Emoji 混合查询不应导致 BM25Filter 崩溃.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验.
+    所有外部输入经 Pydantic 校验.
     jieba 对 Emoji/Unicode 有兜底处理 (未登录词按单字切分).
     """
     settings = _make_unit_settings()
@@ -423,8 +422,8 @@ async def test_unicode_emoji_mixed_query() -> None:
 async def test_concurrent_sessions_stress() -> None:
     """边界: 10 个并发 embed_texts 调用应全部成功 (Semaphore 限流不崩溃).
 
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话.
-    AGENTS.md 第 7 章: Embeddings 客户端按 embeddings_max_concurrent 限流.
+    每个 Agent 应支持并发多会话.
+    Embeddings 客户端按 embeddings_max_concurrent 限流.
     """
     settings = _make_unit_settings(embeddings_max_concurrent=3)
     emb_client = EmbeddingsClient(settings)
@@ -464,7 +463,7 @@ async def test_concurrent_sessions_stress() -> None:
 async def test_session_id_with_special_chars_injection() -> None:
     """边界: session_id 含 SQL/Path/JS 注入字符不应导致 LLMClient 崩溃.
 
-    AGENTS.md 第 11 章: 所有外部输入经 Pydantic 校验; 禁止 eval/exec 用户输入.
+    所有外部输入经 Pydantic 校验; 禁止 eval/exec 用户输入.
     session_id 作为 thread_id 传入 trace span metadata, 不应引发注入风险.
     """
     settings = _make_unit_settings(
@@ -523,8 +522,8 @@ async def test_session_id_with_special_chars_injection() -> None:
 async def test_rapid_sequential_requests() -> None:
     """边界: 同一输入 5 次快速连续请求, LLM 响应缓存应命中后 4 次.
 
-    AGENTS.md 第 7 章: Redis 缓存不可用时应降级无缓存, 不阻断检索.
-    AGENTS.md 第 9 章: LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链.
+    Redis 缓存不可用时应降级无缓存, 不阻断检索.
+    LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链.
     用户硬约束: 出错了不要存缓存 — 仅缓存成功响应.
 
     本测试 mock Redis 客户端模拟缓存命中/未命中, 验证:

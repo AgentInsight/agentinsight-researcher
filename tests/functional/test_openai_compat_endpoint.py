@@ -1,6 +1,5 @@
 """功能测试: 验证 OpenAI 兼容端点 (/v1/chat/completions + /v1/models).
 
-AGENTS.md 第 14 章硬约束:
 - 测试页面统一调用 OpenAI 兼容端点 POST /v1/chat/completions, 请求体带 stream: true
 - 不推荐调用后端私有端点, 测试应只走对外 OpenAI 兼容接口
 - 流式响应用浏览器原生 fetch + ReadableStream 解析 SSE
@@ -31,7 +30,7 @@ CHAT_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
 
 def _unique_session_id() -> str:
-    """生成唯一 session_id (AGENTS.md 第 13 章: session_id=test_*)."""
+    """生成唯一 session_id (session_id=test_*)."""
     return f"test_oai_{uuid.uuid4().hex[:12]}"
 
 
@@ -110,7 +109,7 @@ def test_chat_completions_stream_sse_format() -> None:
 
 @pytest.mark.functional
 def test_chat_completions_missing_user_message_returns_400() -> None:
-    """缺 user 消息 -> 400 (AGENTS.md 第 14 章 OpenAI 兼容错误处理).
+    """缺 user 消息 -> 400 (OpenAI 兼容错误处理).
 
     src/api/routes.py: messages 无 user 角色 -> HTTPException(400).
     """
@@ -127,7 +126,7 @@ def test_chat_completions_missing_user_message_returns_400() -> None:
 
 @pytest.mark.functional
 def test_chat_completions_empty_query_returns_400() -> None:
-    """空查询 -> 400 (AGENTS.md 第 14 章, query.strip() 为空校验).
+    """空查询 -> 400 (query.strip() 为空校验).
 
     src/api/routes.py: user 消息 content 为空白 -> HTTPException(400).
     """
@@ -146,7 +145,7 @@ def test_chat_completions_empty_query_returns_400() -> None:
 def test_models_endpoint_returns_agentinsight_researcher() -> None:
     """GET /v1/models -> 200 + 含 agentinsight-researcher 模型 (OpenAI 兼容).
 
-    AGENTS.md 第 14 章: 测试页面从 /v1/models 获取可用模型列表.
+    测试页面从 /v1/models 获取可用模型列表.
     src/api/routes.py: list_models 返回 {object: list, data: [...]}.
     """
     with httpx.Client(timeout=CHAT_TIMEOUT) as client:

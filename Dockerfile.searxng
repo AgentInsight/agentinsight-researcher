@@ -1,5 +1,5 @@
 # SearXNG 自定义镜像 (构建时预装 curl_cffi, 替代启动时 pip install)
-# 严格遵循 AGENTS.md 第 12 章: 构建时预装依赖, 非运行时下载
+# 构建时预装依赖, 非运行时下载
 #
 # curl_cffi 用于 sogou_stealth/baidu_stealth/quark_stealth 引擎 (模拟 Chrome TLS 指纹规避 CAPTCHA)
 # SearXNG 镜像 entrypoint.sh 最后一行 exec granian 会忽略 CMD, 故必须构建时预装
@@ -19,7 +19,7 @@ ARG SEARXNG_VENV_PY=/usr/local/searxng/.venv/bin/python3
 COPY packages/searxng-wheels/ /tmp/searxng-wheels/
 
 # 安装 curl_cffi 到 SearXNG venv
-# 离线模式: --no-index --find-links 从本地 wheel 安装 (AGENTS.md 第 12 章离线硬约束)
+# 离线模式: --no-index --find-links 从本地 wheel 安装 (离线硬约束)
 # 联网模式: 联网 pip install (ensurepip 确保 pip 可用, 生产联网模式允许联网)
 # 安装失败不阻断构建 (|| true), stealth 引擎将降级为 httpx (可能触发 CAPTCHA 但引擎仍可加载)
 RUN if ls /tmp/searxng-wheels/*.whl 2>/dev/null 1>&2; then \

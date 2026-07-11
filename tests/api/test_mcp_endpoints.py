@@ -1,6 +1,6 @@
 """API 测试: MCP 配置 API 端点 (CRUD/clone/test) + 隔离场景.
 
-AGENTS.md 第 13 章硬约束:
+测试约定:
 - API 测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 每次用唯一 session_id=test_* / config name=test-api-mcp-*
@@ -31,7 +31,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入, 禁止硬编码
+# 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # API 测试超时 60s (MCP 可用性测试 30s + 余量)

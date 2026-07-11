@@ -8,7 +8,7 @@
 - _bm25_search: score <= 0 过滤 (BM25 固有, 非 score_threshold)
 - 向量检索结果不因低分被过滤 (RRF 融合保留所有候选)
 
-AGENTS.md 第 7 章: score_threshold 默认 0.3, 低于阈值丢弃
+score_threshold 默认 0.3, 低于阈值丢弃
 (仅当 rerank 启用时生效, RRF 融合分数不应用此阈值).
 """
 
@@ -410,7 +410,7 @@ async def test_vector_low_score_not_filtered_by_threshold(
 
 
 def test_score_threshold_default_is_0_3() -> None:
-    """Settings.score_threshold 默认 0.3 (AGENTS.md 第 7 章)."""
+    """Settings.score_threshold 默认 0.3."""
     settings = Settings(_env_file=None)
     assert settings.score_threshold == 0.3
 
@@ -422,7 +422,7 @@ def test_score_threshold_configurable() -> None:
 
 
 def test_rerank_enabled_default_false() -> None:
-    """Settings.rerank_enabled 默认 False (AGENTS.md 第 7 章: 默认不启用)."""
+    """Settings.rerank_enabled 默认 False (默认不启用)."""
     settings = Settings(_env_file=None)
     assert settings.rerank_enabled is False
 
@@ -433,7 +433,7 @@ def test_rerank_enabled_default_false() -> None:
 def test_score_threshold_only_used_in_rerank() -> None:
     """源码契约: score_threshold 仅在 _rerank 方法内使用 (不在 retrieve 主流程过滤).
 
-    AGENTS.md 第 7 章: score_threshold 仅当 rerank 启用时生效.
+    score_threshold 仅当 rerank 启用时生效.
     验证 retrieve 主流程 (rerank 关闭分支) 不引用 score_threshold.
     """
     import inspect

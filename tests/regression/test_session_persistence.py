@@ -1,6 +1,5 @@
 """回归测试: 会话持久化.
 
-AGENTS.md 第 6/13 章硬约束:
 - 会话持久化到 Postgres Checkpointer; 内存 Checkpointer 仅 ENV=dev 允许
 - thread_id (session_id) 做会话隔离键, 由请求上下文注入
 - 会话间状态通过 Postgres Checkpointer 隔离, 禁止共享可变内存
@@ -25,7 +24,7 @@ import uuid
 import httpx
 import pytest
 
-# AGENTS.md 第 13 章: 测试目标地址从环境变量注入
+# 测试目标地址从环境变量注入
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
 
 # 回归测试超时 300s (两次请求, 每次 60-120s)
@@ -44,7 +43,7 @@ def _log(msg: str) -> None:
 def test_session_id_consistency() -> None:
     """验证会话持久化: 同一 session_id 两次请求 → 上下文保持.
 
-    AGENTS.md 第 6 章: 会话间状态通过 Postgres Checkpointer 隔离.
+    会话间状态通过 Postgres Checkpointer 隔离.
     第一次请求让 agent 记住关键词, 第二次请求询问关键词, 验证响应包含该关键词.
 
     注意: 由于意图分类 (CHAT/RESEARCH), 两次请求可能走不同 graph.
@@ -106,7 +105,7 @@ def test_session_id_consistency() -> None:
 def test_different_session_isolation() -> None:
     """验证不同 session_id 隔离: 两个不同 session 不共享上下文.
 
-    AGENTS.md 第 6 章: 会话间状态通过 Postgres Checkpointer 隔离.
+    会话间状态通过 Postgres Checkpointer 隔离.
     """
     sid_a = f"test_session_iso_a_{uuid.uuid4().hex[:12]}"
     sid_b = f"test_session_iso_b_{uuid.uuid4().hex[:12]}"
@@ -156,7 +155,7 @@ def test_different_session_isolation() -> None:
 
 
 # ========== 异步回归测试 (httpx.AsyncClient, 仅验证 HTTP 状态码/会话隔离, 不依赖完整 LLM 研究) ==========
-# AGENTS.md 第 13 章: 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
+# 新增测试不依赖外部 LLM 调用, 仅验证 HTTP 状态码而非内容.
 # 使用短查询 (SHORT_QUERY/OFF_TOPIC) 触发快速响应路径, 验证会话隔离与持久化机制.
 
 # 异步测试超时 (短查询响应快速; 含一次研究流式头验证)
@@ -167,7 +166,7 @@ ASYNC_TEST_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.
 async def test_session_persistence_stream_then_non_stream() -> None:
     """同一 session 先流式后非流式 → 两次请求均 200 (会话跨模式持久化).
 
-    AGENTS.md 第 6 章: 会话持久化到 Postgres Checkpointer, 跨请求保持.
+    会话持久化到 Postgres Checkpointer, 跨请求保持.
     验证同一 session_id 支持流式与非流式混合请求.
     """
     sid = f"test_session_mix_{uuid.uuid4().hex[:12]}"
@@ -214,7 +213,7 @@ async def test_session_persistence_stream_then_non_stream() -> None:
 async def test_multi_session_parallel_isolation() -> None:
     """3 个并行会话 → 各自 200 + X-Session-Id 隔离.
 
-    AGENTS.md 第 6 章: 每个 Agent 应支持并发多会话; 会话间状态通过 Checkpointer 隔离.
+    每个 Agent 应支持并发多会话; 会话间状态通过 Checkpointer 隔离.
     """
     sids = [f"test_session_parallel_{i}_{uuid.uuid4().hex[:8]}" for i in range(3)]
     _log(f"并行会话测试开始: sessions={sids}")
@@ -246,7 +245,7 @@ async def test_multi_session_parallel_isolation() -> None:
 async def test_session_switching_context_isolation() -> None:
     """会话切换 A→B→A → 每次 X-Session-Id 与请求一致 (切换不混淆).
 
-    AGENTS.md 第 6 章: 会话间状态隔离, 切换会话不混淆上下文.
+    会话间状态隔离, 切换会话不混淆上下文.
     """
     sid_a = f"test_session_switch_a_{uuid.uuid4().hex[:8]}"
     sid_b = f"test_session_switch_b_{uuid.uuid4().hex[:8]}"
@@ -304,7 +303,7 @@ async def test_session_switching_context_isolation() -> None:
 async def test_long_session_id_persistence() -> None:
     """超长 session_id (1K 字符) → 200 + X-Session-Id 一致.
 
-    AGENTS.md 第 6 章: thread_id 做会话隔离键, 不应限制长度.
+    thread_id 做会话隔离键, 不应限制长度.
     """
     long_sid = "test_long_session_" + "x" * 1000
     _log(f"超长 session_id 测试开始: 长度={len(long_sid)}")
@@ -331,7 +330,7 @@ async def test_long_session_id_persistence() -> None:
 async def test_session_id_with_safe_special_chars() -> None:
     """session_id 含安全特殊字符 (连字符/下划线) → 200 + X-Session-Id 一致.
 
-    AGENTS.md 第 6 章: session_id 由请求上下文注入, 支持标准标识符字符.
+    session_id 由请求上下文注入, 支持标准标识符字符.
     """
     special_sid = f"test-session-id_{uuid.uuid4().hex[:12]}"
     _log(f"特殊字符 session_id 测试开始: {special_sid}")
@@ -357,7 +356,7 @@ async def test_session_id_with_safe_special_chars() -> None:
 async def test_session_resume_after_short_query() -> None:
     """短查询后继续同会话研究请求 → 两次均 200 (会话复用, 跨意图持久化).
 
-    AGENTS.md 第 6 章: 会话持久化, 支持跨意图复用.
+    会话持久化, 支持跨意图复用.
     验证短查询 (SHORT_QUERY) 不破坏会话, 后续研究请求仍可使用同一 session.
     第二次研究请求用 stream=true, 仅验证响应头 (不等待完整研究).
     """

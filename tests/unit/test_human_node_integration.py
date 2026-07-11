@@ -4,12 +4,12 @@
 - human_node 节点接入主图 (human_review_enabled=True 时启用)
 - human_review_enabled=False 时跳过 human 节点 (agent_creator → researcher 直连)
 - create_human_review_guard 路由: accept (feedback is None) | revise (有反馈)
-- max_plan_revisions 守卫: 达上限强制 accept (AGENTS.md 第 5 章 max_iterations 硬上限)
+- max_plan_revisions 守卫: 达上限强制 accept (max_iterations 硬上限)
 - HumanAgent.review_plan: WebSocket 未连接/超时 → 自动通过 (不阻断)
 - 接受关键词 ("approve"/"通过"/"" 等) → accept, 其他反馈 → revise
 
-AGENTS.md 第 5 章: LangGraph StateGraph 唯一编排, 节点为纯函数.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (WebSocket/feedback_queue 全部 mock).
+LangGraph StateGraph 唯一编排, 节点为纯函数.
+单元测试不依赖外部服务 (WebSocket/feedback_queue 全部 mock).
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def test_accept_keywords_includes_common_terms() -> None:
 
 @pytest.mark.asyncio
 async def test_human_node_delegates_to_agent() -> None:
-    """human_node 是 HumanAgent.review_plan 的纯函数包装 (AGENTS.md 第 5 章)."""
+    """human_node 是 HumanAgent.review_plan 的纯函数包装."""
     state: dict[str, Any] = {
         "session_id": "test-session",
         "user_id": "test-user",

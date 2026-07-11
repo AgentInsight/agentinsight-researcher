@@ -6,7 +6,7 @@
 - _chunk_cache key 生成: sha256(doc_text) + sha256(chunk) 双键
 - _post_filter_compress 复用 _embeddings_rerank 的 embedding 缓存
 
-AGENTS.md 第 13 章: 单元测试在构建期执行, 不依赖外部服务.
+单元测试在构建期执行, 不依赖外部服务.
 _embeddings_rerank 测试全部 mock FastEmbedClient (无 ONNX 加载).
 """
 

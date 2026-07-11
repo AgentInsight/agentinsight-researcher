@@ -1,6 +1,5 @@
 """功能测试: MCP 协调器端到端调用 (mock MCP Server, 不实际启动).
 
-AGENTS.md 第 13 章:
 - 功能测试在 docker compose up -d 且全部容器 service_healthy 后执行
 - 测试用例独立可重复运行, 不依赖执行顺序
 - 测试数据隔离: session_id=test_mcp_* / config name=test-mcp-*
@@ -351,7 +350,7 @@ class TestMCPResearchFlow:
     async def test_mcp_call_traced_in_span(
         self, coordinator: MCPCoordinator, mock_llm: MagicMock
     ) -> None:
-        """MCP 调用被 trace_tool span 包裹 (AGENTS.md 第 10 章).
+        """MCP 调用被 trace_tool span 包裹.
 
         mock trace_tool 为 asynccontextmanager, 验证 conduct_research 进入 span,
         且 span.update 被调用记录 success=True.

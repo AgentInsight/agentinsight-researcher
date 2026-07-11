@@ -50,7 +50,7 @@ agentinsight-researcher.
 | beautifulsoup4 | 4.15.0 | MIT |
 | lxml | 6.1.1 | BSD-3-Clause |
 | playwright | 1.61.0 | Apache-2.0 |
-| PyMuPDF | 1.28.0 | AGPL-3.0-or-later |
+| pypdf | 5.6.0 | BSD-3-Clause |
 | trafilatura | 2.1.0 | Apache-2.0 |
 | markdownify | 1.2.3 | MIT |
 | curl_cffi | >=0.7 | MIT |
@@ -92,9 +92,6 @@ agentinsight-researcher.
 - **LGPL-3.0-or-later** (psycopg / psycopg-pool): Used as a system library
   via pip import, does not impose copyleft on the project. 作为系统库通过
   pip 导入使用, 不对项目施加 copyleft 约束。
-- **AGPL-3.0-or-later** (PyMuPDF): Network copyleft license. Used for PDF
-  parsing only. Review your distribution model before deploying as a network
-  service. 网络互惠许可证, 仅用于 PDF 解析。作为网络服务部署前请审查分发模式。
 - For packages with dual licenses (e.g. "Apache-2.0 OR MIT"), either license
   may be chosen. 双许可证包可选择其中任一。
 

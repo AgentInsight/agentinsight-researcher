@@ -1,10 +1,10 @@
 # tests/ 测试目录
 
-> AGENTS.md 第 13 章测试规则落地. 本目录承载 agentinsight-researcher 全部测试用例.
+> 本目录承载 agentinsight-researcher 全部测试用例.
 
 ## 1. 测试分层结构
 
-按执行环境与触发时机分 7 层 (与 AGENTS.md 第 13 章 7 类测试对齐), 每层独立目录:
+按执行环境与触发时机分 7 层, 每层独立目录:
 
 | 类型 | 目录 | 执行环境 | 触发时机 | pytest mark |
 |------|------|---------|---------|-------------|
@@ -345,14 +345,14 @@ MCP 工具调用 (`src/skills/researcher/mcp_coordinator.py`) 测试分布在两
 ## 6. 测试约定
 
 - **数据隔离**: Qdrant `namespace=test_*` + `user_id=test_*` + `session_id=test_*`, 测试结束清理
-  (AGENTS.md 第 13 章, 第 11 章 PII 安全硬约束).
+  (PII 安全硬约束).
 - **目标地址**: 测试目标地址从环境变量 `AGENT_URL` 注入 (默认 `http://127.0.0.1:8066`),
   禁止硬编码.
 - **独立性**: 测试用例独立可重复运行, 不依赖执行顺序; 用例间通过 fixture 清理状态.
 - **mock 化**: 单元测试不依赖外部服务 (Postgres/Qdrant/Redis/LLM), 全部 mock.
 - **容器栈依赖**: 功能/回归/API/e2e/性能测试在 `docker compose up -d` 且全部容器
   `service_healthy` 后执行; 容器栈未运行时自动跳过 (`conftest.py` 钩子).
-- **CI 流水线顺序** (AGENTS.md 第 13 章):
+- **CI 流水线顺序**:
   1. 构建镜像 + 单元测试 (失败即终止)
   2. `docker compose up -d` + 等待全部健康检查通过
   3. 功能 → API → 回归 → e2e (按序, 前者失败后者不执行)
@@ -360,7 +360,7 @@ MCP 工具调用 (`src/skills/researcher/mcp_coordinator.py`) 测试分布在两
 
 ## 7. 7 层测试分层执行命令与触发时机
 
-> 与 AGENTS.md 第 13 章对齐, 每层独立目录, 执行环境与触发时机严格区分.
+> 每层独立目录, 执行环境与触发时机严格区分.
 
 | 层级 | 目录 | 执行环境 | 触发时机 | 执行命令 |
 |------|------|---------|---------|---------|
@@ -375,7 +375,7 @@ MCP 工具调用 (`src/skills/researcher/mcp_coordinator.py`) 测试分布在两
 **容器栈依赖测试执行流程** (功能/回归/API/e2e/性能/探索性):
 
 ```bash
-# 1. 启动容器栈 (优先使用构建脚本, AGENTS.md 第 12 章)
+# 1. 启动容器栈 (优先使用构建脚本)
 docker compose -p agentinsight -f docker-compose.yml up -d --wait
 # QA 模式: docker-build.qa.bat
 # 生产联网: docker-build.sh
@@ -425,7 +425,7 @@ docker compose -p agentinsight down -v
 **验证目标**: 离线部署模式中文字体安装逻辑 (PDF/DOCX 报告不乱码)
 **mark**: `unit` (静态文件检查, 不构建 Docker 镜像)
 **skip 策略**: `Dockerfile.qa`/`Dockerfile.offline`/`docker-compose-qa.yaml`/
-`packages/debs/` 均在 `.gitignore` 中 (AGENTS.md 第 12 章三套构建模式, 不入仓),
+`packages/debs/` 均在 `.gitignore` 中 (三套构建模式, 不入仓),
 文件不存在时 `pytest.skip()` 而非失败.
 
 | 测试分组 | 用例数 | 验证点 |
@@ -440,7 +440,7 @@ docker compose -p agentinsight down -v
 
 ## 9. tests/manual/ 目录
 
-> AGENTS.md 第 3 章临时文件管理约定: 手动调试脚本放在 `tests/manual/`.
+> 临时文件管理约定: 手动调试脚本放在 `tests/manual/`.
 
 **性质**: 手动调试脚本, **非 pytest 自动化测试用例**, 不纳入 CI 流水线.
 

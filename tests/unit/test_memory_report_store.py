@@ -5,8 +5,8 @@
 - ReportStore._dsn(): 返回 postgresql:// 格式 DSN (非 postgresql+asyncpg://)
 - CRUD 方法 (save_report/get_report/list_reports/delete_report) 用 mock asyncpg
 
-AGENTS.md 第 6/7 章: 业务表含 agent_id + user_id 双列复合索引, asyncpg 直连.
-AGENTS.md 第 13 章: 单元测试不依赖外部服务 (用 mock asyncpg).
+业务表含 agent_id + user_id 双列复合索引, asyncpg 直连.
+单元测试不依赖外部服务 (用 mock asyncpg).
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ class TestReportStoreDsn:
         )
         store = ReportStore(settings)
         # _dsn() 已弃用, 用 pytest.warns 显式捕获 DeprecationWarning 避免 warning 噪声
-        with pytest.warns(DeprecationWarning, match="deprecated since P0-4"):
+        with pytest.warns(DeprecationWarning, match="deprecated"):
             dsn = store._dsn()
         assert dsn == "postgresql://user:pass@host:5432/db"
         assert "asyncpg" not in dsn
@@ -117,7 +117,7 @@ class TestReportStoreDsn:
         """_dsn() 以 postgresql:// 开头."""
         settings = Settings(_env_file=None)
         store = ReportStore(settings)
-        with pytest.warns(DeprecationWarning, match="deprecated since P0-4"):
+        with pytest.warns(DeprecationWarning, match="deprecated"):
             dsn = store._dsn()
         assert dsn.startswith("postgresql://")
 
