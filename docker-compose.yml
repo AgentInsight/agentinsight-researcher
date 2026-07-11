@@ -24,11 +24,6 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '2.0'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
@@ -49,11 +44,6 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
     healthcheck:
       test: ["CMD-SHELL", "redis-cli $${REDIS_AUTH:+-a \"$$REDIS_AUTH\"} ping"]
       interval: 3s
@@ -75,11 +65,6 @@ services:
       - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '2.0'
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
@@ -110,47 +95,10 @@ services:
     volumes:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - embeddings_models:/data
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
     healthcheck:
       # TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截
       # 改用 CMD-SHELL + curl 绝对路径, 绕过 ENTRYPOINT 拦截
       test: ["CMD-SHELL", "/usr/bin/curl -sf http://localhost:8088/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
-
-  rerank:
-    # BGE Reranker 服务镜像 (bge-reranker-v2-m3), 可选容器
-    # 默认不启动; 启用方式: docker compose --profile rerank up -d
-    # 同时需在 .env 设置 RERANK_ENABLED=true
-    # 生产联网模式: 模型权重由 TEI 容器首次启动时从 HuggingFace 下载到命名卷 rerank_models 缓存
-    profiles: ["rerank"]
-    image: tei-embedding:cpu-1.9
-    restart: always
-    env_file:
-      - .env
-    environment:
-      # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
-      MODEL_ID: /data/bge-reranker-v2-m3
-      DTYPE: float16
-      MAX_BATCH_TOKENS: 16384
-      MAX_CLIENT_BATCH_SIZE: 32
-      MAX_CONCURRENT_REQUESTS: 512
-      PORT: "8089"
-      API_KEY: ${RERANK_API_KEY:-}
-    ports:
-      - "8089:8089"
-    volumes:
-      # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
-      - rerank_models:/data
-    healthcheck:
-      # 同 embeddings, 用 CMD-SHELL + curl 绝对路径
-      test: ["CMD-SHELL", "/usr/bin/curl -sf http://localhost:8089/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -229,12 +177,6 @@ services:
         condition: service_healthy
       searxng:
         condition: service_healthy
-      # rerank 为可选容器 (profiles: [rerank]), 不强制依赖
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
       interval: 30s
