@@ -354,16 +354,17 @@ async def test_assess_complexity_non_dict_response(
     mock_llm: MagicMock,
     settings: Settings,
 ) -> None:
-    """测试复杂度评估: LLM 返回非 dict (如 list) 时降级默认值."""
+    """测试复杂度评估: LLM 返回非 dict (如 list) 时降级 L4-L5 中等参数."""
     mock_llm.achat.return_value = LLMResponse(
         content='["not", "a", "dict"]',
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
+    # V4-P2-04: 降级到 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4)
     assert params == {
-        "breadth": settings.deep_research_breadth,
-        "depth": 1,  # 安全网
-        "concurrency": settings.deep_research_concurrency,
+        "breadth": 4,
+        "depth": 2,  # L4-L5 中等参数
+        "concurrency": 4,
     }
 
 
@@ -373,13 +374,13 @@ async def test_assess_complexity_non_int_complexity(
     mock_llm: MagicMock,
     settings: Settings,
 ) -> None:
-    """测试复杂度评估: complexity 非整数 (如字符串) 时降级默认值."""
+    """测试复杂度评估: complexity 非整数 (如字符串) 时降级 L4-L5 中等参数."""
     mock_llm.achat.return_value = LLMResponse(
         content='{"complexity": "三", "reason": "字符串非整数"}',
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 1  # 安全网
+    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
 
 
 @pytest.mark.asyncio
@@ -388,22 +389,22 @@ async def test_assess_complexity_out_of_range(
     mock_llm: MagicMock,
     settings: Settings,
 ) -> None:
-    """测试复杂度评估: complexity 越界 (0 或 6) 时降级默认值."""
+    """测试复杂度评估: complexity 越界 (0 或 11) 时降级 L4-L5 中等参数."""
     # complexity=0 (低于下限 1)
     mock_llm.achat.return_value = LLMResponse(
         content='{"complexity": 0, "reason": "越界低"}',
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 1
+    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
 
-    # complexity=6 (高于上限 5)
+    # complexity=11 (高于上限 10)
     mock_llm.achat.return_value = LLMResponse(
-        content='{"complexity": 6, "reason": "越界高"}',
+        content='{"complexity": 11, "reason": "越界高"}',
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 1
+    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
 
 
 @pytest.mark.asyncio
@@ -411,22 +412,30 @@ async def test_assess_complexity_boundary_values(
     researcher: DeepResearcher,
     mock_llm: MagicMock,
 ) -> None:
-    """测试复杂度评估: 边界值 1/3/4 映射正确."""
-    # complexity=1 → 简单 (breadth=4, depth=1)
+    """测试复杂度评估: 边界值 1/4/10 映射正确 (V4-P2-04: 10 级映射)."""
+    # complexity=1 → L1 单一事实 (breadth=3, depth=1, concurrency=3)
     mock_llm.achat.return_value = LLMResponse(
         content='{"complexity": 1, "reason": "最简单"}',
         model="test",
     )
     params = await researcher._assess_complexity("定义查询")
-    assert params == {"breadth": 4, "depth": 1, "concurrency": 4}
+    assert params == {"breadth": 3, "depth": 1, "concurrency": 3}
 
-    # complexity=4 → 复杂 (breadth=4, depth=3, concurrency=6)
+    # complexity=4 → L4 多维度分析 (breadth=4, depth=2, concurrency=4)
     mock_llm.achat.return_value = LLMResponse(
         content='{"complexity": 4, "reason": "复杂"}',
         model="test",
     )
     params = await researcher._assess_complexity("复杂查询")
-    assert params == {"breadth": 4, "depth": 3, "concurrency": 6}
+    assert params == {"breadth": 4, "depth": 2, "concurrency": 4}
+
+    # complexity=10 → L10 极复杂 (breadth=5, depth=3, concurrency=8)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 10, "reason": "极复杂"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("极复杂查询")
+    assert params == {"breadth": 5, "depth": 3, "concurrency": 8}
 
 
 # ========== citation 标注差异 (功能 7) ==========
@@ -572,9 +581,9 @@ async def test_max_sub_queries_guard_not_triggered(
     researcher: DeepResearcher,
     settings: Settings,
 ) -> None:
-    """测试 max_sub_queries 守卫: breadth=4, depth=2 不触发守卫 (12 < 28).
+    """测试 max_sub_queries 守卫: breadth=4, depth=2 不触发守卫 (12 < 42).
 
-    递归树: 4 + 4*2 = 12 < 28 (deep_research_max_sub_queries), 不降级.
+    递归树: 4 + 4*2 = 12 < 42 (deep_research_max_sub_queries, V4-P2-04), 不降级.
     """
     call_count = 0
 
@@ -603,5 +612,5 @@ async def test_max_sub_queries_guard_not_triggered(
     assert len(result["children"]) > 0
     # 调用次数: depth 0 (4 次) + depth 1 (4 个递归 × next_breadth=max(2, 4//2)=2 = 8 次) = 12 次
     assert call_count == 12
-    # 验证 max_sub_queries 默认值
-    assert settings.deep_research_max_sub_queries == 28
+    # 验证 max_sub_queries 默认值 (V4-P2-04: 28 → 42)
+    assert settings.deep_research_max_sub_queries == 42

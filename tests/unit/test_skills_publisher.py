@@ -171,8 +171,7 @@ def test_to_json_is_serializable(publisher: Publisher) -> None:
 
 
 def test_to_docx_returns_bytes(publisher: Publisher) -> None:
-    """测试 DOCX 返回字节对象 (需 python-docx, 否则跳过)."""
-    pytest.importorskip("docx")
+    """测试 DOCX 返回字节对象."""
     docx_bytes = publisher._to_docx("# 标题\n正文", title="测试")
     assert isinstance(docx_bytes, bytes)
     assert len(docx_bytes) > 0
@@ -200,7 +199,6 @@ def test_to_docx_failure_returns_empty(publisher: Publisher) -> None:
 
 def test_md_to_html_contains_inline_css(publisher: Publisher) -> None:
     """测试 HTML 输出含内联 CSS (<style> 标签)."""
-    pytest.importorskip("mistune")
     html = publisher._md_to_html("# 标题\n正文")
     assert "<style>" in html
     assert "font-family" in html
@@ -209,7 +207,6 @@ def test_md_to_html_contains_inline_css(publisher: Publisher) -> None:
 
 def test_md_to_html_renders_markdown(publisher: Publisher) -> None:
     """测试 mistune 渲染 Markdown (H1 → <h1>)."""
-    pytest.importorskip("mistune")
     html = publisher._md_to_html("# 我的标题\n\n一段正文")
     assert "<h1>" in html
     assert "我的标题" in html
@@ -218,22 +215,101 @@ def test_md_to_html_renders_markdown(publisher: Publisher) -> None:
 
 def test_md_to_html_renders_list(publisher: Publisher) -> None:
     """测试 mistune 渲染列表."""
-    pytest.importorskip("mistune")
     html = publisher._md_to_html("- 项一\n- 项二")
     assert "<ul>" in html
     assert "<li>" in html
 
 
 def test_md_to_html_fallback_without_mistune(publisher: Publisher) -> None:
-    """测试 mistune 未安装时降级为 <pre> 包裹的纯文本 (不抛异常)."""
+    """测试 mistune 未安装时降级为 <pre> 包裹的纯文本 (不抛异常).
+
+    用 sys.modules mock 模拟 mistune 不可用, 确保测试不依赖环境.
+    """
     import sys
 
-    if "mistune" in sys.modules:
-        pytest.skip("mistune 已安装, 跳过降级测试")
-    html = publisher._md_to_html("# 标题\n正文")
-    assert "<html>" in html
-    assert "<pre>" in html
-    assert "# 标题" in html
+    original_mistune = sys.modules.get("mistune")
+    sys.modules["mistune"] = None  # type: ignore[assignment]
+    try:
+        html = publisher._md_to_html("# 标题\n正文")
+        assert "<html>" in html
+        assert "<pre>" in html
+        assert "# 标题" in html
+    finally:
+        if original_mistune is not None:
+            sys.modules["mistune"] = original_mistune
+        else:
+            sys.modules.pop("mistune", None)
+
+
+def test_md_to_html_renders_table(publisher: Publisher) -> None:
+    """测试 mistune table 插件渲染 Markdown 表格为 <table>."""
+    md = "| 列A | 列B |\n| :--- | :--- |\n| 1 | 2 |\n| 3 | 4 |"
+    html = publisher._md_to_html(md)
+    assert "<table>" in html
+    assert "<thead>" in html
+    assert "<tbody>" in html
+    assert "</td>" in html
+    assert "列A" in html
+    assert "列B" in html
+
+
+def test_md_to_html_table_not_plain_text(publisher: Publisher) -> None:
+    """测试表格不被渲染为纯文本段落 (回归测试)."""
+    md = "| 名称 | 数值 |\n| :--- | :--- |\n| alpha | 100 |"
+    html = publisher._md_to_html(md)
+    # 不应出现把 | 当作普通文本的 <p>| 名称...</p>
+    assert "<table>" in html
+    assert "<p>| 名称" not in html
+
+
+# ========== _to_docx 表格 ==========
+
+
+def test_to_docx_contains_table(publisher: Publisher) -> None:
+    """测试 DOCX 输出包含表格对象."""
+    import io
+
+    from docx import Document
+
+    md = "# 标题\n\n| 列A | 列B |\n| :--- | :--- |\n| 1 | 2 |\n"
+    docx_bytes = publisher._to_docx(md, title="测试")
+    assert isinstance(docx_bytes, bytes)
+    doc = Document(io.BytesIO(docx_bytes))
+    tables = doc.tables
+    assert len(tables) == 1
+    assert len(tables[0].rows) == 2  # header + 1 data row
+    assert len(tables[0].columns) == 2
+    assert tables[0].rows[0].cells[0].text == "列A"
+    assert tables[0].rows[0].cells[1].text == "列B"
+    assert tables[0].rows[1].cells[0].text == "1"
+    assert tables[0].rows[1].cells[1].text == "2"
+
+
+def test_to_docx_table_bold_in_cell(publisher: Publisher) -> None:
+    """测试 DOCX 表格单元格内联 **bold** 粗体."""
+    import io
+
+    from docx import Document
+
+    md = "| 名称 | 值 |\n| :--- | :--- |\n| **重点** | 100 |\n"
+    docx_bytes = publisher._to_docx(md, title="t")
+    doc = Document(io.BytesIO(docx_bytes))
+    cell = doc.tables[0].rows[1].cells[0]
+    # cell.text 去除 markdown 标记
+    assert cell.text == "重点"
+    # 至少一个 run 应为 bold
+    assert any(r.bold for p in cell.paragraphs for r in (p.runs or []))
+
+
+def test_is_md_table_separator(publisher: Publisher) -> None:
+    """测试表格分隔行检测."""
+    assert publisher._is_md_table_separator("| :--- | :--- |")
+    assert publisher._is_md_table_separator("| --- | --- |")
+    assert publisher._is_md_table_separator("|:---|:---|")
+    assert publisher._is_md_table_separator("| :---: | ---: | :--- |")
+    assert not publisher._is_md_table_separator("| 名称 | 值 |")
+    assert not publisher._is_md_table_separator("普通文本")
+    assert not publisher._is_md_table_separator("| abc | def |")
 
 
 # ========== 辅助函数 ==========

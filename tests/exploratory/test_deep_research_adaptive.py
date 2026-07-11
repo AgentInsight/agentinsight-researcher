@@ -179,14 +179,14 @@ async def test_adaptive_disabled_state_overrides_settings(
 async def test_max_sub_queries_guard_triggers_degradation() -> None:
     """测试 max_sub_queries 守卫触发降级: breadth=10/depth=3 → 降级到 depth=1.
 
-    递归树规模: 10 * (1 + 5 + 25) = 310 > 28 (max_sub_queries)
+    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (max_sub_queries, V4-P2-04 从 28 提升到 42)
     → 降级到 depth=1, 仅 10 个子查询, 不递归.
     """
     settings = Settings(
         _env_file=None,
         mcp_strategy="disabled",
         deep_research_adaptive=False,
-        deep_research_max_sub_queries=28,
+        deep_research_max_sub_queries=42,  # V4-P2-04: 28 → 42
     )
 
     mock_llm = MagicMock()
@@ -223,7 +223,7 @@ async def test_max_sub_queries_guard_triggers_degradation() -> None:
     researcher._research_sub_query = mock_research_sub_query  # type: ignore[method-assign]
     researcher._generate_sub_queries = mock_generate_sub_queries  # type: ignore[method-assign]
 
-    # breadth=10, depth=3 → 310 > 28, 降级到 depth=1
+    # breadth=10, depth=3 → 310 > 42, 降级到 depth=1
     result = await researcher.research("guard test", breadth=10, depth=3)
 
     # 降级到 depth=1: 不递归, children 为空
@@ -243,13 +243,13 @@ async def test_adaptive_enabled_with_complex_query() -> None:
     """测试自适应深度开启 + 复杂查询 → _assess_complexity 返回 depth=3.
 
     验证自适应深度机制: 复杂查询 (complexity=5) 映射到 depth=3,
-    但受 max_sub_queries 守卫限制 (4+8+16=28 = max_sub_queries, 刚好不触发降级).
+    递归树 4+8+16=28 < max_sub_queries=42, 守卫不触发降级.
     """
     settings = Settings(
         _env_file=None,
         mcp_strategy="disabled",
         deep_research_adaptive=True,
-        deep_research_max_sub_queries=28,
+        deep_research_max_sub_queries=42,  # V4-P2-04: 28 → 42
     )
 
     mock_llm = MagicMock()
@@ -295,7 +295,7 @@ async def test_adaptive_enabled_with_complex_query() -> None:
     # 不传 breadth/depth → 触发自适应 → _assess_complexity 返回 breadth=4/depth=3
     result = await researcher.research("complex query")
 
-    # depth=3: 递归树 4+8+16=28 = max_sub_queries, 守卫不触发
+    # depth=3: 递归树 4+8+16=28 < max_sub_queries=42, 守卫不触发
     # children 非空 (depth=3 递归)
     assert len(result["children"]) > 0
     # 调用次数: 4 (depth 0) + 8 (depth 1) + 16 (depth 2) = 28

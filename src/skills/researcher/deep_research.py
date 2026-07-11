@@ -28,6 +28,80 @@ from src.skills.researcher.searchers import (
 
 logger = logging.getLogger(__name__)
 
+# V4-P2-04: 10 级复杂度评估提示词 (对标 GPTR RFC adaptive-deep-research.md 4 维度评估)
+_COMPLEXITY_PROMPT = """你是研究复杂度评估专家. 请评估以下查询的研究复杂度 (1-10), 返回严格 JSON.
+
+## 评估维度 (每维度 1-10 分)
+
+1. **scope (研究广度)**: 涉及的领域/实体/主题数量
+   - 1-3: 单一实体/概念
+   - 4-6: 2-3 个实体对比
+   - 7-10: 跨多个领域/行业
+
+2. **depth (研究深度)**: 分析层次与逻辑链长度
+   - 1-3: 事实陈述/定义
+   - 4-6: 优缺点分析/多维度对比
+   - 7-10: 因果链/战略推演/长期预测
+
+3. **multidisciplinary (跨学科)**: 涉及不同学科/行业数量
+   - 1-3: 单一学科
+   - 4-6: 2-3 个学科交叉
+   - 7-10: 4+ 学科综合
+
+4. **temporal (时效性)**: 是否需要最新数据/趋势预测
+   - 1-3: 无时效要求 (定义/历史)
+   - 4-6: 需要近期数据 (1 年内)
+   - 7-10: 需要预测/前瞻 (未来趋势)
+
+## 复杂度分级参考 (Rubric)
+
+| 级别 | 名称 | 特征 | 示例 |
+|------|------|------|------|
+| L1 | 单一事实 | 事实型/定义型, 单一答案 | "什么是 RAG" |
+| L2 | 事实+示例 | 定义+举例/列表 | "RAG 的主要组件有哪些" |
+| L3 | 简单对比 | 2-3 个实体横向对比 | "React 和 Vue 哪个更好" |
+| L4 | 多维度分析 | 多维度深入对比/优缺点 | "对比 React 和 Vue 的优缺点" |
+| L5 | 技术深度 | 单一领域技术深度分析 | "RAG 在企业落地的技术挑战" |
+| L6 | 行业调研 | 单一行业现状/趋势 | "2026 年 AI Agent 行业现状" |
+| L7 | 综合研究 | 跨维度综合性研究 | "分析 2026 年 AI Agent 行业趋势与竞争格局" |
+| L8 | 跨领域 | 跨 2-3 个领域综合 | "AI Agent 对金融/医疗/教育的影响" |
+| L9 | 战略级 | 战略规划/决策支持 | "基于 AI Agent 趋势制定 2026-2028 技术战略" |
+| L10 | 极复杂 | 跨学科/政策/伦理/长期影响 | "AI Agent 对全球经济长期影响 (技术/市场/政策/伦理)" |
+
+## 输出格式 (严格 JSON, 不要 markdown 代码块)
+
+{{
+  "complexity": <1-10 整数>,
+  "dimensions": {{
+    "scope": <1-10>,
+    "depth": <1-10>,
+    "multidisciplinary": <1-10>,
+    "temporal": <1-10>
+  }},
+  "reasoning": "<评估推理过程, 50-100 字>",
+  "suggested_domains": ["<建议研究维度1>", "<建议研究维度2>"]
+}}
+
+## 查询: {query}
+
+仅返回 JSON:"""
+
+# V4-P2-04: 10 级复杂度 → breadth/depth/concurrency 映射表
+# 子查询数 = breadth × (1 + next_breadth + next_breadth² + ...), next_breadth = max(2, breadth//2)
+# max_sub_queries=42 守卫: L9-L10 (35 子查询) 不触发降级
+_COMPLEXITY_MAP: dict[int, dict[str, int]] = {
+    1: {"breadth": 3, "depth": 1, "concurrency": 3},  # 3 子查询
+    2: {"breadth": 3, "depth": 1, "concurrency": 3},  # 3 子查询
+    3: {"breadth": 4, "depth": 1, "concurrency": 4},  # 4 子查询
+    4: {"breadth": 4, "depth": 2, "concurrency": 4},  # 4+8=12 子查询
+    5: {"breadth": 4, "depth": 2, "concurrency": 4},  # 4+8=12 子查询
+    6: {"breadth": 4, "depth": 2, "concurrency": 5},  # 4+8=12 子查询
+    7: {"breadth": 4, "depth": 3, "concurrency": 6},  # 4+8+16=28 子查询
+    8: {"breadth": 4, "depth": 3, "concurrency": 6},  # 4+8+16=28 子查询
+    9: {"breadth": 5, "depth": 3, "concurrency": 8},  # 5+10+20=35 子查询
+    10: {"breadth": 5, "depth": 3, "concurrency": 8},  # 5+10+20=35 子查询
+}
+
 
 class DeepResearcher:
     """递归深度研究器 (breadth×depth 树探索).
@@ -252,32 +326,35 @@ class DeepResearcher:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, int]:
-        """评估查询复杂度, 返回自适应参数.
+        """评估查询复杂度, 返回自适应参数 (V4-P2-04: 10 级 + 4 维度).
 
-        用 LLMTier.FAST 评估查询复杂度 (1-5), 映射到 breadth/depth/concurrency:
-            1-2 (简单): breadth=4, depth=1, concurrency=4 (depth=1 安全网, 不递归)
-            3   (中等): breadth=4, depth=2, concurrency=4 (4+8=12 子查询)
-            4-5 (复杂): breadth=4, depth=3, concurrency=6 (4+8+16=28, 受 max_sub_queries 守卫)
+        用 LLMTier.SMART 评估查询复杂度 (1-10), 映射到 breadth/depth/concurrency:
+            L1-L2  (简单):   breadth=3, depth=1, concurrency=3 (3 子查询, 单层)
+            L3     (简单+):  breadth=4, depth=1, concurrency=4 (4 子查询, 单层)
+            L4-L5  (中等):   breadth=4, depth=2, concurrency=4 (4+8=12 子查询)
+            L6     (中等+):  breadth=4, depth=2, concurrency=5 (4+8=12, 高并发)
+            L7-L8  (复杂):   breadth=4, depth=3, concurrency=6 (4+8+16=28 子查询)
+            L9-L10 (极复杂): breadth=5, depth=3, concurrency=8 (5+10+20=35 子查询)
 
-        LLM 失败时返回 depth=1 安全网 (避免 LLM 失败时触发深度递归).
+        4 维度评估 (对标 GPTR RFC adaptive-deep-research.md):
+            - scope (研究广度): 涉及领域/实体数量
+            - depth (研究深度): 分析层次/逻辑链长度
+            - multidisciplinary (跨学科): 涉及不同学科/行业数量
+            - temporal (时效性): 是否需要最新数据/趋势预测
+
+        LLM 失败时返回 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4, 12 子查询),
+        确保失败时仍能给出中等质量研究结果, 而非最简陋的单层研究.
         """
-        # 默认参数兜底 (LLM 失败时使用): depth=1 安全网
+        # V4-P2-04: 默认参数兜底 (LLM 失败时使用 L4-L5 中等参数)
+        # 理由: 大多数查询本身为中等复杂度, 用 L4-L5 (12 子查询) 比 depth=1 (4 子查询)
+        # 更贴合实际分布, 失败时仍能给出中等质量研究结果.
         default_params: dict[str, int] = {
-            "breadth": self.settings.deep_research_breadth,
-            "depth": 1,
-            "concurrency": self.settings.deep_research_concurrency,
+            "breadth": 4,
+            "depth": 2,  # L4-L5 中等参数: 4+8=12 子查询
+            "concurrency": 4,
         }
 
-        prompt = (
-            "评估以下查询的研究复杂度 (1-5), 返回 JSON: "
-            '{"complexity": 1-5, "reason": "..."}\n'
-            "复杂度参考:\n"
-            "  1-2: 单一事实/简单定义 (如 '什么是 RAG')\n"
-            "  3: 多维度分析 (如 '对比 React 和 Vue 的优缺点')\n"
-            "  4-5: 综合性深度研究 (如 '分析 2026 年 AI Agent 行业趋势与竞争格局')\n\n"
-            f"查询: {query}\n\n"
-            "仅返回 JSON:"
-        )
+        prompt = _COMPLEXITY_PROMPT.format(query=query)
         messages = [{"role": "user", "content": prompt}]
 
         try:
@@ -285,7 +362,7 @@ class DeepResearcher:
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.0,
-                max_tokens=200,
+                max_tokens=500,  # V4-P2-04: 500 token 容错空间 (4 维度 + reasoning + domains)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="deep-research-complexity",
@@ -300,32 +377,34 @@ class DeepResearcher:
                 return default_params
 
             complexity = parsed.get("complexity")
-            if not isinstance(complexity, int) or complexity < 1 or complexity > 5:
+            if not isinstance(complexity, int) or complexity < 1 or complexity > 10:
                 logger.warning(
-                    "复杂度评分非法 (%r), 降级默认值, query=%s",
+                    "复杂度评分非法 (%r, 应为 1-10 整数), 降级默认值, query=%s",
                     complexity,
                     query[:50],
                 )
                 return default_params
 
-            # 复杂度映射表 (对标 GPTR breadth=4 默认, 功能 11)
-            if complexity <= 2:
-                # 简单查询: depth=1 安全网 (单层, 不递归)
-                params = {"breadth": 4, "depth": 1, "concurrency": 4}
-            elif complexity == 3:
-                # 中等查询: depth=2 (4+8=12 子查询)
-                params = {"breadth": 4, "depth": 2, "concurrency": 4}
-            else:  # complexity 4-5
-                # 复杂查询: depth=3 (4+8+16=28 子查询, 受 max_sub_queries 守卫)
-                params = {"breadth": 4, "depth": 3, "concurrency": 6}
+            # V4-P2-04: 从映射表获取参数 (clamped to 1-10)
+            complexity = max(1, min(10, complexity))
+            params = _COMPLEXITY_MAP.get(complexity, _COMPLEXITY_MAP[5])  # 兜底用 L5
 
+            # 记录维度评分 (供日志/trace 分析, 不影响路由)
+            dimensions = parsed.get("dimensions", {})
+            reasoning = parsed.get("reasoning", "")
             logger.info(
-                "自适应深度评估: complexity=%d → breadth=%d depth=%d concurrency=%d (query=%s)",
+                "自适应深度评估: complexity=L%d (scope=%s depth=%s multi=%s temporal=%s) "
+                "→ breadth=%d depth=%d concurrency=%d (query=%s, reasoning=%s)",
                 complexity,
+                dimensions.get("scope", "?"),
+                dimensions.get("depth", "?"),
+                dimensions.get("multidisciplinary", "?"),
+                dimensions.get("temporal", "?"),
                 params["breadth"],
                 params["depth"],
                 params["concurrency"],
                 query[:50],
+                reasoning[:80],
             )
             return params
         except Exception as e:  # noqa: BLE001

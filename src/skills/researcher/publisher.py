@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from src.config.settings import Settings, get_settings
@@ -103,7 +104,7 @@ class Publisher:
     def _to_docx(self, content: str, *, title: str = "") -> bytes:
         """Markdown → DOCX (python-docx).
 
-        简易 Markdown 解析 (标题/段落/列表), 失败返回空 bytes.
+        简易 Markdown 解析 (标题/段落/列表/表格), 失败返回空 bytes.
         中文字体通过修改 Normal 样式 + eastAsia 属性设置, 确保 Word/WPS 正确显示.
         """
         try:
@@ -132,10 +133,28 @@ class Publisher:
 
             if title:
                 doc.add_heading(title, level=0)
-            # 简易 Markdown 解析 (标题/段落/列表)
-            for line in content.split("\n"):
-                line = line.rstrip()
+            # 简易 Markdown 解析 (标题/段落/列表/表格)
+            lines = content.split("\n")
+            i = 0
+            while i < len(lines):
+                line = lines[i].rstrip()
                 if not line:
+                    i += 1
+                    continue
+                # 表格检测: 当前行以 | 开头, 且下一行是分隔行 (| :--- | :--- |)
+                if (
+                    line.lstrip().startswith("|")
+                    and i + 1 < len(lines)
+                    and self._is_md_table_separator(lines[i + 1])
+                ):
+                    table_lines = [line]
+                    i += 1
+                    table_lines.append(lines[i])  # 分隔行
+                    i += 1
+                    while i < len(lines) and lines[i].lstrip().startswith("|"):
+                        table_lines.append(lines[i])
+                        i += 1
+                    self._add_docx_table(doc, table_lines)
                     continue
                 if line.startswith("# "):
                     doc.add_heading(line[2:], level=1)
@@ -151,12 +170,72 @@ class Publisher:
                     doc.add_paragraph(text, style="List Number")
                 else:
                     doc.add_paragraph(line)
+                i += 1
             buf = io.BytesIO()
             doc.save(buf)
             return buf.getvalue()
         except Exception as e:  # noqa: BLE001
             logger.warning("DOCX 生成失败: %s", e)
             return b""
+
+    @staticmethod
+    def _is_md_table_separator(line: str) -> bool:
+        """判断一行是否为 Markdown 表格分隔行 (如 | :--- | :--- |)."""
+        import re
+
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            return False
+        inner = stripped.strip("|")
+        cells = inner.split("|")
+        if not cells:
+            return False
+        for cell in cells:
+            c = cell.strip()
+            if not c or not re.fullmatch(r":?-+:?", c):
+                return False
+        return True
+
+    @staticmethod
+    def _parse_md_table_row(line: str) -> list[str]:
+        """解析 Markdown 表格行为单元格列表."""
+        stripped = line.strip()
+        inner = stripped.strip("|")
+        return [cell.strip() for cell in inner.split("|")]
+
+    @staticmethod
+    def _set_docx_cell_text(cell, text: str, *, bold: bool = False) -> None:
+        """设置单元格文本, 支持内联 **bold** 粗体."""
+        cell.text = ""
+        para = cell.paragraphs[0]
+        parts = re.split(r"(\*\*.+?\*\*)", text)
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith("**") and part.endswith("**"):
+                run = para.add_run(part[2:-2])
+                run.bold = True
+            else:
+                run = para.add_run(part)
+                if bold:
+                    run.bold = True
+
+    def _add_docx_table(self, doc, table_lines: list[str]) -> None:
+        """将 Markdown 表格行列表添加到 python-docx Document."""
+        header_cells = self._parse_md_table_row(table_lines[0])
+        data_rows = [self._parse_md_table_row(line) for line in table_lines[2:]]
+        num_cols = len(header_cells)
+        if num_cols == 0:
+            return
+        table = doc.add_table(rows=1 + len(data_rows), cols=num_cols)
+        table.style = "Table Grid"
+        for j, cell_text in enumerate(header_cells):
+            if j < num_cols:
+                self._set_docx_cell_text(table.rows[0].cells[j], cell_text, bold=True)
+        for row_idx, row_cells in enumerate(data_rows):
+            for j, cell_text in enumerate(row_cells):
+                if j < num_cols:
+                    self._set_docx_cell_text(table.rows[row_idx + 1].cells[j], cell_text)
 
     def _to_json(
         self,
@@ -188,7 +267,7 @@ class Publisher:
         try:
             import mistune
 
-            markdown = mistune.create_markdown()
+            markdown = mistune.create_markdown(plugins=["table"])
             body = markdown(md)
 
             # HTML 模板 (内联 CSS, 离线友好)

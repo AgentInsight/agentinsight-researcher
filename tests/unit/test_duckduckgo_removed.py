@@ -118,8 +118,6 @@ def test_duckduckgo_file_still_exists() -> None:
 
 def test_duckduckgo_file_contains_class_definition() -> None:
     """duckduckgo.py 仍含 DuckDuckGoSearcher 类定义 (代码完整保留)."""
-    if not _DUCKDUCKGO_FILE.exists():
-        pytest.skip("duckduckgo.py 不存在")
     content = _DUCKDUCKGO_FILE.read_text(encoding="utf-8")
     assert "class DuckDuckGoSearcher" in content, (
         "duckduckgo.py 应仍含 'class DuckDuckGoSearcher' 定义 (代码完整保留)"
@@ -143,8 +141,6 @@ def test_free_quota_map_retains_duckduckgo() -> None:
 
 def test_duckduckgo_import_commented_out() -> None:
     """__init__.py 中 DuckDuckGoSearcher import 已注释 (不执行 import)."""
-    if not _SEARCHERS_INIT.exists():
-        pytest.skip("searchers/__init__.py 不存在")
     content = _SEARCHERS_INIT.read_text(encoding="utf-8")
     # 查找注释的 import 行 (以 # 开头, 含 DuckDuckGoSearcher)
     import_lines = [
@@ -160,8 +156,6 @@ def test_duckduckgo_import_commented_out() -> None:
 
 def test_duckduckgo_registry_block_commented_out() -> None:
     """__init__.py 中 duckduckgo 注册块已注释 (_SEARCHER_REGISTRY["duckduckgo"] = ...)."""
-    if not _SEARCHERS_INIT.exists():
-        pytest.skip("searchers/__init__.py 不存在")
     content = _SEARCHERS_INIT.read_text(encoding="utf-8")
     # 查找注册行 (含 _SEARCHER_REGISTRY["duckduckgo"])
     registry_lines = [
@@ -177,8 +171,6 @@ def test_duckduckgo_registry_block_commented_out() -> None:
 
 def test_searchers_init_contains_replacement_comment() -> None:
     """__init__.py 含 DuckDuckGo 已被 SearXNG 替代的说明注释."""
-    if not _SEARCHERS_INIT.exists():
-        pytest.skip("searchers/__init__.py 不存在")
     content = _SEARCHERS_INIT.read_text(encoding="utf-8")
     # 应含替代说明 (中文或英文)
     assert ("SearXNG" in content and "替代" in content) or "replaced" in content.lower(), (
@@ -196,8 +188,6 @@ def test_no_active_duckduckgo_calls_in_source() -> None:
     duckduckgo searcher 的活跃调用 (注释行除外).
     """
     src_dir = _PROJECT_ROOT / "src"
-    if not src_dir.exists():
-        pytest.skip("src/ 目录不存在")
     active_calls: list[str] = []
     for py_file in src_dir.rglob("*.py"):
         try:

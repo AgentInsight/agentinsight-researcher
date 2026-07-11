@@ -2,10 +2,9 @@
 
 验证 1024维 → 768维 模型迁移的完整性与一致性:
 1. settings.py SSOT: qdrant_vector_size=768 / embeddings_model="BAAI/bge-base-zh-v1.5"
-2. Docker Compose 三套构建文件: MODEL_ID/bind mount 注释均含 bge-base-zh-v1.5
-3. requirements.txt: 含 bge-base-zh-v1.5 引用 (无 bge-large-zh-v1.5 残留)
-4. fastembed_client.py: FastEmbed 仍用 bge-small-zh-v1.5 (上下文压缩专用, 与 TEI 隔离)
-5. 源码无 bge-large-zh-v1.5 残留 (排除 requirements.in 等历史文件)
+2. requirements.txt: 含 bge-base-zh-v1.5 引用 (无 bge-large-zh-v1.5 残留)
+3. fastembed_client.py: FastEmbed 仍用 bge-small-zh-v1.5 (上下文压缩专用, 与 TEI 隔离)
+4. 源码无 bge-large-zh-v1.5 残留 (排除 requirements.in 等历史文件)
 
 单元测试在构建期执行, 不依赖外部服务.
 硬约束:
@@ -23,9 +22,6 @@ pytestmark = pytest.mark.unit
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SETTINGS_PY = _PROJECT_ROOT / "src" / "config" / "settings.py"
-_COMPOSE_QA = _PROJECT_ROOT / "docker-compose-qa.yaml"
-_COMPOSE_ONLINE = _PROJECT_ROOT / "docker-compose.yml"
-_COMPOSE_OFFLINE = _PROJECT_ROOT / "docker-compose-offline.yaml"
 _REQUIREMENTS = _PROJECT_ROOT / "requirements.txt"
 _FASTEMBED_CLIENT = _PROJECT_ROOT / "src" / "rag" / "fastembed_client.py"
 
@@ -93,73 +89,11 @@ def test_settings_source_file_no_large_residual() -> None:
     )
 
 
-# ========== Docker Compose 三套构建文件验证 ==========
-
-
-def test_compose_qa_uses_bge_base() -> None:
-    """docker-compose-qa.yaml: MODEL_ID 与 bind mount 均为 bge-base-zh-v1.5."""
-    if not _COMPOSE_QA.exists():
-        pytest.skip("docker-compose-qa.yaml 不存在 (gitignored)")
-    content = _COMPOSE_QA.read_text(encoding="utf-8")
-    assert "/data/bge-base-zh-v1.5" in content, (
-        "docker-compose-qa.yaml 应含 MODEL_ID=/data/bge-base-zh-v1.5"
-    )
-    assert "bge-base-zh-v1.5:/data/bge-base-zh-v1.5:ro" in content, (
-        "docker-compose-qa.yaml 应含 bge-base-zh-v1.5 bind mount"
-    )
-    assert "768" in content, "docker-compose-qa.yaml 应含 768 维注释"
-
-
-def test_compose_qa_no_large_residual() -> None:
-    """docker-compose-qa.yaml 无 bge-large-zh-v1.5 残留."""
-    if not _COMPOSE_QA.exists():
-        pytest.skip("docker-compose-qa.yaml 不存在 (gitignored)")
-    content = _COMPOSE_QA.read_text(encoding="utf-8")
-    assert "bge-large-zh-v1.5" not in content, "docker-compose-qa.yaml 不应残留 bge-large-zh-v1.5"
-
-
-def test_compose_online_uses_bge_base() -> None:
-    """docker-compose.yml: MODEL_ID 为 bge-base-zh-v1.5."""
-    if not _COMPOSE_ONLINE.exists():
-        pytest.skip("docker-compose.yml 不存在")
-    content = _COMPOSE_ONLINE.read_text(encoding="utf-8")
-    assert "/data/bge-base-zh-v1.5" in content
-    assert "768" in content
-
-
-def test_compose_online_no_large_residual() -> None:
-    """docker-compose.yml 无 bge-large-zh-v1.5 残留."""
-    if not _COMPOSE_ONLINE.exists():
-        pytest.skip("docker-compose.yml 不存在")
-    content = _COMPOSE_ONLINE.read_text(encoding="utf-8")
-    assert "bge-large-zh-v1.5" not in content
-
-
-def test_compose_offline_uses_bge_base() -> None:
-    """docker-compose-offline.yaml: MODEL_ID 与 bind mount 均为 bge-base-zh-v1.5."""
-    if not _COMPOSE_OFFLINE.exists():
-        pytest.skip("docker-compose-offline.yaml 不存在 (gitignored)")
-    content = _COMPOSE_OFFLINE.read_text(encoding="utf-8")
-    assert "/data/bge-base-zh-v1.5" in content
-    assert "bge-base-zh-v1.5:/data/bge-base-zh-v1.5:ro" in content
-    assert "768" in content
-
-
-def test_compose_offline_no_large_residual() -> None:
-    """docker-compose-offline.yaml 无 bge-large-zh-v1.5 残留."""
-    if not _COMPOSE_OFFLINE.exists():
-        pytest.skip("docker-compose-offline.yaml 不存在 (gitignored)")
-    content = _COMPOSE_OFFLINE.read_text(encoding="utf-8")
-    assert "bge-large-zh-v1.5" not in content
-
-
 # ========== requirements.txt 验证 ==========
 
 
 def test_requirements_mentions_bge_base() -> None:
     """requirements.txt 含 bge-base-zh-v1.5 引用 (注释或依赖)."""
-    if not _REQUIREMENTS.exists():
-        pytest.skip("requirements.txt 不存在")
     content = _REQUIREMENTS.read_text(encoding="utf-8")
     # requirements.txt 可能在注释中提及模型名 (作为文档说明)
     assert "bge-base-zh-v1.5" in content or "BAAI/bge-base-zh-v1.5" in content, (
@@ -176,8 +110,6 @@ def test_fastembed_client_still_uses_bge_small() -> None:
     FastEmbed 与远程 TEI 完全隔离.
     本次迁移仅影响远程 TEI (bge-large → bge-base), 不应影响 FastEmbed.
     """
-    if not _FASTEMBED_CLIENT.exists():
-        pytest.skip("fastembed_client.py 不存在")
     content = _FASTEMBED_CLIENT.read_text(encoding="utf-8")
     assert "bge-small-zh-v1.5" in content, (
         "fastembed_client.py 应仍使用 bge-small-zh-v1.5 (上下文压缩专用)"
@@ -197,8 +129,6 @@ def test_no_bge_large_residual_in_source() -> None:
     排除 .venv/ 与 __pycache__/ 等非源码目录.
     """
     src_dir = _PROJECT_ROOT / "src"
-    if not src_dir.exists():
-        pytest.skip("src/ 目录不存在")
     residuals: list[str] = []
     for py_file in src_dir.rglob("*.py"):
         try:

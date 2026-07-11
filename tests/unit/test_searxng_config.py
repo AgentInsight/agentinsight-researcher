@@ -65,13 +65,9 @@ _FORBIDDEN_ENGINES = {
 
 
 def _load_searxng_settings() -> dict:
-    """加载 SearXNG settings.yml, 文件不存在时跳过测试."""
-    if not _SEARXNG_SETTINGS.exists():
-        pytest.skip("config/searxng/settings.yml 不存在")
-    try:
-        import yaml
-    except ImportError:
-        pytest.skip("PyYAML 未安装, 跳过 YAML 结构化检查")
+    """加载 SearXNG settings.yml."""
+    import yaml
+
     with _SEARXNG_SETTINGS.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
 

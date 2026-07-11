@@ -87,8 +87,8 @@ def test_deep_research_settings_readable() -> None:
     assert settings.deep_research_concurrency == 4
     # 自适应深度默认开启
     assert settings.deep_research_adaptive is True
-    # max_sub_queries 守卫: 28 (depth=3 时 4+8+16=28)
-    assert settings.deep_research_max_sub_queries == 28
+    # max_sub_queries 守卫: 42 (V4-P2-04, 支持 L9-L10: 5+10+20=35)
+    assert settings.deep_research_max_sub_queries == 42
     # 每子查询 learnings 数量上限
     assert settings.deep_research_num_learnings == 3
     # reasoning_effort 默认 high

@@ -329,7 +329,8 @@ class Settings(BaseSettings):
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
     deep_research_adaptive: bool = True  # 自适应深度开关 (默认开启, 自适应深度机制)
-    deep_research_max_sub_queries: int = 28  # 递归树硬上限守卫 (depth=3 时 4+8+16=28)
+    # V4-P2-04: 提升至 42, 支持 L9-L10 (breadth=5/depth=3, 5+10+20=35)
+    deep_research_max_sub_queries: int = 42  # 递归树硬上限守卫 (L9-L10: 5+10+20=35)
     deep_research_num_learnings: int = 3  # 每子查询提取 learnings 数量上限 (功能 6)
     deep_research_reasoning_effort: str = "high"  # 规划/提取阶段推理强度 (功能 10)
     curate_sources: bool = True

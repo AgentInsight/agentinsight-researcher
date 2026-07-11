@@ -223,56 +223,155 @@ async def test_deep_researcher_visited_urls_dedup(
     assert unique_url_2 in researcher._visited_urls
 
 
-# ========== _assess_complexity() 自适应复杂度 (对标 GPTR breadth=4 默认) ==========
+# ========== _assess_complexity() 自适应复杂度 (V4-P2-04: 10 级 + 4 维度) ==========
 
 
 @pytest.mark.asyncio
 async def test_deep_researcher_adaptive_complexity(
     researcher: DeepResearcher,
     mock_llm: MagicMock,
-    settings: Settings,
 ) -> None:
-    """测试 _assess_complexity 按复杂度 (1-5) 返回自适应参数.
+    """测试 _assess_complexity 按复杂度 (1-10) 返回自适应参数.
 
-    映射表 (功能 11 + 自适应深度, 对标 GPTR breadth=4 默认):
-    - complexity 1-2 (简单): breadth=4, depth=1, concurrency=4 (depth=1 安全网)
-    - complexity 3   (中等): breadth=4, depth=2, concurrency=4 (4+8=12 子查询)
-    - complexity 4-5 (复杂): breadth=4, depth=3, concurrency=6 (4+8+16=28 子查询)
+    V4-P2-04: 10 级复杂度映射表:
+    - L1-L2  (简单):   breadth=3, depth=1, concurrency=3
+    - L3     (简单+):  breadth=4, depth=1, concurrency=4
+    - L4-L5  (中等):   breadth=4, depth=2, concurrency=4
+    - L6     (中等+):  breadth=4, depth=2, concurrency=5
+    - L7-L8  (复杂):   breadth=4, depth=3, concurrency=6
+    - L9-L10 (极复杂): breadth=5, depth=3, concurrency=8
 
-    LLM 失败时返回 depth=1 安全网 (避免 LLM 失败时触发深度递归).
+    LLM 失败时降级 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4).
     """
-    # 简单查询 (complexity 2)
+    # L1: 单一事实
     mock_llm.achat.return_value = LLMResponse(
-        content='{"complexity": 2, "reason": "单一事实查询"}',
+        content='{"complexity": 1, "dimensions": {"scope": 1, "depth": 1, '
+        '"multidisciplinary": 1, "temporal": 1}, "reasoning": "单一事实查询"}',
         model="test",
     )
     params = await researcher._assess_complexity("什么是 RAG")
-    assert params == {"breadth": 4, "depth": 1, "concurrency": 4}
+    assert params == {"breadth": 3, "depth": 1, "concurrency": 3}
 
-    # 中等查询 (complexity 3)
+    # L4: 多维度分析
     mock_llm.achat.return_value = LLMResponse(
-        content='{"complexity": 3, "reason": "多维度分析"}',
+        content='{"complexity": 4, "dimensions": {"scope": 4, "depth": 5, '
+        '"multidisciplinary": 2, "temporal": 3}, "reasoning": "多维度对比"}',
         model="test",
     )
     params = await researcher._assess_complexity("对比 React 和 Vue 的优缺点")
     assert params == {"breadth": 4, "depth": 2, "concurrency": 4}
 
-    # 复杂查询 (complexity 5)
+    # L7: 综合研究
     mock_llm.achat.return_value = LLMResponse(
-        content='{"complexity": 5, "reason": "综合性深度研究"}',
+        content='{"complexity": 7, "dimensions": {"scope": 7, "depth": 8, '
+        '"multidisciplinary": 5, "temporal": 8}, "reasoning": "综合性研究"}',
         model="test",
     )
     params = await researcher._assess_complexity("分析 2026 年 AI Agent 行业趋势")
     assert params == {"breadth": 4, "depth": 3, "concurrency": 6}
 
-    # LLM 失败时降级默认值 (depth=1 安全网)
+    # L10: 极复杂
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 10, "dimensions": {"scope": 10, "depth": 10, '
+        '"multidisciplinary": 10, "temporal": 10}, "reasoning": "跨学科极复杂"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("AI Agent 对全球经济长期影响")
+    assert params == {"breadth": 5, "depth": 3, "concurrency": 8}
+
+    # LLM 失败时降级 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4)
     mock_llm.achat.side_effect = Exception("LLM 不可用")
     params = await researcher._assess_complexity("任意查询")
     assert params == {
-        "breadth": settings.deep_research_breadth,
-        "depth": 1,  # 安全网: LLM 失败时不递归
-        "concurrency": settings.deep_research_concurrency,
+        "breadth": 4,
+        "depth": 2,  # L4-L5 中等参数: 12 子查询
+        "concurrency": 4,
     }
+
+
+@pytest.mark.asyncio
+async def test_complexity_boundary_values(
+    researcher: DeepResearcher,
+    mock_llm: MagicMock,
+) -> None:
+    """测试复杂度边界值: L1/L10/L0/L11/非整数/非 dict."""
+
+    # L1 (最小值)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 1, "dimensions": {}, "reasoning": "min"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 3, "depth": 1, "concurrency": 3}
+
+    # L10 (最大值)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 10, "dimensions": {}, "reasoning": "max"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 5, "depth": 3, "concurrency": 8}
+
+    # L0 (非法, 应降级到 L4-L5 中等参数)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 0, "dimensions": {}, "reasoning": "invalid"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 4, "depth": 2, "concurrency": 4}  # L4-L5 中等参数
+
+    # L11 (非法, 应降级到 L4-L5 中等参数)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 11, "dimensions": {}, "reasoning": "invalid"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 4, "depth": 2, "concurrency": 4}  # L4-L5 中等参数
+
+    # 非整数 (应降级到 L4-L5 中等参数)
+    mock_llm.achat.return_value = LLMResponse(
+        content='{"complexity": 3.5, "dimensions": {}, "reasoning": "float"}',
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 4, "depth": 2, "concurrency": 4}  # L4-L5 中等参数
+
+    # 非 dict (应降级到 L4-L5 中等参数)
+    mock_llm.achat.return_value = LLMResponse(
+        content="[1, 2, 3]",
+        model="test",
+    )
+    params = await researcher._assess_complexity("test")
+    assert params == {"breadth": 4, "depth": 2, "concurrency": 4}  # L4-L5 中等参数
+
+
+@pytest.mark.asyncio
+async def test_complexity_all_10_levels(
+    researcher: DeepResearcher,
+    mock_llm: MagicMock,
+) -> None:
+    """测试 L1-L10 所有 10 个级别的映射正确性."""
+
+    expected_map = {
+        1: {"breadth": 3, "depth": 1, "concurrency": 3},
+        2: {"breadth": 3, "depth": 1, "concurrency": 3},
+        3: {"breadth": 4, "depth": 1, "concurrency": 4},
+        4: {"breadth": 4, "depth": 2, "concurrency": 4},
+        5: {"breadth": 4, "depth": 2, "concurrency": 4},
+        6: {"breadth": 4, "depth": 2, "concurrency": 5},
+        7: {"breadth": 4, "depth": 3, "concurrency": 6},
+        8: {"breadth": 4, "depth": 3, "concurrency": 6},
+        9: {"breadth": 5, "depth": 3, "concurrency": 8},
+        10: {"breadth": 5, "depth": 3, "concurrency": 8},
+    }
+
+    for level in range(1, 11):
+        mock_llm.achat.return_value = LLMResponse(
+            content=f'{{"complexity": {level}, "dimensions": {{}}, "reasoning": "L{level}"}}',
+            model="test",
+        )
+        params = await researcher._assess_complexity(f"test L{level}")
+        assert params == expected_map[level], f"L{level} mapping mismatch"
 
 
 # ========== depth=0 递归终止 ==========
@@ -619,7 +718,7 @@ async def test_deep_researcher_max_sub_queries_guard(
     """测试 max_sub_queries 守卫: 递归树超限时降级到 depth=1.
 
     场景: breadth=10, depth=3 → next_breadth=max(2, 5)=5
-    递归树规模: 10 * (1 + 5 + 25) = 310 > 28 (deep_research_max_sub_queries)
+    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (deep_research_max_sub_queries, V4-P2-04)
     → 降级到 depth=1, 仅 10 个子查询, 不递归.
     """
 
