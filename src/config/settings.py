@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     user_info_api_timeout: int = 5
     # 每日报告生成限额 (按 IP 限流, 默认 3 次/日, 仅报告成功才计数)
     # 0 = 不限制; 环境变量 IP_DAILY_REPORT_LIMIT 控制
+    # 注意: 此配置已迁移到数据库 report_limits 表 (user_id IS NULL 的系统默认行)
+    # 此环境变量仅作为数据库不可用时的降级 fallback
     ip_daily_report_limit: int = 3
 
     # ========== 自托管模式 (SELF_HOST) ==========

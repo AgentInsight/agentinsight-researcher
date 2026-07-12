@@ -424,3 +424,45 @@ WHERE id NOT IN (
 -- 唯一索引 (session_id, agent_id, user_id): 支持 ON CONFLICT 幂等插入 (ensure_session 方法)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
     ON research_sessions(session_id, agent_id, user_id);
+
+-- ========== 业务表: 每日报告生成限额 (从环境变量迁移到数据库) ==========
+-- UserId 为 NULL 时表示系统默认每日报告生成限额
+-- 取限额时取 UserId 专属限额与系统默认限额中较高的那个 (max)
+CREATE TABLE IF NOT EXISTS report_limits (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(64) UNIQUE,                -- NULL = 系统默认限额; 非 NULL = 用户专属限额
+    daily_limit INTEGER NOT NULL DEFAULT 3,    -- 每日报告生成限额 (0 = 不限制)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- 唯一索引: user_id 仅允许一个非 NULL 值 (系统默认) 和多个用户专属行
+-- CREATE TABLE 已含 UNIQUE, 此处补兜底 (旧表可能无)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_limits_user
+    ON report_limits(user_id);
+-- 触发器: 自动维护 updated_at
+CREATE OR REPLACE TRIGGER trg_report_limits_updated_at
+    BEFORE UPDATE ON report_limits
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- 预置系统默认限额 (user_id IS NULL, daily_limit = 3)
+-- ON CONFLICT 保证幂等: 已存在则不覆盖 (管理员可手动调整后不被重置)
+INSERT INTO report_limits (user_id, daily_limit)
+VALUES (NULL, 3)
+ON CONFLICT (user_id) DO NOTHING;
+
+-- ========== 业务表: 每日报告生成使用次数 (从 Redis 迁移到数据库) ==========
+-- 按 UserId + 日期 记录当日报告生成次数
+CREATE TABLE IF NOT EXISTS daily_report_usage (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,              -- 用户 ID (IP-based 或 JWT 解析)
+    usage_date DATE NOT NULL,                  -- 使用日期 (北京时间 YYYY-MM-DD)
+    daily_count INTEGER NOT NULL DEFAULT 0,    -- 当日已生成次数
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- 唯一约束: (user_id, usage_date) 支持 ON CONFLICT 幂等 upsert
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_report_usage_user_date
+    ON daily_report_usage(user_id, usage_date);
+-- 触发器: 自动维护 updated_at
+CREATE OR REPLACE TRIGGER trg_daily_report_usage_updated_at
+    BEFORE UPDATE ON daily_report_usage
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

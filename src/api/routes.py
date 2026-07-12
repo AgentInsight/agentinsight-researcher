@@ -702,15 +702,16 @@ async def chat_completions(
     graph_config = {"configurable": {"thread_id": session_id}}
 
     # IP-based 用户每日报告限额检查 (仅 self_host=True + IP-based 用户)
-    if settings.self_host and user_id.startswith("ip_") and settings.ip_daily_report_limit > 0:
+    # 限额从数据库 report_limits 表读取 (已从环境变量迁移)
+    if settings.self_host and user_id.startswith("ip_"):
         from src.api.ip_user_resolver import check_daily_report_limit
 
-        allowed, current_count = await check_daily_report_limit(
-            user_id, agent_id, settings.ip_daily_report_limit
+        allowed, current_count, effective_limit = await check_daily_report_limit(
+            user_id, agent_id
         )
         if not allowed:
             limit_msg = (
-                f"您今日的报告生成次数已达上限 ({current_count}/{settings.ip_daily_report_limit})。"
+                f"您今日的报告生成次数已达上限 ({current_count}/{effective_limit})。"
                 f"每日限额将在北京时间次日 0 点重置, 届时可继续使用。"
             )
             if request.stream:
