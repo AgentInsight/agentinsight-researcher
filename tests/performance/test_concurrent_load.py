@@ -150,16 +150,14 @@ async def test_redis_cache_hit_rate_under_load() -> None:
     进程内 LRU+TTL 缓存, 提升 embedding 命中率.
     本测试验证缓存机制在高负载下的命中率.
 
-    注意: redis 未安装时跳过本测试.
+    注: redis 为项目必需依赖 (requirements.txt), 不再使用 importorskip.
     """
-    pytest.importorskip("redis")
-
     from src.common.redis_client import get_redis_client
 
     try:
         redis = await get_redis_client()
     except Exception:
-        pytest.skip("Redis 客户端未配置或不可用")
+        pytest.fail("Redis 客户端未配置或不可用 (容器栈应提供 Redis 服务)")
 
     cache_key_prefix = f"test_perf_cache_{uuid.uuid4().hex[:8]}"
 
@@ -177,8 +175,8 @@ async def test_redis_cache_hit_rate_under_load() -> None:
             else:
                 miss_count += 1
                 await redis.set(key, f"value_{i}", ex=3600)
-        except Exception:
-            pytest.skip("Redis 操作失败, 跳过测试")
+        except Exception as e:
+            pytest.fail(f"Redis 操作失败: {e}")
 
     hit_rate = hit_count / total_requests if total_requests > 0 else 0.0
 

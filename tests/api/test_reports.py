@@ -62,11 +62,14 @@ def generated_report_id() -> str:
             },
         )
     if r.status_code != 200:
-        pytest.skip(f"研究请求失败 (status={r.status_code}), 无法生成报告用于下载测试")
+        pytest.fail(f"研究请求失败 (status={r.status_code}), 无法生成报告用于下载测试")
     data = r.json()
     report_id = data.get("report_id")
     if not report_id:
-        pytest.skip("响应未包含 report_id (可能 report_store 未配置), 跳过下载测试")
+        pytest.fail(
+            "响应未包含 report_id (report_store 未配置或研究未生成报告), "
+            "无法执行下载测试"
+        )
     return str(report_id)
 
 

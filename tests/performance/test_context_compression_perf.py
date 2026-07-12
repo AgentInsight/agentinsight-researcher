@@ -121,15 +121,16 @@ async def test_compress_messages_500k_chars_latency() -> None:
 # ========== 上下文压缩内存占用测试 ==========
 
 
+@pytest.mark.requires_psutil
 async def test_context_compression_memory_usage() -> None:
     """验证上下文压缩内存占用.
 
     上下文压缩应控制内存占用, 避免 OOM.
     本测试测量压缩过程中的内存变化, 验证内存增长在可控范围内.
 
-    注意: psutil 未安装时跳过本测试.
+    注: psutil 为可选依赖, 通过 @pytest.mark.requires_psutil 标记管理,
+    conftest.py 检测未安装时自动跳过 (不在测试函数内 pytest.skip).
     """
-    pytest.importorskip("psutil")
     import psutil
 
     process = psutil.Process()

@@ -299,11 +299,28 @@ def test_get_searchers_returns_sorted_list(settings_no_keys: Settings) -> None:
 
 def test_get_searchers_priority_group_0_for_high_quality_free(
     settings_no_keys: Settings,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """优先级组 0: quality_score >= 70 且有免费额度的引擎排前."""
+    """优先级组 0: quality_score >= 70 且有免费额度的引擎排前.
+
+    用 monkeypatch 注入 mock 高质量免费引擎, 移除对真实搜索引擎注册表的
+    环境依赖 (避免无可用引擎时 skip).
+    """
+
+    # 注入 mock 高质量免费引擎 (priority_group 0)
+    class _HighQualityFreeEngine(BaseSearcher):
+        name = "arxiv"  # FREE_QUOTA_MAP['arxiv']='unlimited' → has_free_quota=True
+        cost_tier = "free"
+        quality_score = 85.0  # >= 70 → is_high_quality=True → priority_group 0
+
+    _SEARCHER_REGISTRY["mock_hq_free"] = {
+        "class": _HighQualityFreeEngine,
+        "regions": (SearchRegion.GLOBAL,),
+        "require_key": None,
+    }
+
     searchers = get_searchers(SearchRegion.GLOBAL, settings_no_keys)
-    if not searchers:
-        pytest.skip("无可用搜索引擎")
+    assert len(searchers) > 0, "注入 mock 引擎后应有可用搜索引擎"
     # 第一个引擎的优先级组应 <= 1 (高质量免费或完全免费)
     first_key = _sort_key(searchers[0])
     assert first_key[0] <= 1, f"首个引擎优先级组应 ≤1, 实际 {first_key[0]}"

@@ -61,14 +61,25 @@ def _open_config_panel(page: Page) -> None:
 
 
 def _new_session(page: Page) -> str:
-    """点击'新建'按钮, 返回生成的 session_id."""
+    """点击'新建'按钮, 返回生成的 session_id.
+
+    注意: 页面加载时可能从后端加载上一个会话 (如 test_e2e_mcp_* 非 UUID ID),
+    需等待 newSession 按钮触发后 session_id 更新为新的 UUID v4.
+    """
     _open_config_panel(page)
+    # 记录旧 session_id (可能来自 localStorage 或后端加载的 test_e2e_mcp_* 会话)
+    display = page.locator("#sessionIdDisplay")
+    old_sid = display.inner_text().strip()
     btn = page.locator("#newSession")
     btn.click()
-    # session_id 显示区会更新
-    display = page.locator("#sessionIdDisplay")
-    expect(display).not_to_have_text("—", timeout=5_000)
-    sid = display.inner_text().strip()
+    # 轮询等待 session_id 更新为新的 UUID v4 (非旧值, 非 "—")
+    deadline = time.time() + 5
+    sid = ""
+    while time.time() < deadline:
+        sid = display.inner_text().strip()
+        if sid and sid != "—" and sid != old_sid and UUID_RE.match(sid):
+            break
+        time.sleep(0.2)
     assert UUID_RE.match(sid), f"session_id 不是合法 UUID v4: {sid}"
     _log(f"新建会话: {sid}")
     return sid
@@ -293,7 +304,7 @@ def test_4_session_isolation(page: Page):
     sid1 = page.evaluate("() => window.__test_sid1")
     query1 = page.evaluate("() => window.__test_query1")
     if not sid1:
-        pytest.skip("前置 test_3 未保存 sid1, 跳过隔离测试")
+        pytest.fail("前置 test_3 未保存 sid1 (test_3 可能失败或未执行)")
 
     # 新建第二个会话
     sid2 = _new_session(page)

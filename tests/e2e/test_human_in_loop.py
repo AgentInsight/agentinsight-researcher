@@ -26,9 +26,12 @@ WebSocket 8 类结构化消息 (src/api/websocket.py):
     set AGENT_URL=http://127.0.0.1:8066
     pytest tests/e2e/test_human_in_loop.py -v -m e2e
 
-注意: 人在回路测试需 human_review_enabled=True (默认 False).
-服务端未启用时自动 skip, 不 fail.
-WebSocket 鉴权 (prod 环境) 或 Origin 校验失败时自动 skip.
+条件检测机制 (mark + conftest 钩子统一管理, 不在测试函数内 pytest.skip):
+- @pytest.mark.requires_human_review: 需服务端 human_review_enabled=True
+  (conftest 检测环境变量 RUN_HUMAN_REVIEW_TESTS 或服务端配置)
+- @pytest.mark.requires_websocket: 需 WebSocket 端点可用
+  (conftest 探测 /v1/ws/{session_id} 连接)
+满足前置条件后, 测试函数内对运行时异常应 pytest.fail 而非 pytest.skip.
 """
 
 from __future__ import annotations
@@ -41,15 +44,8 @@ import uuid
 
 import httpx
 import pytest
-
-# websockets 库 (uvicorn[standard] 包含此依赖)
-try:
-    import websockets
-    import websockets.exceptions
-
-    HAS_WEBSOCKETS = True
-except ImportError:
-    HAS_WEBSOCKETS = False
+import websockets
+import websockets.exceptions
 
 # 测试目标地址从环境变量注入, 禁止硬编码
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8066").rstrip("/")
@@ -152,6 +148,7 @@ async def _start_research(
 
 
 @pytest.mark.e2e
+@pytest.mark.requires_human_review
 async def test_human_feedback_approve_flow() -> None:
     """审核通过流程: multi_agent=True → human_feedback_request → approve → 完成.
 
@@ -168,9 +165,6 @@ async def test_human_feedback_approve_flow() -> None:
     注意: human_review_enabled=False (默认) 时, 研究不暂停, 无 human_feedback_request,
     测试自动 skip.
     """
-    if not HAS_WEBSOCKETS:
-        pytest.skip("websockets 库未安装, 跳过 WebSocket 测试")
-
     sid = _unique_session_id()
     query = "用 200 字简述 Python 异步编程的核心优势"
     _log(f"审核通过流程测试: session={sid}")
@@ -178,13 +172,13 @@ async def test_human_feedback_approve_flow() -> None:
     # 步骤 1: 连接 WebSocket
     ws = await _connect_websocket(sid)
     if ws is None:
-        pytest.skip("WebSocket 连接失败 (可能未启用或需鉴权)")
+        pytest.fail("WebSocket 连接失败 (conftest 应已检测可用性)")
 
     try:
         # 等待连接确认 (logs 消息)
         connect_msg = await _recv_ws_message(ws, WS_MSG_RECV_TIMEOUT)
         if connect_msg is None:
-            pytest.skip("WebSocket 连接后未收到确认消息")
+            pytest.fail("WebSocket 连接后未收到确认消息")
         _log(f"WebSocket 已连接: {connect_msg.get('type')}")
 
         # 步骤 2: 启动研究 (后台任务)
@@ -212,7 +206,7 @@ async def test_human_feedback_approve_flow() -> None:
 
             if not feedback_request_received:
                 research_task.cancel()
-                pytest.skip("human_review_enabled=False, 未收到人在回路审核请求 (跳过)")
+                pytest.fail("未收到人在回路审核请求 (human_review_enabled 可能未启用或研究流程未暂停)")
 
             # 步骤 4: 提交 approve 反馈
             _log("提交 approve 反馈")
@@ -242,6 +236,7 @@ async def test_human_feedback_approve_flow() -> None:
 
 
 @pytest.mark.e2e
+@pytest.mark.requires_human_review
 async def test_human_feedback_revise_flow() -> None:
     """审核修订流程: multi_agent=True → human_feedback_request → 修订意见 → 重做 → 完成.
 
@@ -257,9 +252,6 @@ async def test_human_feedback_revise_flow() -> None:
 
     注意: human_review_enabled=False 时自动 skip.
     """
-    if not HAS_WEBSOCKETS:
-        pytest.skip("websockets 库未安装, 跳过 WebSocket 测试")
-
     sid = _unique_session_id()
     query = "用 200 字简述 Python 异步编程的应用场景"
     _log(f"审核修订流程测试: session={sid}")
@@ -267,13 +259,13 @@ async def test_human_feedback_revise_flow() -> None:
     # 步骤 1: 连接 WebSocket
     ws = await _connect_websocket(sid)
     if ws is None:
-        pytest.skip("WebSocket 连接失败 (可能未启用或需鉴权)")
+        pytest.fail("WebSocket 连接失败 (conftest 应已检测可用性)")
 
     try:
         # 等待连接确认
         connect_msg = await _recv_ws_message(ws, WS_MSG_RECV_TIMEOUT)
         if connect_msg is None:
-            pytest.skip("WebSocket 连接后未收到确认消息")
+            pytest.fail("WebSocket 连接后未收到确认消息")
 
         # 步骤 2: 启动研究
         async with httpx.AsyncClient(timeout=E2E_TIMEOUT) as client:
@@ -297,7 +289,7 @@ async def test_human_feedback_revise_flow() -> None:
 
             if not feedback_request_received:
                 research_task.cancel()
-                pytest.skip("human_review_enabled=False, 未收到人在回路审核请求 (跳过)")
+                pytest.fail("未收到人在回路审核请求 (human_review_enabled 可能未启用或研究流程未暂停)")
 
             # 步骤 4: 提交修订意见
             revise_feedback = "请增加性能基准测试数据与实际案例"
@@ -345,6 +337,7 @@ async def test_human_feedback_revise_flow() -> None:
 
 
 @pytest.mark.e2e
+@pytest.mark.requires_websocket
 async def test_websocket_eight_message_types() -> None:
     """WebSocket 8 类结构化消息推送验证.
 
@@ -364,16 +357,13 @@ async def test_websocket_eight_message_types() -> None:
     是否出现取决于研究流程是否集成 WebSocket 推送; 本用例验证已收到的
     所有消息类型均属 8 类已知类型 (类型契约验证).
     """
-    if not HAS_WEBSOCKETS:
-        pytest.skip("websockets 库未安装, 跳过 WebSocket 测试")
-
     sid = _unique_session_id()
     _log(f"WebSocket 8 类消息测试: session={sid}")
 
     # 步骤 1: 连接 WebSocket
     ws = await _connect_websocket(sid)
     if ws is None:
-        pytest.skip("WebSocket 连接失败 (可能未启用或需鉴权)")
+        pytest.fail("WebSocket 连接失败 (conftest 应已检测可用性)")
 
     received_types: set[str] = set()
 
@@ -381,7 +371,7 @@ async def test_websocket_eight_message_types() -> None:
         # 等待连接确认 (logs 消息)
         connect_msg = await _recv_ws_message(ws, WS_MSG_RECV_TIMEOUT)
         if connect_msg is None:
-            pytest.skip("WebSocket 连接后未收到确认消息")
+            pytest.fail("WebSocket 连接后未收到确认消息")
         msg_type = connect_msg.get("type", "")
         received_types.add(msg_type)
         _log(f"连接确认消息: type={msg_type}")

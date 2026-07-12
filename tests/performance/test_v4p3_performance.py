@@ -101,11 +101,10 @@ async def test_trafilatura_vs_bs_scraping_latency() -> None:
     BS+markdownify 优势: 纯本地计算, 零网络调用.
 
     本测试使用 mock HTTP 响应, 测量两者的处理时间对比.
-    """
-    pytest.importorskip("bs4")
-    pytest.importorskip("markdownify")
-    pytest.importorskip("trafilatura")
 
+    注: bs4/markdownify/trafilatura 为项目必需依赖 (requirements.txt 已声明),
+    不再使用 importorskip (死代码, 永远不会触发).
+    """
     mock_html = (
         "<html><head><title>测试页面</title></head>"
         "<body><article><h1>人工智能</h1><p>医疗应用前景广阔。</p></article></body></html>"

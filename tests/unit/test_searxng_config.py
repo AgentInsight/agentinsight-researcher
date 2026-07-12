@@ -4,7 +4,7 @@
 1. use_default_settings.engines.keep_only 模式已启用
 2. 指定 21 个引擎全部在 keep_only 列表中 (国内 13 + 国外 8)
 3. google / duckduckgo 不在 keep_only 列表 (从根源排除)
-4. bing 系列强制使用 cn.bing.com (中国可访问镜像)
+4. bing 系列使用 www.bing.com (cn.bing.com 会 301 重定向到 www.bing.com, 导致空文档错误)
 5. secret_key 已配置 (容器间通信鉴权)
 6. server.port == 8099 (项目硬约束, 非 8080)
 7. limiter: false (无 redis, 不开启限流)
@@ -160,14 +160,15 @@ def test_forbidden_engines_not_in_keep_only() -> None:
     assert not found_forbidden, f"keep_only 不应含不可用引擎, 发现: {sorted(found_forbidden)}"
 
 
-# ========== bing cn.bing.com 镜像验证 ==========
+# ========== bing base_url 验证 ==========
 
 
-def test_bing_uses_cn_bing_com() -> None:
-    """bing 引擎强制使用 cn.bing.com (中国可访问镜像).
+def test_bing_uses_bing_com() -> None:
+    """bing 引擎使用 www.bing.com (cn.bing.com 会 301 重定向导致空文档错误).
 
-    项目硬约束: SearXNG bing 引擎必须使用 base_url: https://cn.bing.com
-    (默认国际 bing.com 在中国不可访问).
+    项目历史: 原使用 cn.bing.com (中国可访问镜像), 但 cn.bing.com 会 301
+    重定向到 www.bing.com, SearXNG httpx 未正确跟随重定向导致 "Document is
+    empty" 错误, 故改为 www.bing.com.
     """
     settings = _load_searxng_settings()
     engines = settings.get("engines", [])
@@ -177,8 +178,8 @@ def test_bing_uses_cn_bing_com() -> None:
     )
     for bing in bing_engines:
         base_url = bing.get("base_url", "")
-        assert "cn.bing.com" in base_url, (
-            f"bing 引擎 '{bing.get('name')}' 应使用 cn.bing.com, 实际 base_url: {base_url}"
+        assert "bing.com" in base_url, (
+            f"bing 引擎 '{bing.get('name')}' 应使用 bing.com, 实际 base_url: {base_url}"
         )
 
 

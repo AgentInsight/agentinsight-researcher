@@ -166,6 +166,11 @@ markers = [
     "e2e: 端到端测试 (完整链路)",
     "performance: 性能测试 (延迟/吞吐/负载, 部署后容器栈)",
     "exploratory: 探索性测试 (边界/降级场景, 部署后容器栈, 非合并门禁)",
+    # 条件性测试 mark (通过 conftest.py 配置管理, 不在测试函数内 pytest.skip)
+    "requires_self_host_false: 需要服务端 SELF_HOST=False (强制 JWT 校验, 401 测试)",
+    "requires_human_review: 需要服务端 human_review_enabled=True (人在回路测试)",
+    "requires_websocket: 需要 WebSocket 端点可用 (WS 消息测试, 不依赖 human_review)",
+    "requires_psutil: 需要 psutil 库 (内存监控测试, 可选依赖)",
 ]
 # 抑制第三方库不可控的警告 (业务代码已修复的除外)
 # 格式: action:message:category:module:lineno (category 为空则匹配任意类别)
@@ -182,6 +187,10 @@ filterwarnings = [
     "ignore::UserWarning:agentinsight.api.core.pydantic_utilities",
     # jieba 依赖 pkg_resources (已被 setuptools 弃用, 等待 jieba 升级)
     "ignore::UserWarning:jieba._compat",
+    # litellm Logging.async_success_handler coroutine 未 await (第三方库, 等待 litellm 修复)
+    "ignore::RuntimeWarning:litellm.litellm_core_utils.logging_worker",
+    # langchain_core Pydantic V1 兼容层警告 (第三方库, 等待 langchain_core 升级)
+    "ignore:Core Pydantic V1 functionality isn't compatible:UserWarning:langchain_core.utils.pydantic",
 ]
 
 [tool.coverage.run]

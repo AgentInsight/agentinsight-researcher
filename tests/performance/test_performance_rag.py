@@ -237,7 +237,7 @@ def test_qdrant_search_under_5s(
 
     # 集合可能不存在 (Agent 未启动), 跳过
     if r.status_code == 404:
-        pytest.skip(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在, 跳过检索耗时测试")
+        pytest.fail(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在 (Agent 启动时应创建)")
     assert r.status_code == 200, f"Qdrant 搜索非 200: {r.status_code} {r.text[:200]}"
     result = r.json()
     assert "result" in result
@@ -294,7 +294,7 @@ def test_qdrant_search_with_large_namespace_filter(
         elapsed = time.perf_counter() - start
 
     if r.status_code == 404:
-        pytest.skip(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在")
+        pytest.fail(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在 (Agent 启动时应创建)")
     assert r.status_code == 200, f"Qdrant 多 namespace 搜索非 200: {r.status_code} {r.text[:200]}"
     assert elapsed < threshold_s, (
         f"Qdrant 多 namespace 检索耗时 {elapsed:.3f}s 超过阈值 {threshold_s}s"
@@ -369,7 +369,7 @@ def test_rag_retrieval_relevance(
             headers=qdrant_headers,
         )
         if upsert_r.status_code == 404:
-            pytest.skip(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在")
+            pytest.fail(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在 (Agent 启动时应创建)")
         assert upsert_r.status_code == 200, (
             f"Qdrant upsert 非 200: {upsert_r.status_code} {upsert_r.text[:200]}"
         )

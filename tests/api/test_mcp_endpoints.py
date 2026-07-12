@@ -358,13 +358,20 @@ def test_clone_nonexistent_system_config_returns_404() -> None:
 def test_clone_system_config_creates_user_copy(
     cleanup_configs: list[int],
 ) -> None:
-    """POST clone 系统 MCP → 200 + is_system=False + enabled=False (用户私有副本)."""
+    """POST clone 系统 MCP → 200 + is_system=False + enabled=False (用户私有副本).
+
+    系统 MCP 由 init.sql 预置 (12 个核心配置, is_system=TRUE),
+    容器栈健康时必然存在, 无配置表示真实故障.
+    """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         # 列出系统 MCP
         r = client.get(f"{AGENT_URL}/v1/mcp/system")
         system_configs = r.json()
         if not system_configs:
-            pytest.skip("无系统 MCP 配置可克隆")
+            pytest.fail(
+                "无系统 MCP 配置可克隆 (init.sql 应预置 12 个核心配置, "
+                "容器栈健康时必然存在)"
+            )
 
         src = system_configs[0]
         # 先清理可能存在的同名副本 (上次用例残留)
@@ -386,11 +393,17 @@ def test_clone_system_config_creates_user_copy(
 def test_clone_system_config_duplicate_returns_409(
     cleanup_configs: list[int],
 ) -> None:
-    """POST clone 同名系统 MCP 二次 → 409 (已存在同名配置)."""
+    """POST clone 同名系统 MCP 二次 → 409 (已存在同名配置).
+
+    系统 MCP 由 init.sql 预置, 容器栈健康时必然存在.
+    """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         system_configs = client.get(f"{AGENT_URL}/v1/mcp/system").json()
         if not system_configs:
-            pytest.skip("无系统 MCP 配置可克隆")
+            pytest.fail(
+                "无系统 MCP 配置可克隆 (init.sql 应预置 12 个核心配置, "
+                "容器栈健康时必然存在)"
+            )
 
         src = system_configs[0]
         # 先清理可能存在的同名副本

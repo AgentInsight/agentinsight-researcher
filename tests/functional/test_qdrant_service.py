@@ -188,10 +188,14 @@ def test_namespace_filter_isolation() -> None:
     """
     client = _get_qdrant_client()
     try:
+        # 集合应存在 (Agent 启动时通过 ensure_collection() 创建), 不存在表示真实故障
         try:
             client.get_collection(COLLECTION)
-        except (UnexpectedResponse, Exception):
-            pytest.skip(f"集合 {COLLECTION} 不存在, 跳过隔离测试")
+        except (UnexpectedResponse, Exception) as e:
+            pytest.fail(
+                f"集合 {COLLECTION} 不存在或获取失败: {e}\n"
+                "Agent 启动时应通过 ensure_collection() 创建集合"
+            )
 
         # 用随机向量搜索一个不存在的 namespace
         # qdrant_client ≥1.18: 用 query_points 替代已弃用的 search

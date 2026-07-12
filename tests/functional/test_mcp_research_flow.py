@@ -404,6 +404,10 @@ def test_mcp_clone_system_config() -> None:
 
     系统 MCP (is_system=True) 用户可查看不可编辑,
     通过 clone 复制为用户私有副本 (is_system=False, enabled=False).
+
+    系统 MCP 由 init.sql 预置 (12 个核心配置, is_system=TRUE),
+    容器栈健康时必然存在, 无配置表示真实故障.
+    测试前主动清理同名残留, 保证用例独立性 (不依赖 skip 跳过).
     """
     with httpx.Client(timeout=FUNC_TIMEOUT) as client:
         # 1. 列出系统 MCP
@@ -412,18 +416,30 @@ def test_mcp_clone_system_config() -> None:
         system_configs = r.json()
 
         if not system_configs:
-            pytest.skip("无系统 MCP 配置可克隆 (容器栈未预置系统 MCP)")
+            pytest.fail(
+                "无系统 MCP 配置可克隆 (init.sql 应预置 12 个核心配置, "
+                "容器栈健康时必然存在)"
+            )
 
         src_id = system_configs[0]["id"]
         src_name = system_configs[0]["name"]
 
+        # 预清理同名残留 (保证用例独立性, 不依赖 skip 跳过 409)
         try:
-            # 2. 克隆
+            existing = _list_mcp_configs(client)
+            for c in existing:
+                if c.get("name") == src_name:
+                    _delete_mcp_config(client, int(c["id"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            # 2. 克隆 (预清理后应返回 200, 不再 409)
             r2 = client.post(f"{AGENT_URL}/v1/mcp/system/{src_id}/clone")
-            if r2.status_code == 409:
-                # 已克隆过同名配置, 跳过 (用例独立性: 上次未清理)
-                pytest.skip(f"已存在同名克隆配置: {src_name}")
-            assert r2.status_code == 200, f"克隆失败: {r2.status_code} {r2.text}"
+            assert r2.status_code == 200, (
+                f"克隆失败: {r2.status_code} {r2.text} "
+                f"(预清理后应返回 200, 409 表示清理不彻底)"
+            )
             cloned = r2.json()
             assert cloned["is_system"] is False
             assert cloned["enabled"] is False  # 克隆后默认禁用

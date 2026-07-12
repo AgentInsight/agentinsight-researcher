@@ -44,7 +44,8 @@ def safe_json_parse(text: str, fallback: Any = None) -> Any:
         import json_repair
 
         result = json_repair.loads(text)
-        if result is not None:
+        # json_repair 对纯文本/空白返回空字符串而非 None, 需额外检查
+        if result is not None and result != "":
             return result
     except Exception as e:
         logger.debug("json_repair 失败: %s", e)

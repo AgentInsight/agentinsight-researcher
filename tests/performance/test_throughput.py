@@ -177,7 +177,7 @@ def test_qdrant_search_latency(
     # Qdrant 搜索接口可能返回 200 (集合存在) 或 404 (集合不存在)
     # 集合不存在时跳过 (Agent 未启动), 由 conftest 的 service-dependent 跳过兜底
     if r.status_code == 404:
-        pytest.skip(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在, 跳过搜索延迟测试")
+        pytest.fail(f"Qdrant 集合 {QDRANT_COLLECTION} 不存在 (Agent 启动时应创建)")
     assert r.status_code == 200, f"Qdrant 搜索非 200: {r.status_code} {r.text}"
     result = r.json()
     assert "result" in result, f"Qdrant 响应缺少 result 字段: {result}"

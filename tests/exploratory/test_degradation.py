@@ -93,9 +93,9 @@ def test_qdrant_nonexistent_namespace_returns_empty() -> None:
             json=payload,
         )
 
-    # 集合可能不存在 (Agent 未启动), 这种情况跳过
+    # 集合应存在 (Agent 启动时创建), 404 表示真实故障
     if r.status_code == 404:
-        pytest.skip("Qdrant 集合 agents 不存在, 跳过降级测试")
+        pytest.fail("Qdrant 集合 agents 不存在 (Agent 启动时应创建, 容器栈运行时集合必须存在)")
     assert r.status_code == 200, f"Qdrant 搜索非 200: {r.status_code} {r.text[:200]}"
     data = r.json()
     assert "result" in data
@@ -128,7 +128,7 @@ def test_qdrant_invalid_vector_dimension_handled() -> None:
         )
 
     if r.status_code == 404:
-        pytest.skip("Qdrant 集合 agents 不存在, 跳过降级测试")
+        pytest.fail("Qdrant 集合 agents 不存在 (Agent 启动时应创建, 容器栈运行时集合必须存在)")
     # 无效维度应返回 4xx 错误 (Qdrant 服务端校验), 不应 5xx
     assert 400 <= r.status_code < 500, (
         f"无效向量维度应返回 4xx, 实际: {r.status_code} {r.text[:200]}"

@@ -465,24 +465,21 @@ def test_chat_completions_multi_agent_true() -> None:
 
 
 @pytest.mark.api
+@pytest.mark.requires_self_host_false
 def test_chat_completions_self_host_false_missing_token_returns_401() -> None:
     """验证 SELF_HOST=False 缺 token 返回 401 (org_id 触发点数校验).
 
     SELF_HOST=False 时强制校验 JWT Token, 缺 token 返回 401.
-    服务端默认 SELF_HOST=True (跳过校验, 返回 200), 此时跳过本用例.
-    仅当服务端配置 SELF_HOST=False 时才验证 401 行为.
-
     路由逻辑 (routes.py): not settings.self_host and (org_id or project_id) and not token → 401.
+
+    通过 @pytest.mark.requires_self_host_false 标记管理:
+    conftest.py 探测服务端 SELF_HOST 状态, True 时自动跳过 (不在测试函数内 skip).
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
             f"{AGENT_URL}/v1/chat/completions",
             json=_chat_payload("你好", stream=False, org_id="test-org-api-check"),
         )
-    # SELF_HOST=True (默认) → 跳过校验 → 200 (短查询响应)
-    # SELF_HOST=False → 缺 token → 401
-    if r.status_code == 200:
-        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
     assert r.status_code == 401, (
         f"SELF_HOST=False 缺 token 应返回 401, 实际: {r.status_code} {r.text[:200]}"
     )
@@ -667,6 +664,7 @@ def test_error_422_invalid_json_body() -> None:
 
 
 @pytest.mark.api
+@pytest.mark.requires_self_host_false
 def test_error_401_self_host_false_missing_token() -> None:
     """错误码 401: SELF_HOST=False + org_id + 缺 token → 401.
 
@@ -674,34 +672,35 @@ def test_error_401_self_host_false_missing_token() -> None:
     API 测试必须覆盖错误码 (含 401).
 
     路由逻辑 (routes.py): not settings.self_host and (org_id or project_id) and not token → 401.
-    服务端默认 SELF_HOST=True 时跳过本用例.
+
+    通过 @pytest.mark.requires_self_host_false 标记管理:
+    conftest.py 探测服务端 SELF_HOST 状态, True 时自动跳过 (不在测试函数内 skip).
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
             f"{AGENT_URL}/v1/chat/completions",
             json=_chat_payload("你好", stream=False, org_id="test-org-401-check"),
         )
-    # SELF_HOST=True (默认) → 跳过校验 → 200 (短查询响应)
-    if r.status_code == 200:
-        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
     assert r.status_code == 401, (
         f"SELF_HOST=False 缺 token 应返回 401, 实际: {r.status_code} {r.text[:200]}"
     )
 
 
 @pytest.mark.api
+@pytest.mark.requires_self_host_false
 def test_error_401_self_host_false_missing_token_project_id() -> None:
     """错误码 401: SELF_HOST=False + project_id + 缺 token → 401.
 
     org_id 优先于 project_id, 二者至少一个触发校验.
+
+    通过 @pytest.mark.requires_self_host_false 标记管理:
+    conftest.py 探测服务端 SELF_HOST 状态, True 时自动跳过 (不在测试函数内 skip).
     """
     with httpx.Client(timeout=API_TIMEOUT) as client:
         r = client.post(
             f"{AGENT_URL}/v1/chat/completions",
             json=_chat_payload("你好", stream=False, project_id="test-project-401"),
         )
-    if r.status_code == 200:
-        pytest.skip("服务端 SELF_HOST=True, 401 校验不适用 (跳过)")
     assert r.status_code == 401, (
         f"SELF_HOST=False 缺 token (project_id) 应返回 401, 实际: {r.status_code}"
     )
