@@ -12,6 +12,6 @@
 - agents.py: 4 个角色 (Researcher/Writer/Reviewer/Publisher) 的 system_prompt 与消息协议.
 - orchestrator.py: AG2Orchestrator, 用 ConversableAgent + GroupChat 编排 4 个角色.
 
-注: 原 main.py 的 run_research_task 入口函数已移除 (死代码, AG2 默认关闭且无生产调用).
+注: AG2 默认关闭, 无生产调用.
     如需启用 AG2, 可直接实例化 AG2Orchestrator 并调用其 run 方法.
 """

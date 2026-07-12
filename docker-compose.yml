@@ -81,7 +81,7 @@ services:
     env_file:
       - .env
     environment:
-      # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
+      # TEI 服务端配置 (compose-only 参数硬编码, 不暴露到 .env)
       MODEL_ID: /data/bge-base-zh-v1.5
       DTYPE: float32
       MAX_BATCH_TOKENS: 16384
@@ -164,7 +164,7 @@ services:
       - session_data:/app/data/sessions
       - uploads_data:/tmp/uploads
       # FastEmbed ONNX 模型文件 (bge-small-zh-v1.5, 上下文压缩精排用)
-      # 生产联网模式: 模型运行时从 HuggingFace 自动下载 (AGENTS.md 允许生产联网模式联网下载)
+      # 生产联网模式: 模型运行时从 HuggingFace 自动下载
       # 如需使用本地预下载模型: ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
     depends_on:
       redis:

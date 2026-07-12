@@ -74,8 +74,7 @@ class SourceCurator:
         """计算来源可信度 (0-1).
 
         优化:
-        - 旧版: 含统计数据仅 +0.03 微弱加分
-        - V2: 将 Quantitative Value 提升为独立维度, 含统计指标 (百分比/金额/CAGR) 显著加分 (+0.10)
+        - 将 Quantitative Value 提升为独立维度, 含统计指标 (百分比/金额/CAGR) 显著加分 (+0.10)
 
         综合域名权威性 + 内容长度 + 数据丰富度 (Quantitative Value).
         域名可信度评估.

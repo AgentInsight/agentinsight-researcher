@@ -32,26 +32,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ========== LLM 网关 (LiteLLM) ==========
-    # 三级 LLM 分层 (FAST/SMART/STRATEGIC):
-    # - FAST: 快速任务 (摘要/分类/JSON 解析)
-    # - SMART: 复杂推理 (报告写作/章节生成/来源策展)
-    # - STRATEGIC: 规划 (子主题拆解/agent 角色)
-    #
-    # 推荐方案 H (DeepSeek 全栈, 已应用为默认值):
-    #   fast_llm = "deepseek/deepseek-v4-flash"    # DeepSeek 轻量 (8 个调用点, 意图分类/闲聊)
-    #   smart_llm = "deepseek/deepseek-v4-flash"   # DeepSeek 轻量 (14 个调用点, 核心生成层)
-    #   strategic_llm = "deepseek/deepseek-v4-pro"  # DeepSeek 思考模式 (4 个调用点)
-    #
-    # 单次研究报告成本 ~0.18 元, 真正 3 层分离.
-    # ⚠️ 旧模型名 deepseek-chat / deepseek-reasoner 将于 2026-07-24 停用, 已迁移到 v4 命名.
-    # ⚠️ 如需使用智谱免费层: fast_llm = "zhipuai/glm-4-flash" + 配置 ZHIPU_API_KEY
-    #
-    # 备选方案 B (质量优先, 中文写作国产第一):
-    #   fast_llm = "deepseek/deepseek-v4-flash"
-    #   smart_llm = "dashscope/qwen-max"        # 中文写作最强 (单次研究 ~0.80 元)
-    #   strategic_llm = "deepseek/deepseek-v4-pro"
-    # 启用方案 B 需配置 DASHSCOPE_API_KEY.
-    fast_llm: str = "deepseek/deepseek-v4-flash"
+    # 三级 LLM 分层:
+    # - FAST: 快速任务 (摘要/分类/JSON 解析), 默认 zhipuai/glm-4-flash (智谱免费层)
+    # - SMART: 复杂推理 (报告写作/章节生成), 默认 deepseek/deepseek-v4-flash
+    # - STRATEGIC: 规划 (子主题拆解/agent 角色), 默认 deepseek/deepseek-v4-pro
+    # 如需全 DeepSeek 栈: 将 fast_llm 改为 "deepseek/deepseek-v4-flash"
+    fast_llm: str = "zhipuai/glm-4-flash"
     smart_llm: str = "deepseek/deepseek-v4-flash"
     strategic_llm: str = "deepseek/deepseek-v4-pro"
     fast_token_limit: int = 3000
@@ -77,7 +63,7 @@ class Settings(BaseSettings):
     # 智谱 AI OpenAI 兼容端点 (LiteLLM 1.90.2 不原生支持 zhipuai/ 前缀,
     # 通过 openai/ 前缀 + api_base 接入智谱 GLM 系列)
     zhipu_api_base: str = "https://open.bigmodel.cn/api/paas/v4"
-    # DashScope (阿里通义 Qwen) API Key, 备选方案 B smart_llm=qwen-max 时启用
+    # DashScope (阿里通义 Qwen) API Key, smart_llm=qwen-max 时启用
     dashscope_api_key: str | None = None
 
     # ========== 图像生成 (报告配图, deepseek-v4-flash) ==========
@@ -226,7 +212,7 @@ class Settings(BaseSettings):
     bm25_filter_char_threshold: int = (
         8000  # < 此值走 Fast Path 不压缩 (环境变量: BM25_FILTER_CHAR_THRESHOLD)
     )
-    bm25_filter_char_upper: int = 50000  # [已弃用] 保留配置供向后兼容
+    bm25_filter_char_upper: int = 50000  # 兼容字段, 保留供向后兼容
     bm25_filter_top_k: int = 20  # 返回 Top-K (与 embeddings_filter_top_k 对齐)
     bm25_filter_top_k_for_rerank: int = (
         50  # BM25 粗筛返回数量 (供 FastEmbed 精排用, 环境变量: BM25_FILTER_TOP_K_FOR_RERANK)
@@ -281,15 +267,15 @@ class Settings(BaseSettings):
     serper_api_key: str | None = None  # Serper.dev Google Search (全球)
     pubmed_email: str = ""  # PubMed NCBI 建议邮箱 (无需 Key)
     semantic_scholar_api_key: str | None = None  # Semantic Scholar Graph API (可选 Key)
-    # 新增 5 个搜索引擎 (参考实现 retrievers/)
+    # 搜索引擎
     exa_api_key: str | None = None  # Exa 搜索 (全球, Bearer token)
-    # v1.1 新增: 秘塔 AI 搜索 (国内 AI 搜索主力, freemium)
+    # 秘塔 AI 搜索 (国内 AI 搜索主力, freemium)
     metaso_api_key: str | None = None  # 秘塔 AI 搜索 API Key (访问 https://metaso.cn/api 获取)
-    # v1.1 新增: GitHub 代码搜索 (可选 Token 提高配额)
+    # GitHub 代码搜索 (可选 Token 提高配额)
     github_token: str | None = (
         None  # GitHub Personal Access Token (https://github.com/settings/tokens)
     )
-    # v1.1 新增: 学术搜索引擎邮箱配置 (polite pool)
+    # 学术搜索引擎邮箱配置 (polite pool)
     crossref_mailto: str = ""  # CrossRef polite pool 邮箱 (可选, 50 req/s)
     unpaywall_email: str = ""  # Unpaywall 真实邮箱 (必填, 否则 HTTP 422 拒绝)
     searchapi_api_key: str | None = None  # SearchAPI.io (全球, query param)
@@ -330,11 +316,11 @@ class Settings(BaseSettings):
     max_iterations: int = 3  # Planner 拆解子查询数量 (非图迭代上限)
     graph_max_iterations: int = 10  # 图迭代硬上限 (守卫用)
     max_subtopics: int = 3
-    deep_research_breadth: int = 4  # 对标 GPTR (4+8=12 子查询, 功能 11)
+    deep_research_breadth: int = 4  # 4+8=12 子查询
     deep_research_depth: int = 2
     deep_research_concurrency: int = 4
     deep_research_adaptive: bool = True  # 自适应深度开关 (默认开启, 自适应深度机制)
-    # V4-P2-04: 提升至 42, 支持 L9-L10 (breadth=5/depth=3, 5+10+20=35)
+    # 支持 L9-L10 (breadth=5/depth=3, 5+10+20=35)
     deep_research_max_sub_queries: int = 42  # 递归树硬上限守卫 (L9-L10: 5+10+20=35)
     deep_research_num_learnings: int = 3  # 每子查询提取 learnings 数量上限 (功能 6)
     deep_research_reasoning_effort: str = "high"  # 规划/提取阶段推理强度 (功能 10)
@@ -367,7 +353,7 @@ class Settings(BaseSettings):
     short_query_min_length: int = 2  # 最小有效查询长度(字符)
     short_query_reply: str = "您好！我是研究助手，请提供您想研究的主题，我将为您生成详细的研究报告。"  # 短查询回复语(用户可配置)
 
-    # ========== 闲聊/离题保护 (Rasa FallbackClassifier / Dify 失效回复 / NeMo topic rail) ==========
+    # ========== 闲聊/离题保护 ==========
     # 非研究/分析类输入 (闲聊/问候/身份询问/娱乐/常识/私人问题) 统一导向固定回复, 零 LLM 成本.
     # 两层分类器 (规则→LLM) 命中 OFF_TOPIC 即返回 off_topic_reply, 不走任何 graph.
     off_topic_enabled: bool = True  # 闲聊/离题保护开关
@@ -376,14 +362,14 @@ class Settings(BaseSettings):
         "请提供您想研究的主题（例如'分析新能源汽车市场'），"
         "我将为您生成详细的研究报告。"
     )  # 离题回复语 (用户可配置)
-    # LLM 分类失败时的兜底意图 (业界标准: 走最轻路径, 避免误导向高成本研究流程)
+    # LLM 分类失败时的兜底意图 (走最轻路径, 避免误导向高成本研究流程)
     llm_classify_fallback: Literal["research", "off_topic"] = "off_topic"
     # CHAT 意图首轮保护: 无已有报告时降级 OFF_TOPIC (避免首轮闲聊消耗 SMART LLM)
     chat_requires_report: bool = True
 
     # ========== 闲聊响应优化 ==========
     # 闲聊响应器: FAST_LLM 实时生成 + Persona + 三段式 + 多模板兜底
-    # Anthropic Claude system prompt 四段式 + Character.AI persona 一致性
+    # 四段式 system prompt + persona 一致性
     chitchat_config_dir: str = "src/config/researcher"  # 闲聊配置目录 (相对项目根)
     chitchat_temperature: float = 0.7  # 闲聊温度 (略高创意)
     chitchat_max_tokens: int = 1000  # 闲聊响应 max_tokens (推理模型需 ≥1000: 推理 500+回复 500)
@@ -410,7 +396,7 @@ class Settings(BaseSettings):
     query_classify_llm_query_truncate: int = 1000  # LLM 分类 query 截断长度
     query_classify_single_word_max_chars: int = 6  # 单单词长度上限
     query_classify_trace_input_truncate: int = 200  # trace span input 截断长度
-    # 分类结果 Redis 缓存 (QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md)
+    # 分类结果 Redis 缓存
     # 启用后高频重复 query 直接命中缓存, 零 LLM 调用; Redis 不可用时降级为不缓存.
     query_classify_cache_enabled: bool = True  # 默认启用
     query_classify_cache_ttl: int = 86400  # 缓存 TTL (秒), 默认 24h

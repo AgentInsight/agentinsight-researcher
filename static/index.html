@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AgentInsight Researcher · 联调测试页</title>
   <!--
-    自包含前端测试页面 (AGENTS.md 第 14 章硬约束)
+    自包含前端测试页面 (项目前端测试页面规范)
     - 单文件, 原生 HTML + 原生 JS, 禁止框架/构建工具
     - 仅做联调展示, 不写业务逻辑 (路由/鉴权/权限)
     - 统一调用 POST /v1/chat/completions (stream:true) + POST /v1/files + /health
@@ -1772,7 +1772,7 @@
       const token = $('tokenInput').value.trim();
       const selectedFileIds = state.files.filter((f) => f.selected).map((f) => f.file_id);
 
-      // 构造请求体 (AGENTS.md 第 14 章)
+      // 构造请求体 (项目前端测试页面规范)
       const body = {
         model: modelInput,
         messages: [{ role: 'user', content: query }],
@@ -1883,7 +1883,7 @@
         }
         if (!resp.body) throw new Error('响应体为空 (浏览器不支持 ReadableStream)');
 
-        // SSE 解析: fetch + ReadableStream (AGENTS.md 第 14 章)
+        // SSE 解析: fetch + ReadableStream (项目前端测试页面规范)
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -1995,7 +1995,7 @@
 
     // ========== 人在回路审核 UI (P2-03) ==========
     // WebSocket 双向通道: 连接 /v1/ws/{session_id}, 接收 human_feedback_request 等结构化消息
-    // SSE (/v1/chat/completions stream=true) 仍为主通道, WS 仅用于人在回路审核请求推送与反馈接收 (AGENTS.md 第 14 章)
+    // SSE (/v1/chat/completions stream=true) 仍为主通道, WS 仅用于人在回路审核请求推送与反馈接收 (项目前端测试页面规范)
     // per-session: 每个会话维护独立的 WS 连接, 存储在 StreamContext.ws 中
     const WS_MAX_RECONNECT = 5;
     const WS_RECONNECT_INTERVAL = 5000;
@@ -2073,7 +2073,7 @@
       }
     }
 
-    /** 处理 WS 推送的 8 类结构化消息 (AGENTS.md 第 14 章)
+    /** 处理 WS 推送的 8 类结构化消息 (项目前端测试页面规范)
      *  per-session: sessionId 标识消息来源会话, 审核请求仅当该会话可见时才显示面板 */
     function handleWsMessage(msg, sessionId) {
       if (!msg || typeof msg !== 'object') return;

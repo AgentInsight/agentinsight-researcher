@@ -8,7 +8,7 @@
 - DELETE /v1/sessions/{session_id}             删除会话 (级联清理)
 - PATCH  /v1/sessions/{session_id}             更新会话标题
 
-数据隔离 (AGENTS.md 第 7 章核心约定):
+数据隔离:
 - 所有查询带 agent_id + user_id
 - user_id 由 JWT 中间件注入 (contextvars)
 - agent_id = agent_name (全局唯一隔离键)

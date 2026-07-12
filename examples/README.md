@@ -37,7 +37,7 @@ copy .env.template .env   # Windows
 
 ```bash
 curl http://localhost:8066/health
-# {"status":"ok","service":"agentinsight-researcher","version":"0.1.0"}
+# {"status":"ok","service":"agentinsight-researcher","version":"1.0.0"}
 ```
 
 ### 4. 安装示例依赖

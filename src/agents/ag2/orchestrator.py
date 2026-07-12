@@ -38,7 +38,7 @@ from src.skills.researcher.research_conductor import ResearchConductor
 logger = logging.getLogger(__name__)
 
 # ========== AG2 (autogen) 可选依赖, try/except import ==========
-# 支持两种包名: ag2 (新版) / autogen (旧版 pyautogen)
+# 支持包名: ag2 / autogen (pyautogen)
 # 任一导入成功即 _AG2_AVAILABLE=True; 均失败则降级为不可用, 调用 run() 时抛 ImportError.
 _AG2_AVAILABLE: bool = False
 

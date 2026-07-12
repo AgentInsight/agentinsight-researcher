@@ -520,7 +520,7 @@ async def test_error_handling_invalid_json_and_404() -> None:
         )
 
         # 子场景 4: 不存在的报告 report_id → 404
-        # report_id 非 UUID 格式时走 deprecated session_id 兼容分支, 仍应返回 404
+        # report_id 非 UUID 格式时走 session_id 兼容分支, 仍应返回 404
         r_report_not_found = await client.get(
             f"{AGENT_URL}/v1/reports/nonexistent-report-id/download"
         )

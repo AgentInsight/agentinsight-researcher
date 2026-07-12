@@ -97,7 +97,7 @@ class TestBM25FilterDegrade:
 
     @pytest.mark.asyncio
     async def test_filter_exception_returns_original(self, bm25_filter, sample_documents):
-        """异常时应降级返回原文前 N 条 (与旧 EmbeddingsFilter 降级策略对齐, 类已删除)."""
+        """异常时应降级返回原文前 N 条."""
         with patch.object(
             bm25_filter, "_split_documents_recursive", side_effect=RuntimeError("mock error")
         ):

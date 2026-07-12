@@ -144,7 +144,7 @@ class BM25Filter:
                     return [str(d.get("content", "")) for d in documents[:max_results]]
 
                 # 3. BM25 语料构建 + 打分 (CPU 密集操作放入线程池, 避免阻塞事件循环)
-                # 显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题
+                # 显式传 k1/b
                 scores = await asyncio.to_thread(self._build_and_score, chunk_tokens, query_tokens)
                 scored: list[tuple[float, str]] = list(
                     zip(scores, [c["content"] for c in chunks], strict=False)
@@ -260,7 +260,7 @@ class BM25Filter:
     ) -> list[float]:
         """同步构建 BM25 并打分 (在线程池中执行).
 
-        显式传 k1/b, 修复 retriever.py:561 历史遗留未传参问题.
+        显式传 k1/b.
         """
         bm25 = BM25Okapi(
             chunk_tokens,

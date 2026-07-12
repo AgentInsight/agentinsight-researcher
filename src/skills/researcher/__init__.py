@@ -4,7 +4,6 @@ Skill 组件清单:
 - agent_creator.py      (LLM 动态角色生成器)
 - research_conductor.py (研究总指挥)
 - context_manager.py    (上下文管理器)
-- browser_manager.py    (浏览器管理器)
 - source_curator.py     (来源策展器)
 - report_generator.py   (报告生成器)
 - publisher.py          (发布器)

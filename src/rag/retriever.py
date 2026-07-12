@@ -38,7 +38,6 @@ from src.rag.qdrant_manager import QdrantManager
 logger = logging.getLogger(__name__)
 
 # 匿名用户 ID (用于共享 namespace 缓存键 / 无 user_id 降级)
-# default_user_id 环境变量已移除, 改为 IP-based UserId;
 # RAG 层可能在 CLI/批处理场景无 HTTP 上下文, 用固定常量作共享缓存维度.
 _ANONYMOUS_USER_ID = "anonymous"
 
@@ -342,7 +341,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """倒数排名融合 (RRF).
 
-        RRF k=60 (业界标准).
+        RRF k=60.
         """
         k = self.settings.rrf_k
         scores: dict[str, float] = {}
@@ -566,7 +565,7 @@ class HybridRetriever:
 
     # ========== BM25 断点修复: Qdrant 持久化稀疏检索 (方案 A 路径 1) ==========
     # 设计要点:
-    # - BM25 语料来源: Qdrant scroll 拉取 namespace 内所有 content (替代旧版无调用方路径)
+    # - BM25 语料来源: Qdrant scroll 拉取 namespace 内所有 content
     # - Redis 缓存: 按 namespace + 版本号键, TTL 24h 兜底; 主路径靠 invalidate 主动失效
     # - 版本号: Redis INCR 计数器, 文档新增/删除时 +1; 未设置时默认 1
     # - 内存缓存: _bm25_per_namespace 记录已加载版本, 命中且版本一致跳过重拉
@@ -713,8 +712,7 @@ class HybridRetriever:
     ) -> None:
         """检索前确保 BM25 语料已加载 (按 namespace 维度, 含版本号校验).
 
-        检索必须混合 BM25 + 向量. 本方法替代旧版
-        update_bm25_corpus "无业务调用方" 的断点路径, 在 retrieve 入口自动调用.
+        检索必须混合 BM25 + 向量. 在 retrieve 入口自动调用.
 
         流程 (对每个 namespace):
         1. 读取当前版本号 (Redis 计数器, 默认 1)
@@ -782,7 +780,7 @@ class HybridRetriever:
         """失效 BM25 语料缓存 (文档新增/删除后由调用方触发).
 
         增量更新策略:
-        - Redis 版本号 +1 (INCR), 旧版本缓存键自然失效 (下次 _ensure_bm25_corpus 重拉)
+        - Redis 版本号 +1 (INCR), 旧缓存键自然失效 (下次 _ensure_bm25_corpus 重拉)
         - 内存缓存清除该 namespace 条目 (下次 retrieve 重新加载)
         - Redis 不可用时仅清内存缓存 (下次 retrieve 仍会从 Qdrant 拉, 行为正确)
 
@@ -829,7 +827,7 @@ class HybridRetriever:
     async def close(self) -> None:
         """关闭资源.
 
-        不再关闭 Redis 客户端; Redis 改为全局单例 (common.redis_client),
+        Redis 为全局单例 (common.redis_client),
         由 server.py lifespan 统一调用 close_redis_client() 关闭.
         """
         await self._embeddings.close()

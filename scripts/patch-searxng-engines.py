@@ -30,7 +30,7 @@ def ensure_import_os(content: str, filename: str) -> tuple[str, bool]:
     导致简单匹配会将 import os 插入到 docstring 中间.
 
     修复:
-    1. 清理 docstring 中误插入的 import os 行 (旧版 patch bug)
+    1. 清理 docstring 中误插入的 import os 行
     2. 跳过模块 docstring (三引号区域), 在真正的 import 区域插入
 
     返回: (修改后的 content, 是否修改)
@@ -50,7 +50,7 @@ def ensure_import_os(content: str, filename: str) -> tuple[str, bool]:
             # count == 2 表示单行 docstring, 不改变状态
             continue
         if in_docstring:
-            # docstring 内的 import os 是旧版 patch 误插入的, 标记删除
+            # docstring 内的 import os 为误插入, 删除
             if line.strip() == "import os":
                 lines_to_remove.append(i)
                 print(f"[SearXNG][PATCH] {filename}: 清理 docstring 中误插入的 import os (第 {i + 1} 行)")
@@ -102,7 +102,7 @@ def patch_crossref() -> bool:
     """
     path = ENGINES_DIR / "crossref.py"
     if not path.exists():
-        print(f"[SearXNG][PATCH] 跳过 crossref.py (文件不存在)", file=sys.stderr)
+        print("[SearXNG][PATCH] 跳过 crossref.py (文件不存在)", file=sys.stderr)
         return False
 
     content = path.read_text(encoding="utf-8")
@@ -113,7 +113,7 @@ def patch_crossref() -> bool:
     changed = os_changed or changed
 
     # 2. 添加 mailto 参数 (从环境变量 CROSSREF_MAILTO 读取)
-    #    先清理旧版本 patch (硬编码邮箱 -> 环境变量版本)
+    #    清理硬编码邮箱 patch, 改为环境变量
     old_mailto = '        "mailto": "agentinsight@example.com",'
     new_mailto = '        "mailto": os.environ.get("CROSSREF_MAILTO", ""),'
     if old_mailto in content:
@@ -154,7 +154,7 @@ def patch_pubmed() -> bool:
     """Patch pubmed.py: 在 esearch 和 efetch 两个 urlencode 添加 email 参数 (从环境变量 PUBMED_EMAIL 读取)."""
     path = ENGINES_DIR / "pubmed.py"
     if not path.exists():
-        print(f"[SearXNG][PATCH] 跳过 pubmed.py (文件不存在)", file=sys.stderr)
+        print("[SearXNG][PATCH] 跳过 pubmed.py (文件不存在)", file=sys.stderr)
         return False
 
     content = path.read_text(encoding="utf-8")
@@ -165,7 +165,7 @@ def patch_pubmed() -> bool:
     changed = os_changed or changed
 
     # 2. 添加 email 参数 (从环境变量 PUBMED_EMAIL 读取)
-    #    先清理旧版本 patch (硬编码邮箱 -> 环境变量版本)
+    #    清理硬编码邮箱 patch, 改为环境变量
     old_email = '            "email": "agentinsight@example.com",'
     new_email = '            "email": os.environ.get("PUBMED_EMAIL", ""),'
     if old_email in content:
@@ -216,7 +216,7 @@ def patch_network_image_proxy_http() -> bool:
     """
     path = NETWORK_DIR / "network.py"
     if not path.exists():
-        print(f"[SearXNG][PATCH] 跳过 network.py (文件不存在)", file=sys.stderr)
+        print("[SearXNG][PATCH] 跳过 network.py (文件不存在)", file=sys.stderr)
         return False
 
     content = path.read_text(encoding="utf-8")
@@ -246,12 +246,12 @@ def patch_network_image_proxy_http() -> bool:
     else:
         print("[SearXNG][PATCH] network.py: image_proxy_params enable_http 已存在, 跳过")
 
-    # 3. 清理之前错误缩进的 patch (0 空格, 在 if 块外, 无效)
+    # 3. 清理错误缩进的 patch
     bad_marker = "image_proxy_params['enable_http'] = True"
     if bad_marker in content and marker not in content:
         content = content.replace(f"\n{bad_marker}\n", "\n", 1)
         changed = True
-        print("[SearXNG][PATCH] network.py: 清理之前错误缩进的 image_proxy enable_http")
+        print("[SearXNG][PATCH] network.py: 清理错误缩进的 image_proxy enable_http")
 
     if changed:
         path.write_text(content, encoding="utf-8")
@@ -269,7 +269,7 @@ def patch_github_api_token() -> bool:
     """
     path = ENGINES_DIR / "github.py"
     if not path.exists():
-        print(f"[SearXNG][PATCH] 跳过 github.py (文件不存在)", file=sys.stderr)
+        print("[SearXNG][PATCH] 跳过 github.py (文件不存在)", file=sys.stderr)
         return False
 
     content = path.read_text(encoding="utf-8")
@@ -319,7 +319,7 @@ def patch_webapp_image_proxy_close_error() -> bool:
     """
     path = WEBAPP_DIR / "webapp.py"
     if not path.exists():
-        print(f"[SearXNG][PATCH] 跳过 webapp.py (文件不存在)", file=sys.stderr)
+        print("[SearXNG][PATCH] 跳过 webapp.py (文件不存在)", file=sys.stderr)
         return False
 
     content = path.read_text(encoding="utf-8")

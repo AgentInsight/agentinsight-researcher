@@ -275,7 +275,7 @@ async def test_fallback_uses_settings_when_template_disabled(
     mock_config: MagicMock,
     persona: PersonaConfig,
 ) -> None:
-    """chitchat_fallback_to_template=False → 返回 settings 固定话术 (旧版兼容)."""
+    """chitchat_fallback_to_template=False → 返回 settings 固定话术."""
     settings = Settings(
         _env_file=None,
         chitchat_fallback_to_template=False,

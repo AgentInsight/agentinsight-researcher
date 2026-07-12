@@ -2,7 +2,7 @@
 
 节点为纯函数, 单一职责.
 通过 breadth×depth 递归树探索, 每层聚合上下文.
-对标 GPTR DeepResearchSkill (11 项功能 + 自适应深度).
+11 项功能 + 自适应深度.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from src.skills.researcher.searchers import (
 
 logger = logging.getLogger(__name__)
 
-# V4-P2-04: 10 级复杂度评估提示词 (对标 GPTR RFC adaptive-deep-research.md 4 维度评估)
+# 10 级复杂度评估提示词 (4 维度评估)
 _COMPLEXITY_PROMPT = """你是研究复杂度评估专家. 请评估以下查询的研究复杂度 (1-10), 返回严格 JSON.
 
 ## 评估维度 (每维度 1-10 分)
@@ -86,7 +86,7 @@ _COMPLEXITY_PROMPT = """你是研究复杂度评估专家. 请评估以下查询
 
 仅返回 JSON:"""
 
-# V4-P2-04: 10 级复杂度 → breadth/depth/concurrency 映射表
+# 10 级复杂度 → breadth/depth/concurrency 映射表
 # 子查询数 = breadth × (1 + next_breadth + next_breadth² + ...), next_breadth = max(2, breadth//2)
 # max_sub_queries=42 守卫: L9-L10 (35 子查询) 不触发降级
 _COMPLEXITY_MAP: dict[int, dict[str, int]] = {
@@ -107,14 +107,14 @@ class DeepResearcher:
     """递归深度研究器 (breadth×depth 树探索).
 
     每层: 1) 生成 breadth 个子查询 2) 并行检索 3) 聚合上下文 4) 递归下一层.
-    对标 GPTR: 对每个 result 递归, 由 researchGoal + followUpQuestions 驱动.
+    对每个 result 递归, 由 researchGoal + followUpQuestions 驱动.
     """
 
     settings: Settings
     _llm: LLMClient
     _context_manager: ContextManager
     _visited_urls: set[str]
-    # learnings 去重集合 (功能 9, 对标 GPTR list(set(all_learnings)))
+    # learnings 去重集合 (功能 9, list(set(all_learnings)))
     _learnings: set[str]
     # citations 累积字典 (功能 7, learning -> source_url)
     _citations: dict[str, str]
@@ -224,7 +224,7 @@ class DeepResearcher:
                     "children": [],
                 }
 
-            # 1. 生成 breadth 个子查询 (含 researchGoal, 对标 GPTR)
+            # 1. 生成 breadth 个子查询 (含 researchGoal)
             sub_queries = await self._generate_sub_queries(
                 query,
                 breadth,
@@ -250,7 +250,7 @@ class DeepResearcher:
             for sq, r in zip(sub_queries, results, strict=True):
                 r["researchGoal"] = sq.get("researchGoal", sq["query"])
 
-            # 3. 聚合上下文 (对标 GPTR: 列表累积 + learnings + citation + 裁剪)
+            # 3. 聚合上下文 (列表累积 + learnings + citation + 裁剪)
             all_context_list: list[str] = []
             all_sources = [s for r in results for s in r["sources"]]
 
@@ -278,9 +278,9 @@ class DeepResearcher:
             if _parent_context:
                 aggregated_context = f"{_parent_context}\n\n---\n\n{aggregated_context}"
 
-            # 4. 递归下一层 (对标 GPTR: 对每个 result 递归, 由 researchGoal+followUpQuestions 驱动)
+            # 4. 递归下一层 (对每个 result 递归, 由 researchGoal+followUpQuestions 驱动)
             if depth - _current_depth > 1:
-                # 功能 2: next_breadth = max(2, breadth // 2) (对标 GPTR L495)
+                # 功能 2: next_breadth = max(2, breadth // 2)
                 next_breadth = max(2, breadth // 2)
                 children = await asyncio.gather(
                     *[
@@ -326,7 +326,7 @@ class DeepResearcher:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, int]:
-        """评估查询复杂度, 返回自适应参数 (V4-P2-04: 10 级 + 4 维度).
+        """评估查询复杂度, 返回自适应参数 (10 级 + 4 维度).
 
         用 LLMTier.SMART 评估查询复杂度 (1-10), 映射到 breadth/depth/concurrency:
             L1-L2  (简单):   breadth=3, depth=1, concurrency=3 (3 子查询, 单层)
@@ -336,7 +336,7 @@ class DeepResearcher:
             L7-L8  (复杂):   breadth=4, depth=3, concurrency=6 (4+8+16=28 子查询)
             L9-L10 (极复杂): breadth=5, depth=3, concurrency=8 (5+10+20=35 子查询)
 
-        4 维度评估 (对标 GPTR RFC adaptive-deep-research.md):
+        4 维度评估:
             - scope (研究广度): 涉及领域/实体数量
             - depth (研究深度): 分析层次/逻辑链长度
             - multidisciplinary (跨学科): 涉及不同学科/行业数量
@@ -345,7 +345,7 @@ class DeepResearcher:
         LLM 失败时返回 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4, 12 子查询),
         确保失败时仍能给出中等质量研究结果, 而非最简陋的单层研究.
         """
-        # V4-P2-04: 默认参数兜底 (LLM 失败时使用 L4-L5 中等参数)
+        # 默认参数兜底 (LLM 失败时使用 L4-L5 中等参数)
         # 理由: 大多数查询本身为中等复杂度, 用 L4-L5 (12 子查询) 比 depth=1 (4 子查询)
         # 更贴合实际分布, 失败时仍能给出中等质量研究结果.
         default_params: dict[str, int] = {
@@ -362,7 +362,7 @@ class DeepResearcher:
                 messages,
                 tier=LLMTier.SMART,
                 temperature=0.0,
-                max_tokens=500,  # V4-P2-04: 500 token 容错空间 (4 维度 + reasoning + domains)
+                max_tokens=500,  # 500 token 容错空间 (4 维度 + reasoning + domains)
                 user_id=user_id,
                 session_id=session_id,
                 span_name="deep-research-complexity",
@@ -385,7 +385,7 @@ class DeepResearcher:
                 )
                 return default_params
 
-            # V4-P2-04: 从映射表获取参数 (clamped to 1-10)
+            # 从映射表获取参数 (clamped to 1-10)
             complexity = max(1, min(10, complexity))
             params = _COMPLEXITY_MAP.get(complexity, _COMPLEXITY_MAP[5])  # 兜底用 L5
 
@@ -424,7 +424,7 @@ class DeepResearcher:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[dict[str, str]]:
-        """LLM 生成 breadth 个子查询 (含 researchGoal, 对标 GPTR L259-289).
+        """LLM 生成 breadth 个子查询 (含 researchGoal).
 
         Returns:
             [{"query": "<搜索查询>", "researchGoal": "<研究目标>"}, ...]
@@ -458,7 +458,7 @@ class DeepResearcher:
 
     @staticmethod
     def _parse_search_queries(response: str, num_queries: int) -> list[dict[str, str]]:
-        """解析子查询响应 (对标 GPTR parse_search_queries_response L77-116).
+        """解析子查询响应.
 
         支持两种格式:
         - [{"query": "...", "researchGoal": "..."}] (标准)
@@ -496,7 +496,7 @@ class DeepResearcher:
         - 串行 → 并行 (asyncio.gather)
         - 接入 QuotaCache 额度缓存 (捕获 QuotaExceededError 写入缓存)
 
-        GPTR 对标 (功能 6):
+        功能 6:
         - 返回值新增 learnings/followUpQuestions/citations/researchGoal
         - researchGoal 由 research() 调用处关联 (此处不设置)
         """
@@ -577,7 +577,7 @@ class DeepResearcher:
 
             context_str = "\n\n".join(context_parts)
 
-            # 功能 6: learnings 提取 (对标 GPTR process_research_results)
+            # 功能 6: learnings 提取
             learnings_result = await self._process_research_results(
                 sub_query,
                 context_str,
@@ -612,7 +612,7 @@ class DeepResearcher:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """提取 learnings + followUpQuestions + citations (对标 GPTR L344-374).
+        """提取 learnings + followUpQuestions + citations.
 
         Args:
             query: 子查询
@@ -658,7 +658,7 @@ class DeepResearcher:
 
     @staticmethod
     def _parse_research_results(response: str, num_learnings: int) -> dict[str, Any]:
-        """解析 LLM 返回的 learnings/followUpQuestions/citations (对标 GPTR L143-205).
+        """解析 LLM 返回的 learnings/followUpQuestions/citations.
 
         支持两种格式:
         - {"learnings": [{"insight": "...", "sourceUrl": "..."}], "followUpQuestions": [...]}
@@ -692,7 +692,7 @@ class DeepResearcher:
         return {"learnings": [], "followUpQuestions": [], "citations": {}}
 
     def _build_next_query(self, result: dict[str, Any]) -> str:
-        """构建下一层递归查询 (对标 GPTR L500-503).
+        """构建下一层递归查询.
 
         由 researchGoal + followUpQuestions 拼接, 内容驱动深入探索.
         """
@@ -707,7 +707,7 @@ class DeepResearcher:
 
     @staticmethod
     def _trim_context_to_word_limit(context_list: list[str], max_words: int) -> list[str]:
-        """裁剪上下文列表到词数上限 (对标 GPTR trim_context_to_word_limit L213-231).
+        """裁剪上下文列表到词数上限.
 
         从后向前保留最近/最相关内容, 超限的早期上下文被丢弃.
         """

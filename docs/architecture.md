@@ -427,4 +427,4 @@ Three build modes: QA offline / production online / production offline. Seven-co
 
 ---
 
-> 本文档基于项目实际代码编写。详细的开发规范与约束请参阅 [AGENTS.md](../AGENTS.md)（14 章规范），API 接口详情请参阅 [README.md](../README.md)。
+> 本文档基于项目实际代码编写。详细的开发规范与约束请参阅项目根目录的规范文档（14 章规范），API 接口详情请参阅 [README.md](../README.md)。

@@ -1,6 +1,6 @@
 """冒烟测试: DeepResearcher 模块可导入 + 可实例化 + research() 最小调用.
 
-验证 GPTR 深度研究功能的核心可调用性:
+验证深度研究功能的核心可调用性:
 - DeepResearcher 类可导入无异常
 - DeepResearcher 可实例化 (依赖全部 mock, 不连接外部服务)
 - research() 最小调用 (mock LLM + mock 搜索) 不报错
@@ -79,7 +79,7 @@ def test_deep_research_settings_readable() -> None:
     """验证 Settings 含 deep_research_* 配置字段且默认值正确."""
     settings = Settings(_env_file=None)
 
-    # 功能 11: breadth=4 (对标 GPTR)
+    # 功能 11: breadth=4
     assert settings.deep_research_breadth == 4
     # depth=2 默认
     assert settings.deep_research_depth == 2
@@ -87,7 +87,7 @@ def test_deep_research_settings_readable() -> None:
     assert settings.deep_research_concurrency == 4
     # 自适应深度默认开启
     assert settings.deep_research_adaptive is True
-    # max_sub_queries 守卫: 42 (V4-P2-04, 支持 L9-L10: 5+10+20=35)
+    # max_sub_queries 守卫: 42 (支持 L9-L10: 5+10+20=35)
     assert settings.deep_research_max_sub_queries == 42
     # 每子查询 learnings 数量上限
     assert settings.deep_research_num_learnings == 3

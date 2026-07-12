@@ -24,7 +24,7 @@ from typing import Any
 
 # curl_cffi 可选导入 (容器启动时 pip install curl_cffi 安装)
 # 注: 不在模块级暴露 curl_requests (SearXNG 引擎加载器会扫描模块属性作为配置,
-#     None 值会触发 "Missing engine config attribute" 错误), 改为函数内导入
+#     None 值会触发 "Missing engine config attribute" 错误), 因此使用函数内导入
 try:
     import curl_cffi  # noqa: F401
 

@@ -1,6 +1,6 @@
 """性能测试: DeepResearcher 核心方法性能基准.
 
-验证 GPTR 深度研究核心方法的性能:
+验证深度研究核心方法的性能:
 - _trim_context_to_word_limit 大列表性能 (10000 块上下文裁剪延迟)
 - learnings 去重大量数据性能 (10000 个 learnings 去重延迟)
 

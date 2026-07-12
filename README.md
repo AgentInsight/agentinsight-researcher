@@ -222,7 +222,7 @@ GET /health
 {
   "status": "ok",
   "service": "agentinsight-researcher",
-  "version": "0.1.0"
+  "version": "1.0.0"
 }
 ```
 
@@ -255,7 +255,7 @@ GET /.well-known/agent-discovery.json
 ```json
 {
   "name": "agentinsight-researcher",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "中文优先的研究分析智能体",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI 兼容研究端点 (流式 SSE + 非流式)"},
@@ -1273,7 +1273,7 @@ No body, no auth.
 {
   "status": "ok",
   "service": "agentinsight-researcher",
-  "version": "0.1.0"
+  "version": "1.0.0"
 }
 ```
 
@@ -1302,7 +1302,7 @@ No auth.
 ```json
 {
   "name": "agentinsight-researcher",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Chinese-first research analysis agent",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI-compatible research endpoint (streaming SSE + non-streaming)"},

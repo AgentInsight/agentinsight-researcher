@@ -89,7 +89,7 @@ COPY --chown=agent:agent . .
 
 USER agent
 
-# P0-2 修复: 验证 litellm 已正确安装 (构建时强校验, 避免运行时 ModuleNotFoundError)
+# 构建时强校验 litellm 已正确安装 (避免运行时 ModuleNotFoundError)
 # 重建镜像须加 --no-cache: docker compose -p agentinsight build --no-cache (确保 litellm 被重新安装)
 # 注意: litellm 库不暴露 __version__ 属性, 用 importlib.metadata.version 读取
 RUN python -c "import litellm; from importlib.metadata import version; print(f'litellm version: {version(\"litellm\")}')" || \

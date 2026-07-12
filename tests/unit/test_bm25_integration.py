@@ -1,4 +1,4 @@
-"""单元测试: BM25 自动调用 update_bm25_corpus (P0 BM25 断点修复集成).
+"""单元测试: BM25 自动调用 update_bm25_corpus.
 
 验证 src/rag/retriever.py _ensure_bm25_corpus 在 retrieve 入口自动调用:
 - retrieve 入口自动触发 _ensure_bm25_corpus (无需业务代码显式调用)
@@ -8,7 +8,7 @@
 - _ensure_bm25_corpus singleflight 锁 (并发同 namespace 只拉一次)
 - _ensure_bm25_corpus 清理已不在检索列表的 namespace 内存缓存
 - _ensure_bm25_corpus 失败不阻断检索 (BM25 路径返回空)
-- update_bm25_corpus 由 _ensure_bm25_corpus 自动调用 (死代码修复)
+- update_bm25_corpus 由 _ensure_bm25_corpus 自动调用
 
 检索必须混合 BM25 + 向量.
 单元测试不依赖外部服务 (mock Qdrant/Redis/Embeddings).
@@ -324,9 +324,9 @@ async def test_retrieve_bm25_load_failure_does_not_block(
 
 
 async def test_update_bm25_corpus_called_by_ensure(retriever: HybridRetriever) -> None:
-    """update_bm25_corpus 由 _ensure_bm25_corpus 自动调用 (死代码修复).
+    """update_bm25_corpus 由 _ensure_bm25_corpus 自动调用.
 
-    场景: 旧版 update_bm25_corpus 无业务调用方 (死代码), 现由 _ensure_bm25_corpus
+    场景: update_bm25_corpus 由 _ensure_bm25_corpus
     在 retrieve 入口自动调用. 验证 _ensure_bm25_corpus 内部调用 update_bm25_corpus.
     """
     docs = [_make_doc("文档1"), _make_doc("文档2")]

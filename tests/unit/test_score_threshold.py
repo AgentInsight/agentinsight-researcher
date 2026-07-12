@@ -171,7 +171,7 @@ async def test_rerank_on_filters_low_score_results(
     """rerank_enabled=True: _rerank 内部过滤 score < threshold 的结果.
 
     场景: rerank 返回的 relevance_score < 0.3 应被丢弃.
-    注: 不过滤 _rerank 方法, 改为 mock _rerank_client.post, 让真实 _rerank
+    注: 不过滤 _rerank 方法, 而是 mock _rerank_client.post, 让真实 _rerank
     跑 score_threshold 过滤逻辑 (过滤在 _rerank 内部, 非 retrieve 主流程).
     """
     retriever_rerank_on._qdrant.build_data_shared_namespace = MagicMock(return_value="agent-data")

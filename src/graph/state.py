@@ -93,8 +93,8 @@ class ResearcherState(TypedDict, total=False):
     # ========== 输出 ==========
     # 报告格式字段合并为单一 dict, key 为格式名 (md/html/pdf/docx/json),
     # value 为内容 (md/html/docx/json) 或文件路径 (pdf).
-    # report_md 保留一个发布周期 (deprecated), 新代码应使用 report_formats["md"].
-    report_md: str  # deprecated: 使用 report_formats["md"], 兼容期保留
+    # report_md 为兼容字段, 新代码应使用 report_formats["md"].
+    report_md: str  # 兼容字段: 使用 report_formats["md"]
     report_formats: dict[str, str]  # {md|html|pdf|docx|json: 内容或路径}
     report_image_url: str  # 报告配图 URL (deepseek-v4-flash 生成)
     report_image_b64: str  # 报告配图 base64 (与 url 二选一)

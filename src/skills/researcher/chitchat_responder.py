@@ -435,10 +435,10 @@ class ChitchatResponder:
     ) -> str:
         """获取兜底话术 (multi-template 随机).
 
-        chitchat_fallback_to_template=False 时返回 settings 里的固定话术 (旧版兼容).
+        chitchat_fallback_to_template=False 时返回 settings 里的固定话术.
         """
         if not self._settings.chitchat_fallback_to_template:
-            # 旧版兼容: 返回 settings 固定话术
+            # 返回 settings 固定话术
             if category == "short_query":
                 return self._settings.short_query_reply
             return self._settings.off_topic_reply

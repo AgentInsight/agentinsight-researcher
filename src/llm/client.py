@@ -127,7 +127,7 @@ class LLMClient:
     """
 
     settings: Settings = field(default_factory=get_settings)
-    # 成本追踪改为 per-session 隔离 (全局单例不再累积跨会话成本)
+    # 成本追踪 per-session 隔离
     # key = session_id, value = {call_count, input_tokens, output_tokens, cost_usd, step_costs}
     _session_costs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
 
@@ -330,7 +330,7 @@ class LLMClient:
         if stop:
             kwargs["stop"] = stop
         if reasoning_effort:
-            # reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts)
+            # reasoning_effort 透传 LiteLLM
             # 不支持 reasoning_effort 的模型由 LiteLLM 静默忽略
             kwargs["reasoning_effort"] = reasoning_effort
         if api_key:
@@ -502,7 +502,7 @@ class LLMClient:
               命中直接返回 (跳过 LLM 调用);
               仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
         放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
-        reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts),
+        reasoning_effort 透传 LiteLLM,
               None 时不添加该参数, 不支持该参数的模型由 LiteLLM 静默忽略.
         """
         # span 用初始 tier 的 model/params (降级后实际 model 在 cost_details.model 记录)
@@ -664,7 +664,7 @@ class LLMClient:
         step 标识业务步骤, 计入 step_costs 分布.
         流式连接建立失败时按 _FALLBACK_TIER 逐级降级;
         一旦开始 yield 内容后不降级 (已输出内容无法回滚).
-        reasoning_effort 透传 LiteLLM (功能 10, 对标 GPTR ReasoningEfforts),
+        reasoning_effort 透传 LiteLLM,
               None 时不添加该参数, 不支持该参数的模型由 LiteLLM 静默忽略.
         """
         # span 用初始 tier 的 model/params

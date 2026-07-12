@@ -4,7 +4,7 @@
 无需 API Key, 需配置 SEARX_URL 环境变量 (默认 http://searxng:8099, 容器内访问).
 
 国内主搜索引擎, 替代 DuckDuckGo (平均 22.5s/次) 作为 CN 区域首选.
-- name 改为 "searxng" (与注册表 FREE_QUOTA_MAP 一致)
+- name: "searxng" (与注册表 FREE_QUOTA_MAP 一致)
 - timeout 从 settings.search_timeout 读取 (默认 10.0)
 - 新增 safesearch=0 (关闭安全搜索过滤) + language="zh-CN" 参数
 - 新增 time_range/categories 参数支持 (可选, kwargs 传入)

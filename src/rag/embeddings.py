@@ -32,8 +32,7 @@ logger = logging.getLogger(__name__)
 NAMESPACE_DNS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 # ========== 进程内 Embedding 缓存 (LRU + TTL) ==========
-# 改为单文本级缓存 (key=单条文本 sha256), 提升命中率
-# 旧版整批 sha256 在 query 变化时 100% miss, 单文本缓存可跨 query 复用 chunks 向量
+# 单文本级缓存 (key=单条文本 sha256), 提升命中率
 _EMBED_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _EMBED_CACHE_MAX_SIZE: int = 2000  # 最大缓存条目 (单文本级, 提升容量)
 _EMBED_CACHE_TTL: int = 3600  # 1 小时 TTL (秒)
@@ -42,7 +41,7 @@ _EMBED_CACHE_TTL: int = 3600  # 1 小时 TTL (秒)
 def _cache_key_single(text: str) -> str:
     """生成单文本缓存键 (基于单条文本 sha256).
 
-    相比旧版整批 sha256, 单文本 key 在 query 变化但 chunks 相同时可命中,
+    单文本 key 在 query 变化但 chunks 相同时可命中,
     WrittenContentCompressor 已写入 chunks 的 embedding 也可被复用.
     """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -67,9 +66,9 @@ def _cache_set_single(key: str, vector: list[float]) -> None:
         _EMBED_CACHE.popitem(last=False)
 
 
-# 保留旧版批量接口兼容 (标记 deprecated, 内部转发到单文本逻辑)
+# 批量接口兼容 (内部转发到单文本逻辑)
 def _cache_key(texts: list[str]) -> str:
-    """[deprecated] 旧版整批缓存键, 仅供向后兼容."""
+    """批量缓存键, 仅供向后兼容."""
     combined = "\n".join(texts)
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
@@ -232,7 +231,7 @@ class EmbeddingsClient:
 
         客户端按 embeddings_max_client_batch_size 分批, asyncio.gather 并发.
         进程内 LRU+TTL 缓存, 命中直接返回.
-        单文本级缓存 (替代旧版整批 sha256), 大幅提升命中率.
+        单文本级缓存, 大幅提升命中率.
         """
         if not texts:
             return []

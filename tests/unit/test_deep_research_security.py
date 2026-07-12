@@ -1,6 +1,6 @@
 """安全测试: DeepResearcher 安全防护验证.
 
-验证 GPTR 深度研究功能的安全防护:
+验证深度研究功能的安全防护:
 - context[:8000] 截断防注入: _process_research_results 截断超长上下文
 - safe_json_parse 处理恶意 JSON: 注入尝试/超大数字/嵌套深度
 - learnings 不含 PII 泄漏: learnings 提取不泄露 user_id/session_id

@@ -25,7 +25,7 @@ from typing import Any
 # curl_cffi 可选导入 (容器启动时 pip install curl_cffi 安装)
 # curl_cffi 是本地库, 通过 BoringSSL 模拟 Chrome TLS 指纹, 不调用外部 API
 # 注: 不在模块级暴露 curl_requests (SearXNG 引擎加载器会扫描模块属性作为配置,
-#     None 值会触发 "Missing engine config attribute" 错误), 改为函数内导入
+#     None 值会触发 "Missing engine config attribute" 错误), 因此使用函数内导入
 try:
     import curl_cffi  # noqa: F401
 
@@ -222,7 +222,7 @@ def _parse_sogou_html(html_text: str) -> list[dict[str, Any]]:
     """降级解析: 直接从 HTML 解析 sogou 搜索结果 (不依赖原 sogou 引擎模块).
 
     当 searx.engines.sogou 模块不可用时 (非 SearXNG 容器环境) 使用此降级解析。
-    解析逻辑对标原 sogou.py 的 response() 函数。
+    解析逻辑参考 sogou.py 的 response() 函数。
 
     Args:
         html_text: sogou 搜索结果页 HTML.

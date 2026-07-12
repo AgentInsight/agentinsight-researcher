@@ -218,12 +218,12 @@ async def report_generator_node(
             session_id=state.get("session_id"),
         )
         report_md = result["report_md"]
-        # 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        # 同步写入 report_formats["md"] 与 report_md (兼容字段)
         existing_formats = state.get("report_formats") or {}
         new_formats: dict[str, str] = dict(existing_formats)
         new_formats["md"] = report_md
         delta: dict[str, Any] = {
-            "report_md": report_md,  # deprecated: 兼容旧代码
+            "report_md": report_md,  # 兼容字段
             "report_formats": new_formats,
             "status": "completed",
         }
@@ -278,7 +278,7 @@ async def publisher_node(
     graph 完成后异步调用 report_store.save_report 完成 (节点纯函数约束).
 
     报告格式字段统一写入 report_formats dict (key 为 md/html/pdf/docx/json),
-    report_md 同步写入兼容旧代码 (deprecated, 兼容期保留).
+    report_md 同步写入兼容字段.
     """
     async with trace_chain(
         name="publisher",
@@ -317,7 +317,7 @@ async def publisher_node(
             "status": "completed",
             "report_format": result_format,
             "report_formats": new_formats,
-            "report_md": report_md,  # deprecated: 同步写入兼容旧代码
+            "report_md": report_md,  # 兼容字段
         }
         # 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
         # 节点不直接写 DB (节点纯函数无副作用约束).
@@ -418,14 +418,14 @@ async def reviser_node(
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
         )
-        # 同步写入 report_formats["md"] 与 deprecated report_md (兼容期)
+        # 同步写入 report_formats["md"] 与 report_md (兼容字段)
         revised_md = result["report_md"]
         existing_formats = state.get("report_formats") or {}
         new_formats: dict[str, str] = dict(existing_formats)
         new_formats["md"] = revised_md
         # revision_count 累加 1 (Annotated[int, operator.add] reducer)
         delta: dict[str, Any] = {
-            "report_md": revised_md,  # deprecated: 兼容旧代码
+            "report_md": revised_md,  # 兼容字段
             "report_formats": new_formats,
             "revision_count": 1,
         }

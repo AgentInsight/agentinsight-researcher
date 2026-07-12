@@ -1,7 +1,7 @@
 """单元测试: DeepResearcher 递归深度研究器.
 
 验证 src/skills/researcher/deep_research.py:
-- research(): breadth x depth 递归树探索, 每层聚合上下文 (对标 GPTR: 对每个 result 递归)
+- research(): breadth x depth 递归树探索, 每层聚合上下文 (对每个 result 递归)
 - _assess_complexity(): 自适应复杂度评估 (LLM 返回 1-5 映射 breadth/depth)
 - _research_sub_query(): 搜索 + 抓取 + 压缩 + learnings 提取 (含 _visited_urls 跨子查询去重)
 
@@ -59,14 +59,14 @@ def researcher(
     )
 
 
-# ========== research() 递归探索 (对标 GPTR: 对每个 result 递归) ==========
+# ========== research() 递归探索 (对每个 result 递归) ==========
 
 
 @pytest.mark.asyncio
 async def test_deep_researcher_recursive_exploration(
     researcher: DeepResearcher,
 ) -> None:
-    """测试 breadth=2, depth=2 递归探索 (对标 GPTR: 对每个 result 递归).
+    """测试 breadth=2, depth=2 递归探索 (对每个 result 递归).
 
     递归树 (功能 1+2: 对每个 result 递归, next_breadth=max(2, breadth//2)):
     - depth 0 (breadth=2): 生成 2 子查询, _research_sub_query 调用 2 次
@@ -223,7 +223,7 @@ async def test_deep_researcher_visited_urls_dedup(
     assert unique_url_2 in researcher._visited_urls
 
 
-# ========== _assess_complexity() 自适应复杂度 (V4-P2-04: 10 级 + 4 维度) ==========
+# ========== _assess_complexity() 自适应复杂度 (10 级 + 4 维度) ==========
 
 
 @pytest.mark.asyncio
@@ -233,7 +233,7 @@ async def test_deep_researcher_adaptive_complexity(
 ) -> None:
     """测试 _assess_complexity 按复杂度 (1-10) 返回自适应参数.
 
-    V4-P2-04: 10 级复杂度映射表:
+    10 级复杂度映射表:
     - L1-L2  (简单):   breadth=3, depth=1, concurrency=3
     - L3     (简单+):  breadth=4, depth=1, concurrency=4
     - L4-L5  (中等):   breadth=4, depth=2, concurrency=4
@@ -485,7 +485,7 @@ async def test_deep_researcher_handles_sub_query_failure(
 
 
 def test_trim_context_to_word_limit_preserves_recent(researcher: DeepResearcher) -> None:
-    """测试上下文裁剪: 从后向前保留最近内容, 超限丢弃早期 (对标 GPTR L213-231)."""
+    """测试上下文裁剪: 从后向前保留最近内容, 超限丢弃早期."""
     # 5 个上下文块, 每块 3 词
     context_list = ["a b c", "d e f", "g h i", "j k l", "m n o"]
     # max_words=9 → 保留最近 3 块 (9 词)
@@ -512,7 +512,7 @@ def test_trim_context_to_word_limit_first_truncated(researcher: DeepResearcher) 
 
 
 def test_build_next_query_with_goal_and_followups(researcher: DeepResearcher) -> None:
-    """测试递归查询构建: researchGoal + followUpQuestions 拼接 (对标 GPTR L500-503)."""
+    """测试递归查询构建: researchGoal + followUpQuestions 拼接."""
     result = {
         "researchGoal": "研究 AI Agent 趋势",
         "followUpQuestions": ["Q1?", "Q2?"],
@@ -620,7 +620,7 @@ def test_parse_search_queries_num_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_deep_researcher_learnings_dedup(researcher: DeepResearcher) -> None:
-    """测试 learnings 跨子查询去重 (功能 9, 对标 GPTR list(set(all_learnings))).
+    """测试 learnings 跨子查询去重 (功能 9, list(set(all_learnings))).
 
     多个子查询返回相同 learning 时, self._learnings set 仅记录一次,
     上下文累积时也仅追加一次.
@@ -718,7 +718,7 @@ async def test_deep_researcher_max_sub_queries_guard(
     """测试 max_sub_queries 守卫: 递归树超限时降级到 depth=1.
 
     场景: breadth=10, depth=3 → next_breadth=max(2, 5)=5
-    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (deep_research_max_sub_queries, V4-P2-04)
+    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (deep_research_max_sub_queries)
     → 降级到 depth=1, 仅 10 个子查询, 不递归.
     """
 

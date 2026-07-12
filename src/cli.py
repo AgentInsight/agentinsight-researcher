@@ -161,7 +161,7 @@ def _build_initial_state(
         "visited_urls": set[str](),
         "curated_sources": [],
         # 输出占位
-        "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
+        "report_md": "",  # 兼容字段, 新代码用 report_formats
         "report_formats": {},  # {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
         # 深度研究配置

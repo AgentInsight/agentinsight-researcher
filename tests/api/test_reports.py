@@ -11,7 +11,7 @@
 - GET /v1/reports/{report_id}/download?format=xml → 400 (不支持的格式)
 
 报告下载端点 (routes.py download_report):
-- report_id 应为 UUID, 不符合格式时走 deprecated session_id 兼容分支
+- report_id 应为 UUID, 不符合格式时走 session_id 兼容分支
 - 支持格式: markdown / html / pdf / docx / json
 - 数据隔离: report.user_id 必须匹配当前 user_id (匿名用户跳过)
 
@@ -105,7 +105,7 @@ def test_download_report_not_found_404() -> None:
     """报告 ID 不存在返回 404: GET /v1/reports/{nonexistent_uuid}/download → 404.
 
     API 测试应覆盖错误码.
-    routes.py: report_id 合法 UUID 但 DB 中不存在 → deprecated session_id fallback →
+    routes.py: report_id 合法 UUID 但 DB 中不存在 → session_id 兼容分支 →
     仍无匹配 → 404.
     """
     # 生成合法 UUID 但不存在的 report_id
@@ -126,7 +126,7 @@ def test_download_report_invalid_id_400(generated_report_id: str) -> None:
 
     API 测试应覆盖错误码.
     routes.py: format 不在 [markdown/html/pdf/docx/json] 白名单 → 400.
-    注意: "无效报告 ID" (非 UUID 格式) 实际走 deprecated session_id 兼容分支,
+    注意: "无效报告 ID" (非 UUID 格式) 实际走 session_id 兼容分支,
     不匹配时返回 404 而非 400; 真正返回 400 的场景是 format 参数不合法.
     """
     with httpx.Client(timeout=QUICK_TIMEOUT) as client:

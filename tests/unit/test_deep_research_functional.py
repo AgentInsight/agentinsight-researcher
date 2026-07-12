@@ -1,6 +1,6 @@
-"""功能测试: DeepResearcher GPTR 递归树探索 (mock 版).
+"""功能测试: DeepResearcher 递归树探索 (mock 版).
 
-验证 GPTR 深度研究核心功能 (对标 GPTR DeepResearchSkill):
+验证深度研究核心功能:
 - breadth=4/depth=2 → 12 子查询 (递归树规模验证)
 - learnings 被正确提取 (mock _process_research_results)
 - citation 标注出现在 context 中
@@ -60,14 +60,14 @@ def researcher(
     )
 
 
-# ========== 功能 11: breadth=4/depth=2 → 12 子查询 (对标 GPTR) ==========
+# ========== 功能 11: breadth=4/depth=2 → 12 子查询 ==========
 
 
 @pytest.mark.asyncio
 async def test_breadth_4_depth_2_generates_12_sub_queries(
     researcher: DeepResearcher,
 ) -> None:
-    """验证 breadth=4/depth=2 递归树生成 12 个子查询 (对标 GPTR 默认).
+    """验证 breadth=4/depth=2 递归树生成 12 个子查询.
 
     递归树:
     - depth 0 (breadth=4): 4 子查询
@@ -245,7 +245,7 @@ async def test_follow_up_questions_drive_recursion(researcher: DeepResearcher) -
 async def test_sources_aggregation_across_layers(researcher: DeepResearcher) -> None:
     """验证 sources 聚合: 根节点仅含 depth 0 的 sources, children 含 depth 1 的 sources.
 
-    GPTR 对标: 每层 sources 独立, 不跨层聚合 (避免来源重复).
+    每层 sources 独立, 不跨层聚合 (避免来源重复).
     """
     call_count = 0
 

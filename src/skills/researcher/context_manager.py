@@ -62,7 +62,7 @@ class ContextManager:
         保留最近 25% 消息为原文, 其余 LLM 摘要化.
         供后续节点 (writer/proofreader 等) 在写入会话前调用.
 
-        3.6.1 死代码修复: 本方法实现完整可用, 供 chat_agent.py 的 chat 方法
+        本方法实现完整可用, 供 chat_agent.py 的 chat 方法
         (或 multi_agent_builder.py 的 researcher 节点) 在写入会话前调用做长会话压缩.
         典型调用方式:
 
@@ -363,8 +363,7 @@ class ContextManager:
                 doc_embs = all_embs[1:]
 
                 # 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
-                # 旧版仅缓存 sha256(doc_text), 与 compute_embedding_batch 查询 key sha256(chunk) 不匹配
-                # 新版拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
+                # 拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
                 from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
 
                 for doc_text, doc_emb in zip(documents, doc_embs, strict=False):
@@ -572,10 +571,10 @@ class ContextManager:
         new_vecs: list[list[float]],
         written_vecs: list[list[float]],
     ) -> np.ndarray:
-        """批量余弦相似度 (numpy 矩阵加速, P4 修复 context-compress 性能瓶颈).
+        """批量余弦相似度 (numpy 矩阵加速, 修复 context-compress 性能瓶颈).
 
         一次性计算 M 条新向量与 N 条已写入向量之间的两两余弦相似度,
-        替代旧版 WrittenContentCompressor.should_keep 内的 O(N*M) 双重 for 循环.
+        替代 O(N*M) 双重 for 循环.
 
         Args:
             new_vecs: 新向量列表 (M 条, 每条 D 维)
@@ -698,8 +697,8 @@ class WrittenContentCompressor:
     """已写入内容去重器.
 
     优化:
-    - 阈值走 settings.written_content_similarity_threshold (旧版硬编码 0.5)
-    - chunk 级去重 (旧版整篇 content 比对, V2 切成 chunks 后逐 chunk 比对)
+    - 阈值走 settings.written_content_similarity_threshold
+    - chunk 级去重 (切成 chunks 后逐 chunk 比对)
     - 多查询并集去重 (current_subtopic + draft_section_titles 并集)
 
     用 FastEmbed (本地 bge-small-zh-v1.5, 512维) 对已写入内容做相似度去重,
@@ -709,7 +708,7 @@ class WrittenContentCompressor:
     settings: Settings
     _fastembed: FastEmbedClient
     threshold: float
-    # chunk 级去重, 替代旧版整篇 content 比对
+    # chunk 级去重
     _written_embeddings: list[list[float]]
     _written_chunks: list[str]
     # 单条 chunk embedding 缓存 (key=chunk sha256), 避免同一 chunk
@@ -737,14 +736,14 @@ class WrittenContentCompressor:
         self,
         content: str,
     ) -> tuple[list[str], list[list[float]]]:
-        """锁外计算 content 的 chunk embeddings (P4 修复: 缩小锁粒度).
+        """锁外计算 content 的 chunk embeddings (缩小锁粒度).
 
         在锁外完成本地 FastEmbed I/O, 利用 _chunk_cache 缓存单条 chunk 的
         embedding, 避免同一 chunk 在不同 content 中重复嵌入. 返回 (chunks,
         content_embs) 供 check_and_update 在锁内做 numpy 相似度比对.
 
-        拆分动机: 旧版 should_keep 在 dedup_lock 内部调用 embed_texts, 使并行
-        退化为串行 (P50=176s). 现将 embed_texts 移到锁外, 锁仅保护
+        拆分动机: should_keep 在 dedup_lock 内部调用 embed_texts 会使并行
+        退化为串行. 现将 embed_texts 移到锁外, 锁仅保护
         _written_embeddings / _written_chunks 的并发修改.
 
         Embeddings 与追踪硬约束:
@@ -826,7 +825,7 @@ class WrittenContentCompressor:
         """锁内同步: numpy 矩阵比对相似度 + 更新内部状态.
 
         在锁内执行 (保护 _written_embeddings 和 _written_chunks 的并发修改),
-        用 numpy 矩阵乘法一次性计算所有相似度, 替代旧版 O(N*M) 双重 for 循环.
+        用 numpy 矩阵乘法一次性计算所有相似度, 替代 O(N*M) 双重 for 循环.
         任意 chunk 与已写入 chunks 的最高相似度 >= threshold 即丢弃整篇 content,
         保留原语义.
 
@@ -879,7 +878,7 @@ class WrittenContentCompressor:
         """跨章节语义去重 (只丢弃相似 chunk, 保留差异部分).
 
         串行去重: 串行处理子主题, 每个参考已写章节避免重复;
-        本项目并行处理, 旧版"任意 chunk 相似即整篇丢弃"过于激进,
+        本项目并行处理, "任意 chunk 相似即整篇丢弃"过于激进,
         导致子主题间有部分相似内容时整篇被丢弃 (TOC 有标题但正文无内容).
 
         新策略:
@@ -1054,8 +1053,7 @@ class WrittenContentCompressor:
     async def should_keep(self, content: str) -> bool:
         """判断内容是否应保留 (兼容入口, 内部调用 compute_embedding + check_and_update).
 
-        chunk 级去重. 旧版整篇 content 比对, 当 content 较长时
-        相似度被稀释, 误判率高. V2 切成 chunks 后取最高相似度判断,
+        chunk 级去重. 切成 chunks 后取最高相似度判断,
         与 WrittenContentCompressor 对齐.
 
         内部拆分为 compute_embedding (锁外 I/O) + check_and_update

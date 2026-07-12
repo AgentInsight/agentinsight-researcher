@@ -141,9 +141,29 @@ class Publisher:
                 if not line:
                     i += 1
                     continue
-                # SVG 代码块检测 (```svg ... ```)
-                if line.strip() == "```svg":
+                # SVG 检测 1: <div class="report-image"> 内联 SVG (新格式)
+                if '<div class="report-image">' in line:
                     svg_lines: list[str] = []
+                    i += 1
+                    # 收集 <svg> ... </svg> 内容
+                    while i < len(lines) and "</div>" not in lines[i]:
+                        svg_lines.append(lines[i])
+                        i += 1
+                    if i < len(lines):
+                        i += 1  # 跳过 </div>
+
+                    # SVG 转 PNG 后插入 DOCX
+                    svg_code = "\n".join(svg_lines)
+                    png_bytes = self._svg_to_png_bytes(svg_code)
+                    if png_bytes:
+                        doc.add_picture(io.BytesIO(png_bytes), width=Pt(400))
+                    else:
+                        # 转换失败, 降级显示占位文本
+                        doc.add_paragraph("[SVG 配图 (转换失败)]")
+                    continue
+                # SVG 检测 2: ```svg 代码块 (旧格式兼容)
+                if line.strip() == "```svg":
+                    svg_lines = []
                     i += 1
                     while i < len(lines) and lines[i].strip() != "```":
                         svg_lines.append(lines[i])
@@ -157,9 +177,8 @@ class Publisher:
                     if png_bytes:
                         doc.add_picture(io.BytesIO(png_bytes), width=Pt(400))
                     else:
-                        # 转换失败, 降级显示占位文本 + SVG 源代码
-                        doc.add_paragraph("[SVG 配图 (转换失败, 显示源代码)]")
-                        doc.add_paragraph(svg_code[:500])
+                        # 转换失败, 降级显示占位文本
+                        doc.add_paragraph("[SVG 配图 (转换失败)]")
                     continue
                 # 表格检测: 当前行以 | 开头, 且下一行是分隔行 (| :--- | :--- |)
                 if (
@@ -262,14 +281,52 @@ class Publisher:
         """SVG 代码转 PNG bytes (用 cairosvg).
 
         cairosvg 不可用时返回 None (降级显示源代码, 不阻断主流程).
+        自动从 viewBox 解析原始宽高比, 避免裁剪.
+        预处理清理悬空 marker 引用 (cairosvg 2.9.0 bug: 引用缺失时崩溃).
         """
         try:
+            import re
+
             import cairosvg
+
+            # 预处理: 清理悬空 marker 引用 (cairosvg 2.9.0 在 marker-end="url(#id)"
+            # 引用的 <marker id="id"> 不存在时抛 AttributeError)
+            # 收集所有 def 元素的 id (marker/gradient/filter 等)
+            defined_ids = set(re.findall(r'\bid\s*=\s*["\']([^"\']+)["\']', svg_code))
+            # 清理 marker-start/marker-mid/marker-end 中引用不存在定义的属性
+            def _clean_dangling_marker(m: re.Match) -> str:
+                ref_id = m.group(2)
+                if ref_id in defined_ids:
+                    return m.group(0)
+                # 引用不存在, 移除该属性
+                return ""
+            svg_code = re.sub(
+                r'\s(marker-(?:start|mid|end))\s*=\s*["\']url\(#([^)]+)\)["\']',
+                _clean_dangling_marker,
+                svg_code,
+            )
+
+            # 从 SVG viewBox 解析原始宽高比, 避免固定 1024x768 导致裁剪
+            # viewBox="0 0 W H" 格式
+            viewbox_match = re.search(
+                r'viewBox\s*=\s*["\']\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s*["\']',
+                svg_code,
+            )
+            if viewbox_match:
+                vb_w = float(viewbox_match.group(1))
+                vb_h = float(viewbox_match.group(2))
+                # 以 1024 为基准宽度, 按原始宽高比计算高度
+                output_w = 1024
+                output_h = int(1024 * vb_h / vb_w)
+            else:
+                # 无 viewBox, 使用正方形 (避免裁剪)
+                output_w = 1024
+                output_h = 1024
 
             return cairosvg.svg2png(
                 bytestring=svg_code.encode("utf-8"),
-                output_width=1024,
-                output_height=768,
+                output_width=output_w,
+                output_height=output_h,
             )
         except ImportError:
             logger.warning("cairosvg 未安装, SVG 配图无法转 PNG (DOCX/PDF 降级显示源代码)")
@@ -310,10 +367,10 @@ class Publisher:
 
             import mistune
 
-            markdown = mistune.create_markdown(plugins=["table"])
+            markdown = mistune.create_markdown(plugins=["table"], escape=False)
             body = markdown(md)
 
-            # 后处理: 将 ```svg 代码块转为内联 SVG (浏览器原生渲染)
+            # 后处理 1: 将 ```svg 代码块转为内联 SVG (浏览器原生渲染)
             # mistune 将 ```svg 渲染为 <pre><code class="language-svg">...</code></pre>
             # 浏览器不直接渲染该格式, 需替换为 <div>{svg_code}</div> 并还原 HTML 实体
             svg_pattern = r'<pre><code class="language-svg">([\s\S]*?)</code></pre>'
@@ -323,7 +380,22 @@ class Publisher:
 
             body = re.sub(svg_pattern, _unescape_svg, body)
 
+            # 后处理 2: 确保内联 SVG 限制最大宽度 (防止 PDF/HTML 图片超出页面被裁剪)
+            # 给 <svg 标签注入 max-width style (如果未有 style 属性)
+            # 同时给 div.report-image 添加 text-align:center
+            def _constrain_svg(m: re.Match) -> str:
+                svg_tag = m.group(0)
+                # 如果 <svg 已有 style 属性, 追加 max-width; 否则添加 style 属性
+                if 'style="' in svg_tag:
+                    svg_tag = svg_tag.replace('style="', 'style="max-width:100%;height:auto;')
+                else:
+                    svg_tag = svg_tag.replace('<svg ', '<svg style="max-width:100%;height:auto;" ', 1)
+                return svg_tag
+
+            body = re.sub(r'<svg[\s]', _constrain_svg, body)
+
             # HTML 模板 (内联 CSS, 离线友好)
+            # 注意: CSS 花括号不需要转义 (用 .replace 不走 Jinja2 模板)
             template = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -331,24 +403,27 @@ class Publisher:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>研究报告</title>
 <style>
-body {{ font-family: "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; }}
-h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
-h2 {{ color: #34495e; border-bottom: 1px solid #ecf0f1; padding-bottom: 8px; margin-top: 30px; }}
-h3 {{ color: #34495e; margin-top: 25px; }}
-a {{ color: #3498db; text-decoration: none; }}
-a:hover {{ text-decoration: underline; }}
-code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: "DejaVu Sans Mono", "Source Code Pro", monospace; }}
-blockquote {{ border-left: 4px solid #3498db; margin: 0; padding-left: 16px; color: #666; }}
-table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
-th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
-th {{ background: #f8f9fa; font-weight: 600; }}
+body { font-family: "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; }
+h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+h2 { color: #34495e; border-bottom: 1px solid #ecf0f1; padding-bottom: 8px; margin-top: 30px; }
+h3 { color: #34495e; margin-top: 25px; }
+a { color: #3498db; text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: "DejaVu Sans Mono", "Source Code Pro", monospace; }
+blockquote { border-left: 4px solid #3498db; margin: 0; padding-left: 16px; color: #666; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+th { background: #f8f9fa; font-weight: 600; }
+.report-image { text-align: center; margin: 20px 0; }
+.report-image svg { max-width: 100%; height: auto; }
 </style>
 </head>
 <body>
-{body}
+__BODY_PLACEHOLDER__
 </body>
 </html>"""
-            return template.replace("{body}", body)
+            # 用 placeholder 避免 {body} 与 CSS 中的 { } 冲突
+            return template.replace("__BODY_PLACEHOLDER__", body)
         except Exception as e:  # noqa: BLE001
             logger.warning("HTML 渲染失败, 返回纯文本: %s", e)
             return f"<html><body><pre>{md}</pre></body></html>"

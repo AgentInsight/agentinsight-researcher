@@ -108,7 +108,7 @@ class TestReportStoreDsn:
         )
         store = ReportStore(settings)
         # _dsn() 已弃用, 用 pytest.warns 显式捕获 DeprecationWarning 避免 warning 噪声
-        with pytest.warns(DeprecationWarning, match="deprecated"):
+        with pytest.warns(DeprecationWarning, match="db_initializer"):
             dsn = store._dsn()
         assert dsn == "postgresql://user:pass@host:5432/db"
         assert "asyncpg" not in dsn
@@ -117,7 +117,7 @@ class TestReportStoreDsn:
         """_dsn() 以 postgresql:// 开头."""
         settings = Settings(_env_file=None)
         store = ReportStore(settings)
-        with pytest.warns(DeprecationWarning, match="deprecated"):
+        with pytest.warns(DeprecationWarning, match="db_initializer"):
             dsn = store._dsn()
         assert dsn.startswith("postgresql://")
 

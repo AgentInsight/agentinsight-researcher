@@ -3,7 +3,7 @@
 抓取器清单:
 - TrafilaturaScraper: L1 主路径 (LLM 友好 Markdown, 轻量级去噪)
 - BSMarkdownifyScraper: L1 降级链 L2 (HTML→Markdown, 纯本地)
-- BeautifulSoupScraper: 旧版默认 (轻量, 速度快, 输出纯文本)
+- BeautifulSoupScraper: 轻量, 速度快, 输出纯文本
 - PlaywrightScraper: JS 渲染页面 (可选, 镜像内安装 chromium)
 - PyMuPDFScraper: PDF 抓取
 - ArxivScraper: Arxiv 论文 (含全文)

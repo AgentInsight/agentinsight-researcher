@@ -392,7 +392,7 @@ async def test_publisher_node_converts_format_html(
     assert delta["report_formats"]["html"] == "<html><body>报告</body></html>"
     # md 格式保留
     assert delta["report_formats"]["md"] == "# 报告"
-    # report_md 同步写入 (deprecated 兼容)
+    # report_md 同步写入 (兼容字段)
     assert delta["report_md"] == "# 报告"
 
 

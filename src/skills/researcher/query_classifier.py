@@ -9,7 +9,7 @@ skills/ 不应依赖 rag/ (已解除 embeddings/qdrant 依赖).
 - 第一层(规则): 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
 - 第二层(LLM FAST 层): 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
   - 命中结果写入 Redis 缓存 (TTL 24h), 高频重复 query 零 LLM 调用
-  - LLM 调用失败默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程)
+  - LLM 调用失败默认 OFF_TOPIC (走最轻路径, 避免误导向高成本研究流程)
 
 短查询(如"你好"/"1"/"天气")与离题闲聊(如"今天怎么样"/"讲个笑话"/"你多大了")直接返回
 settings.short_query_reply / settings.off_topic_reply, 不走任何 graph, 零 LLM 成本.
@@ -167,7 +167,7 @@ class QueryIntent(StrEnum):
 
 
 # llm_classify_fallback 字符串 → QueryIntent 映射 (字典查表取代 if-else)
-# 默认 OFF_TOPIC (业界标准: 走最轻路径); 仅 "research" 显式映射, 其他值兜底 OFF_TOPIC
+# 默认 OFF_TOPIC (走最轻路径); 仅 "research" 显式映射, 其他值兜底 OFF_TOPIC
 _FALLBACK_INTENT_MAP: dict[str, QueryIntent] = {
     "research": QueryIntent.RESEARCH,
 }
@@ -188,7 +188,7 @@ class QueryIntentClassifier:
     1. 规则层: 长度<min_length / 纯数字 / 纯标点 / 闲聊正则 → SHORT_QUERY 或 OFF_TOPIC
     2. LLM FAST 层: 规则层未命中时, 用 LLMTier.FAST 分类 RESEARCH / CHAT / OFF_TOPIC
        - 命中结果写入 Redis 缓存 (TTL 24h)
-       - 失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径)
+       - 失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 走最轻路径)
 
     设计原则 (级联降级策略):
     - FAST_LLM 优先 (glm-4-flash, 免费层)
@@ -296,7 +296,7 @@ class QueryIntentClassifier:
         """第二层 LLM FAST 分类 (强化 prompt + few-shot 例子).
 
         用 LLMTier.FAST (glm-4-flash, temperature=0.0) 分类 RESEARCH / CHAT / OFF_TOPIC.
-        失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 业界标准: 走最轻路径).
+        失败时默认 settings.llm_classify_fallback (默认 OFF_TOPIC, 走最轻路径).
 
         Args:
             query: 用户原始查询
@@ -375,9 +375,9 @@ class QueryIntentClassifier:
             )
             return self._fallback_intent()
         except Exception as e:  # noqa: BLE001
-            # 业界标准 - LLM 失败走最轻路径 (默认 OFF_TOPIC, 避免误导向研究)
+            # LLM 失败走最轻路径 (默认 OFF_TOPIC, 避免误导向研究)
             logger.warning(
-                "LLM 意图分类失败, 走 llm_classify_fallback=%s (业界默认最轻路径): %s",
+                "LLM 意图分类失败, 走 llm_classify_fallback=%s (默认最轻路径): %s",
                 self.settings.llm_classify_fallback,
                 e,
             )
@@ -386,7 +386,7 @@ class QueryIntentClassifier:
     def _fallback_intent(self) -> QueryIntent:
         """返回配置的 LLM 失败兜底意图.
 
-        默认 OFF_TOPIC (业界标准: 走最轻路径, 避免误导向高成本研究流程).
+        默认 OFF_TOPIC (走最轻路径, 避免误导向高成本研究流程).
         可通过 settings.llm_classify_fallback 配置为 "research" 覆盖.
 
         字典查表取代 if-else (分支优化方案).
@@ -523,7 +523,7 @@ async def cleanup_legacy_chat_seeds() -> None:
 
         mgr = get_qdrant_manager()
         await mgr.ensure_collection()
-        # 旧版 namespace: {agent_id}-chat:short_query / {agent_id}-chat:off_topic
+        # legacy namespace: {agent_id}-chat:short_query / {agent_id}-chat:off_topic
         chat_ns = f"{mgr.settings.agent_name}-chat"
         legacy_namespaces = [f"{chat_ns}:short_query", f"{chat_ns}:off_topic"]
         for ns in legacy_namespaces:

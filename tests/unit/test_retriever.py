@@ -84,8 +84,8 @@ def test_rrf_score_formula():
 async def test_build_data_namespaces_shared_only_when_no_user():
     """测试无 user_id 且共享 namespace 有数据时, 只检索共享 namespace.
 
-    3.5.2 死代码修复: 旧版 build_namespaces 已删除, 改测新版 build_data_namespaces.
-    新版含私有数据存在性检查, 不连接 Qdrant 时用 fake manager 模拟.
+    build_data_namespaces 含私有数据存在性检查,
+    不连接 Qdrant 时用 fake manager 模拟.
     """
     settings = Settings(agent_name="agentinsight-researcher", _env_file=None)
     retriever = HybridRetriever(settings)

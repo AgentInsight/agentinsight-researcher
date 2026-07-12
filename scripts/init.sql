@@ -2,7 +2,7 @@
 -- 单库 agents, 业务表含 agent_id+user_id 双列复合索引
 -- LangGraph PostgresSaver 表由官方 SDK 管理 (thread_id 已含会话隔离)
 --
--- 设计原则 (10 角色 AI 专家团队审查):
+-- 设计原则:
 -- 1. CREATE TABLE 定义与最终状态一致 (新部署直接正确)
 -- 2. ALTER TABLE 保留作为旧表兜底 (CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op, 不会添加新列)
 -- 3. 所有 DDL 使用 IF NOT EXISTS / IF EXISTS / CREATE OR REPLACE 保证幂等 (Agent 启动时重复执行不出错)
@@ -218,7 +218,7 @@ CREATE OR REPLACE TRIGGER trg_mcp_configs_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ========== 预置系统公用 MCP 服务 ==========
--- 来源: https://github.com/modelcontextprotocol/servers 官方参考实现 + 国内外流行 MCP 服务
+-- 来源: modelcontextprotocol/servers + 国内外流行 MCP 服务
 -- 用户可查看但不可编辑/删除, 可克隆到自己的列表后定制
 -- 使用 ON CONFLICT (agent_id, user_id, name) 保证幂等 (重复启动不重复插入)
 
@@ -262,7 +262,7 @@ WHERE is_system = TRUE
 --   neo4j:        @neo4j/mcp-server (npm 404) → mcp-server-neo4j (PyPI, uvx)
 --   chrome-mcp:   @anthropic-ai/chrome-mcp (npm 404) → chrome-devtools-mcp (npm 社区替代)
 --   clickhouse:   @clickhouse/mcp-server (npm 404) → clickhouse-mcp-server (npm 社区替代)
---   github:       保留 npx (npm 200, 之前超时为网络问题)
+--   github:       保留 npx (npm 200, 超时为网络问题)
 -- version=3: 触发 ON CONFLICT DO UPDATE 更新已部署的 v1/v2 配置 (v2 wikipedia 可执行文件名错误)
 INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, version, description) VALUES
     -- ===== 核心保留 12 个 (研究场景高价值、无冗余、合规无冲突) =====

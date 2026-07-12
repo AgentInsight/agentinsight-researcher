@@ -649,7 +649,7 @@ async def chat_completions(
     # 加载已上传文件上下文 (用户需求 8)
     uploaded_files_context: list[str] = []
     if request.uploaded_files:
-        # _load_uploaded_files_context 已改为 async, 内部文件 I/O 经 asyncio.to_thread
+        # _load_uploaded_files_context 为 async, 内部文件 I/O 经 asyncio.to_thread
         uploaded_files_context = await _load_uploaded_files_context(
             request.uploaded_files, user_id, agent_id
         )
@@ -676,7 +676,7 @@ async def chat_completions(
         "sources": [],
         "visited_urls": [],
         "curated_sources": [],
-        "report_md": "",  # deprecated: 兼容期保留, 新代码用 report_formats
+        "report_md": "",  # 兼容字段, 新代码用 report_formats
         "report_formats": {},  # {md|html|pdf|docx|json: 内容或路径}
         "status": "pending",
         # 深度研究配置
@@ -2170,7 +2170,7 @@ async def download_report(
     数据按 agent_id + user_id 隔离.
 
     向后兼容: 若 report_id 未匹配到记录, 尝试将其作为 session_id 查询最新报告
-    (deprecated, 响应头 X-Deprecated 提示调用方迁移到 report_id).
+    (兼容字段, 响应头 X-Deprecated 提示调用方使用 report_id).
     """
     import aiofiles
     import aiofiles.os
@@ -2182,7 +2182,7 @@ async def download_report(
     store = get_report_store()
 
     # report_id 应为 UUID, 不符合格式时跳过 get_report (避免 asyncpg $1::uuid 抛 DataError → 500)
-    # 直接走 deprecated session_id 兼容分支 (session_id 为 VARCHAR(64), 接受任意字符串)
+    # 直接走 session_id 兼容分支 (session_id 为 VARCHAR(64), 接受任意字符串)
     report: dict[str, Any] | None = None
     try:
         uuid.UUID(report_id)
@@ -2203,7 +2203,7 @@ async def download_report(
             report = reports[0]
             deprecated_fallback = True
             logger.warning(
-                "下载端点收到 session_id=%s (deprecated), 应改用 report_id=%s",
+                "下载端点收到 session_id=%s (兼容字段), 建议使用 report_id=%s",
                 report_id,
                 report.get("report_id"),
             )

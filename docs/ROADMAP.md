@@ -21,7 +21,7 @@
 
 ## 版本路线图
 
-### v0.1.0（已发布 - 2026-07-04）✅
+### v1.0.0（已发布 - 2026-07-04）✅
 
 **首次发布**，奠定核心架构与基础能力。
 
@@ -172,7 +172,7 @@ We continue to deepen our focus on:
 
 ## Version Roadmap
 
-### v0.1.0 (Released - 2026-07-04) ✅
+### v1.0.0 (Released - 2026-07-04) ✅
 
 **Initial release**, establishing core architecture and foundational capabilities.
 

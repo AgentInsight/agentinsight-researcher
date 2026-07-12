@@ -190,7 +190,7 @@ class PromptFamily(ABC):
         """
 
     # ========== detailed_report 专用 prompt ==========
-    # 旧版 4 个 prompt 内联在 ReportGenerator, 提取到 PromptFamily 统一管理.
+    # 4 个 prompt 提取到 PromptFamily 统一管理.
 
     @abstractmethod
     def subtopics_prompt(

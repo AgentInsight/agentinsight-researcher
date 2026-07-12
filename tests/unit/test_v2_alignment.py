@@ -292,7 +292,7 @@ class TestAgentCreatorV2:
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_smart_tier(self) -> None:
-        """_generate_via_llm 用 SMART tier (旧版 FAST)."""
+        """_generate_via_llm 用 SMART tier."""
         from src.llm.client import LLMTier
         from src.skills.researcher.agent_creator import AgentCreator
 
@@ -304,13 +304,13 @@ class TestAgentCreatorV2:
 
         await creator._generate_via_llm("测试查询")
 
-        # 验证 tier=SMART (旧版 FAST)
+        # 验证 tier=SMART
         call_kwargs = creator._llm.achat.call_args.kwargs
         assert call_kwargs["tier"] == LLMTier.SMART
 
     @pytest.mark.asyncio
     async def test_generate_via_llm_uses_temperature_0_15(self) -> None:
-        """_generate_via_llm temperature=0.15 (旧版 0.0)."""
+        """_generate_via_llm temperature=0.15."""
         from src.skills.researcher.agent_creator import AgentCreator
 
         creator = AgentCreator(Settings())

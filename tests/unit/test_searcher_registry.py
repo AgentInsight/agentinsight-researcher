@@ -105,9 +105,9 @@ def test_register_all_searchers_clears_then_repopulates() -> None:
     # 显式注册的引擎应存在
     assert "pubmed" in _SEARCHER_REGISTRY
     assert "arxiv" in _SEARCHER_REGISTRY
-    # DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中
+    # DuckDuckGo 注册块注释 (代码保留), 不应在注册表中
     assert "duckduckgo" not in _SEARCHER_REGISTRY
-    assert "searxng" in _SEARCHER_REGISTRY  # SearXNG 替代 DuckDuckGo
+    assert "searxng" in _SEARCHER_REGISTRY  # CN 区域使用 SearXNG
 
 
 def test_register_all_searchers_includes_academic_engines() -> None:
@@ -121,13 +121,13 @@ def test_register_all_searchers_includes_academic_engines() -> None:
 def test_register_all_searchers_includes_cn_engines() -> None:
     """_register_all_searchers 注册 CN 区域引擎 (Bocha/Metaso 需 Key, SearXNG 免费).
 
-    DuckDuckGo 已被 SearXNG 替代, 注册块注释 (代码保留), 不应在注册表中.
-    SearXNG 在 CN/GLOBAL/AUTO 三区域注册 (替代 DuckDuckGo 的 CN 区域角色).
+    DuckDuckGo 注册块注释 (代码保留), 不应在注册表中.
+    SearXNG 在 CN/GLOBAL/AUTO 三区域注册 (CN 区域免费引擎).
     """
     _register_all_searchers()
     assert "bocha" in _SEARCHER_REGISTRY
     assert _SEARCHER_REGISTRY["bocha"]["require_key"] == "bocha_api_key"
-    # SearXNG 替代 DuckDuckGo (CN 区域免费引擎)
+    # CN 区域使用 SearXNG (免费引擎)
     assert "searxng" in _SEARCHER_REGISTRY
     assert _SEARCHER_REGISTRY["searxng"]["require_key"] is None
     # DuckDuckGo 已移除调用 (代码保留), 不应出现在注册表
@@ -163,11 +163,11 @@ def test_get_searchers_academic_returns_only_academic_engines(
 def test_get_searchers_cn_returns_cn_engines(settings_no_keys: Settings) -> None:
     """CN 区域返回中文优先引擎 (SearXNG/GDELT/HackerNews 免费, Bocha/Metaso 需 Key).
 
-    DuckDuckGo 已被 SearXNG 替代, CN 区域免费引擎改为 SearXNG.
+    CN 区域使用 SearXNG 作为免费引擎.
     """
     searchers = get_searchers(SearchRegion.CN, settings_no_keys)
     names = {s.name for s in searchers}
-    # 免费引擎应存在 (SearXNG 替代 DuckDuckGo)
+    # 免费引擎应存在 (CN 区域使用 SearXNG)
     assert "searxng" in names
     assert "gdelt" in names
     assert "hackernews" in names

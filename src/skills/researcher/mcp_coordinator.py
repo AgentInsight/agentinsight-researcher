@@ -282,7 +282,7 @@ class MCPCoordinator:
                         logger.warning("MCP 配置 %s: stdio 模式缺少 command, 跳过", name)
                         continue
                     # args/env_vars 可能是 JSONB 字符串或已解析的 list/dict
-                    # 3.1.2: env_vars 接入 safe_json_parse_dict (含 json_repair + regex 兜底)
+                    # env_vars 接入 safe_json_parse_dict (含 json_repair + regex 兜底)
                     from src.common.json_utils import safe_json_parse, safe_json_parse_dict
 
                     args = cfg.get("args")

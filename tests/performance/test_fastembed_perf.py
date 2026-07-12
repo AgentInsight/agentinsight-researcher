@@ -3,7 +3,7 @@
 - FastEmbed (bge-small-zh-v1.5, 512维) 用于上下文压缩, 不依赖远程 TEI
 - 性能测试以单元测试为主 (mock + time.perf_counter), 不依赖容器栈
 
-覆盖 trace 4ad14970 优化项:
+覆盖以下优化项:
 1. batch_size=64 vs 32 的吞吐对比 (mock ONNX 推理)
 2. ONNX Runtime 并行执行 (intra/inter_op_num_threads) 配置验证
 3. 模型预热消除冷启动延迟验证
@@ -99,7 +99,7 @@ async def test_batch_size_64_vs_32_throughput(
 ) -> None:
     """验证 batch_size=64 相比 32 的吞吐提升 (mock ONNX 推理).
 
-    trace 4ad14970 优化: _PARALLEL_BATCH_SIZE 从 32→64, 提升 ONNX 吞吐 ~20%.
+    _PARALLEL_BATCH_SIZE=64, 提升 ONNX 吞吐 ~20%.
     通过 mock ONNX 推理 (per_vector_ms 模拟耗时), 验证大批量分批并行时
     batch_size=64 的批次更少, 总调度开销更低.
 
@@ -122,7 +122,7 @@ async def test_batch_size_64_vs_32_throughput(
 
     fe_module._FASTEMBED_CACHE.clear()
 
-    # batch_size=32 (旧版)
+    # batch_size=32 (对照基准)
     client_32 = FastEmbedClient(settings)
     client_32._PARALLEL_BATCH_SIZE = 32
     start = time.perf_counter()
@@ -151,7 +151,7 @@ async def test_onnx_thread_config_intra_inter_threads(
 ) -> None:
     """验证 ONNX Runtime 并行线程配置 (intra/inter_op_num_threads).
 
-    trace 4ad14970 优化: 通过 fastembed threads 参数设置 intra_op_num_threads,
+    通过 fastembed threads 参数设置 intra_op_num_threads,
     通过 OMP_NUM_THREADS 环境变量设置 inter_op_num_threads.
 
     验证点:

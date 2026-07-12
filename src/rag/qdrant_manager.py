@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 # ========== namespace 可用性缓存 (用户需求: 最少次 embeddings+qdrant 调用) ==========
 # 缓存 namespace -> has_data 的布尔结果, TTL 10 分钟
 # 避免每次请求都调 Qdrant count (即使 exact=False 也有网络 RTT)
-# 参考 AgentInsightService VectorRetriever.available 的 _check_interval 机制
 _NAMESPACE_CACHE_TTL: int = 600  # 10 分钟 (秒)
 _namespace_cache: dict[str, tuple[bool, float]] = {}  # key=namespace, value=(has_data, timestamp)
 
@@ -156,26 +155,24 @@ class QdrantManager:
             self._collection_ready = True
 
     def build_shared_namespace(self) -> str:
-        """共享知识库 namespace = agent_id (旧版兼容, 推荐用 build_data_shared_namespace).
+        """共享知识库 namespace = agent_id (兼容, 推荐用 build_data_shared_namespace).
 
         共享知识库 namespace = agent_id, 不含 user_id.
         """
         return self.settings.agent_name
 
     def build_user_namespace(self, user_id: str) -> str:
-        """用户私有数据 namespace = {agent_id}:{user_id} (旧版兼容, 推荐用 build_data_user_namespace).
+        """用户私有数据 namespace = {agent_id}:{user_id} (兼容, 推荐用 build_data_user_namespace).
 
         用户私有数据 namespace = {agent_id}:{user_id}, payload 含 user_id.
         """
         return f"{self.settings.agent_name}:{user_id}"
 
-    # ========== 新版 namespace API (CHITCHAT_FAST_LLM_OPTIMIZATION_PLAN, 用户需求: 拆分 data 池) ==========
+    # ========== namespace API (用户需求: 拆分 data 池) ==========
     # 数据 namespace 池:
     # - agentinsight-researcher-data: 用户私有数据搜索 (按 user_id 隔离)
-    # 注: 原 chat namespace 池 (短查询/离题种子) 已在 QUERY_CLASSIFIER_FAST_LLM_OPTIMIZATION_PLAN.md
-    #     P2 阶段移除 (改用 FAST_LLM + Redis 缓存), build_chat_namespace 方法已删除.
     def build_data_shared_namespace(self) -> str:
-        """共享研究数据 namespace = {agent_id}-data (新命名, 替代旧 build_shared_namespace).
+        """共享研究数据 namespace = {agent_id}-data.
 
         共享知识库, 所有用户共享, 不含 user_id.
         """
@@ -438,8 +435,8 @@ class QdrantManager:
         按 payload namespace 字段过滤, 仅返回 content/metadata/
         namespace 三键 (与 upsert_points 写入 payload 一致). 不返回向量 (节省网络带宽).
 
-        P0 BM25 断点修复: HybridRetriever._ensure_bm25_corpus 调用此方法填充 BM25 语料,
-        替代旧的"无任何调用方"路径. 语料缓存到 Redis (带版本号), 文档新增/删除时
+        HybridRetriever._ensure_bm25_corpus 调用此方法填充 BM25 语料.
+        语料缓存到 Redis (带版本号), 文档新增/删除时
         通过 invalidate_bm25_cache 失效缓存.
 
         Args:

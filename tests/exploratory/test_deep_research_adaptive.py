@@ -179,14 +179,14 @@ async def test_adaptive_disabled_state_overrides_settings(
 async def test_max_sub_queries_guard_triggers_degradation() -> None:
     """测试 max_sub_queries 守卫触发降级: breadth=10/depth=3 → 降级到 depth=1.
 
-    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (max_sub_queries, V4-P2-04 从 28 提升到 42)
+    递归树规模: 10 * (1 + 5 + 25) = 310 > 42 (max_sub_queries 提升到 42)
     → 降级到 depth=1, 仅 10 个子查询, 不递归.
     """
     settings = Settings(
         _env_file=None,
         mcp_strategy="disabled",
         deep_research_adaptive=False,
-        deep_research_max_sub_queries=42,  # V4-P2-04: 28 → 42
+        deep_research_max_sub_queries=42,  # max_sub_queries 提升到 42
     )
 
     mock_llm = MagicMock()
@@ -249,7 +249,7 @@ async def test_adaptive_enabled_with_complex_query() -> None:
         _env_file=None,
         mcp_strategy="disabled",
         deep_research_adaptive=True,
-        deep_research_max_sub_queries=42,  # V4-P2-04: 28 → 42
+        deep_research_max_sub_queries=42,  # max_sub_queries 提升到 42
     )
 
     mock_llm = MagicMock()

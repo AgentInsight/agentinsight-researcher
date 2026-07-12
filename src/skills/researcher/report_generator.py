@@ -688,7 +688,6 @@ class ReportGenerator:
         # 2. WrittenContentCompressor 去重 (缩小 dedup_lock 锁粒度)
         # 锁外: compute_embedding 完成网络 I/O (embed_texts), 不持锁保持并行度
         # 锁内: check_and_update 做 numpy 相似度比对 + 更新内部状态 (同步操作)
-        # 旧版将 should_keep 整体放锁内, embedding 网络调用使并行退化为串行
         # 使用 check_and_update_partial 只丢弃相似 chunk, 保留差异部分
         try:
             chunks, content_embs = await written_compressor.compute_embedding(sub_context)
@@ -797,14 +796,14 @@ class ReportGenerator:
         """LLM 生成 3-5 个子主题.
 
         优化:
-        - prompt 提取到 PromptFamily.subtopics_prompt (旧版内联)
+        - prompt 提取到 PromptFamily.subtopics_prompt
         - temperature: 0.4 → 0.25
         - 用 STRATEGIC LLM 拆解
 
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
         LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
         """
-        # prompt 经 PromptFamily.subtopics_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.subtopics_prompt 注入
         prompt = self._prompt_family.subtopics_prompt(
             query=query,
             context=context,
@@ -845,7 +844,7 @@ class ReportGenerator:
         """LLM 写引言 (基于 query + contexts).
 
         优化:
-        - prompt 提取到 PromptFamily.introduction_prompt (旧版内联)
+        - prompt 提取到 PromptFamily.introduction_prompt
         - temperature: 0.4 → 0.25
 
         LLM 调用增加 try/except + 1 次重试, 失败用占位文本.
@@ -856,7 +855,7 @@ class ReportGenerator:
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        # prompt 经 PromptFamily.introduction_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.introduction_prompt 注入
         prompt = self._prompt_family.introduction_prompt(
             query=query,
             context=context,
@@ -962,7 +961,7 @@ class ReportGenerator:
         """LLM 写子主题章节 (基于 sub_context + sources).
 
         优化:
-        - prompt 提取到 PromptFamily.section_prompt (旧版内联)
+        - prompt 提取到 PromptFamily.section_prompt
         - 章节字数 500-1000 → 800-1200
         - temperature: 0.4 → 0.35
         - 加 MUST 具体观点 + 表格 + [n] 编号引用
@@ -975,7 +974,7 @@ class ReportGenerator:
         style_desc = _REPORT_STYLE_DESCRIPTIONS.get(
             self.settings.report_style, _REPORT_STYLE_DESCRIPTIONS["academic"]
         )
-        # prompt 经 PromptFamily.section_prompt 注入 (旧版内联)
+        # prompt 经 PromptFamily.section_prompt 注入
         # 章节字数 500-1000 → 800-1200
         prompt = self._prompt_family.section_prompt(
             topic=topic,
@@ -1217,14 +1216,18 @@ class ReportGenerator:
 
         策略: 在第一个 H1 标题后插入 (标题下方, 正文上方).
         支持三种格式:
-        - image_svg: 直接嵌入 ```svg 代码块 (GitHub/VSCode/mistune 原生渲染)
+        - image_svg: 嵌入 HTML <div> + 内联 <svg> (MD 渲染器原生支持内联 HTML)
         - image_url: ![报告配图](url)
         - image_b64: ![报告配图](data:image/png;base64,...)
         """
         if image_svg:
-            # SVG 模式: 直接嵌入 ```svg 代码块
-            # Markdown 渲染器 (GitHub/VSCode/mistune) 原生支持 ```svg 渲染
-            image_md = f"\n\n```svg\n{image_svg}\n```\n\n"
+            # SVG 模式: 嵌入 HTML <div> + 内联 <svg>
+            # 不用 ```svg 代码块 (大多数 MD 渲染器不渲染, 只显示源代码)
+            # 用内联 HTML, MD 渲染器 (GitHub/VSCode/Typora/mistune) 原生支持
+            # 添加 max-width:100% 确保图片不超出容器宽度
+            image_md = (
+                f'\n\n<div class="report-image">\n{image_svg}\n</div>\n\n'
+            )
         elif image_url:
             image_md = f"\n\n![报告配图]({image_url})\n\n"
         elif image_b64:

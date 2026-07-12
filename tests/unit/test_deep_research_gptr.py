@@ -1,4 +1,4 @@
-"""单元测试: DeepResearcher GPTR 深度研究功能补全测试.
+"""单元测试: DeepResearcher 深度研究功能补全测试.
 
 补充 tests/unit/test_deep_research.py 未覆盖的代码分支:
 - _build_next_query: 仅 researchGoal / 仅 followUpQuestions / 两者皆空回退 query
@@ -360,7 +360,7 @@ async def test_assess_complexity_non_dict_response(
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    # V4-P2-04: 降级到 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4)
+    # 降级到 L4-L5 中等参数 (breadth=4/depth=2/concurrency=4)
     assert params == {
         "breadth": 4,
         "depth": 2,  # L4-L5 中等参数
@@ -380,7 +380,7 @@ async def test_assess_complexity_non_int_complexity(
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
+    assert params["depth"] == 2  # L4-L5 中等参数
 
 
 @pytest.mark.asyncio
@@ -396,7 +396,7 @@ async def test_assess_complexity_out_of_range(
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
+    assert params["depth"] == 2  # L4-L5 中等参数
 
     # complexity=11 (高于上限 10)
     mock_llm.achat.return_value = LLMResponse(
@@ -404,7 +404,7 @@ async def test_assess_complexity_out_of_range(
         model="test",
     )
     params = await researcher._assess_complexity("任意查询")
-    assert params["depth"] == 2  # V4-P2-04: L4-L5 中等参数
+    assert params["depth"] == 2  # L4-L5 中等参数
 
 
 @pytest.mark.asyncio
@@ -412,7 +412,7 @@ async def test_assess_complexity_boundary_values(
     researcher: DeepResearcher,
     mock_llm: MagicMock,
 ) -> None:
-    """测试复杂度评估: 边界值 1/4/10 映射正确 (V4-P2-04: 10 级映射)."""
+    """测试复杂度评估: 边界值 1/4/10 映射正确 (10 级映射)."""
     # complexity=1 → L1 单一事实 (breadth=3, depth=1, concurrency=3)
     mock_llm.achat.return_value = LLMResponse(
         content='{"complexity": 1, "reason": "最简单"}',
@@ -583,7 +583,7 @@ async def test_max_sub_queries_guard_not_triggered(
 ) -> None:
     """测试 max_sub_queries 守卫: breadth=4, depth=2 不触发守卫 (12 < 42).
 
-    递归树: 4 + 4*2 = 12 < 42 (deep_research_max_sub_queries, V4-P2-04), 不降级.
+    递归树: 4 + 4*2 = 12 < 42 (deep_research_max_sub_queries), 不降级.
     """
     call_count = 0
 
@@ -612,5 +612,5 @@ async def test_max_sub_queries_guard_not_triggered(
     assert len(result["children"]) > 0
     # 调用次数: depth 0 (4 次) + depth 1 (4 个递归 × next_breadth=max(2, 4//2)=2 = 8 次) = 12 次
     assert call_count == 12
-    # 验证 max_sub_queries 默认值 (V4-P2-04: 28 → 42)
+    # 验证 max_sub_queries 默认值 (42)
     assert settings.deep_research_max_sub_queries == 42

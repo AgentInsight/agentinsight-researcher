@@ -40,15 +40,15 @@ class ReportStore:
     def _dsn(self) -> str:
         """获取 asyncpg 原生 DSN (postgresql://).
 
-        .. deprecated::
-            改为复用 ``db_initializer.get_pool()`` 连接池单例, 不再新建短连接.
+        .. note::
+            复用 ``db_initializer.get_pool()`` 连接池单例.
             此方法仅为兼容外部调用保留, 后续版本可能移除.
 
         settings.postgres_dsn 返回 postgresql+asyncpg:// 前缀 (sqlalchemy 风格),
         asyncpg 需要 postgresql:// 前缀, 故替换.
         """
         warnings.warn(
-            "ReportStore._dsn() is deprecated; use db_initializer.get_pool() instead.",
+            "ReportStore._dsn() 使用 db_initializer.get_pool().",
             DeprecationWarning,
             stacklevel=2,
         )

@@ -202,11 +202,10 @@ def test_truncate_by_words_handles_chinese_text() -> None:
     assert "中文无空格视为一词" in result
 
 
-# ========== _embeddings_rerank: FastEmbed 精排 + 缓存复用 (P1 优化) ==========
+# ========== _embeddings_rerank: FastEmbed 精排 + 缓存复用 ==========
 #
-# P1 优化 (trace 4ad14970): _embeddings_rerank 缓存 rerank 结果的 embedding,
-# 供后续 _post_filter_compress 复用. 旧版仅缓存 sha256(doc_text), 与
-# compute_embedding_batch 查询 key sha256(chunk) 不匹配; 新版拆分为
+# _embeddings_rerank 缓存 rerank 结果的 embedding,
+# 供后续 _post_filter_compress 复用. 拆分为
 # doc 级 + chunk 级双缓存, 覆盖单 chunk 与多 chunk 场景.
 
 
@@ -488,10 +487,10 @@ async def test_embeddings_rerank_chunk_level_key_aligns_with_compute_embedding_b
     mock_fastembed: MagicMock,
     rerank_settings: Settings,
 ) -> None:
-    """chunk 级缓存 key 与 compute_embedding_batch 查询 key 对齐 (P1 核心修复).
+    """chunk 级缓存 key 与 compute_embedding_batch 查询 key 对齐.
 
-    旧版仅缓存 sha256(doc_text), 与 compute_embedding_batch 的查询 key
-    sha256(chunk) 不匹配; 新版双缓存确保多 chunk 场景命中.
+    双缓存确保多 chunk 场景命中: doc 级缓存 sha256(doc_text),
+    chunk 级缓存 sha256(chunk) 与 compute_embedding_batch 查询 key 对齐.
     """
     doc = "段落一AAAA\n\n段落二BBBB\n\n段落三CCCC"
     doc_emb = [0.7, 0.3]

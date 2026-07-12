@@ -12,7 +12,7 @@
 
 **总体就绪度: ⭐⭐⭐⭐☆ (4/5) — 高度就绪,具备少量可改进项**
 
-项目在「必备文件」「CI/CD」「安全合规」「文档完善度」等核心维度上表现优秀,文件体系完整、双语(中英文)支持到位、规范严格(AGENTS.md 14 章),已具备直接开源的基础条件。主要改进空间集中在「社区建设」「代码质量工具链」「法律合规补充」「可发现性增强」四个方面。
+项目在「必备文件」「CI/CD」「安全合规」「文档完善度」等核心维度上表现优秀,文件体系完整、双语(中英文)支持到位、规范严格(14 章项目规范),已具备直接开源的基础条件。主要改进空间集中在「社区建设」「代码质量工具链」「法律合规补充」「可发现性增强」四个方面。
 
 ### 总览评分表
 
@@ -41,7 +41,7 @@
 | `README.md` | ✅ | 中英双语,2100+ 行,含徽章、Demo、API 文档、配置说明,极其详尽 |
 | `CONTRIBUTING.md` | ✅ | 中英双语,涵盖开发环境、规范、提交规范、PR 流程、安全合规 |
 | `CODE_OF_CONDUCT.md` | ✅ | 中英双语,基于 Contributor Covenant 2.1,含执行措施与举报渠道 |
-| `CHANGELOG.md` | ✅ | 中英双语,Keep a Changelog 格式,语义化版本,首版 0.1.0 内容详尽 |
+| `CHANGELOG.md` | ✅ | 中英双语,Keep a Changelog 格式,语义化版本,首版 1.0.0 内容详尽 |
 | `SECURITY.md` | ✅ | 中英双语,含漏洞报告渠道、响应 SLA、支持版本、安全合规红线 |
 | `.gitignore` | ✅ | 完善,覆盖 Python/IDE/构建/环境变量/离线包/临时文件 |
 | `.env.template` | ✅ | 完善,分类注释清晰,占位符规范,含所有必填项 |
@@ -62,7 +62,7 @@
 |--------|------|------|
 | 架构文档 `docs/architecture.md` | ✅ | 中英双语,含 5 个 Mermaid 图(系统概览/请求流/研究流/检索流/多 Agent/部署),详尽 |
 | API 文档 | ✅ | README.md 含 19 个端点完整文档;FastAPI `/docs` Swagger(dev 模式) |
-| 部署文档 | ⚠️ | 散落在 README + AGENTS.md 第 12 章 + `docker-build.sh`;缺独立 `docs/deployment.md` |
+| 部署文档 | ⚠️ | 散落在 README + 项目部署规则 + `docker-build.sh`;缺独立 `docs/deployment.md` |
 | 开发者文档 | ⚠️ | CONTRIBUTING.md 涵盖基础;缺独立 `docs/development.md`(环境搭建/调试/常见问题) |
 | 使用示例 `examples/` | ✅ | 7 个可运行示例 + 独立 README,覆盖流式/非流式/多 Agent/SDK 兼容/文件上传/下载 |
 | 测试文档 `tests/README.md` | ✅ | 极其详尽,7 层测试分层、执行命令、覆盖矩阵、MCP 测试清单 |
@@ -71,7 +71,7 @@
 | 对比文档 | ✅ | `docs/` 含深度分析文档 |
 
 **改进建议**:
-1. **新增 `docs/deployment.md`**:整合三套构建模式(QA 离线/生产联网/生产离线)的完整部署指南,含端口规划、资源需求、故障排查、升级流程。当前部署信息分散在 README、AGENTS.md、构建脚本中,新用户难以快速上手。
+1. **新增 `docs/deployment.md`**:整合三套构建模式(QA 离线/生产联网/生产离线)的完整部署指南,含端口规划、资源需求、故障排查、升级流程。当前部署信息分散在 README、项目部署规则、构建脚本中,新用户难以快速上手。
 2. **新增 `docs/development.md`**:补充开发环境搭建、调试技巧(断点调试/日志级别/单节点调试)、常见开发任务(新增搜索器/抓取器/Agent 节点的模板)。
 3. **新增 `docs/faq.md`**:将常见问题集中管理,涵盖:Demo 502 处理、401/429 错误、容器启动失败、Embeddings 模型下载慢、中文乱码、Qdrant 连接失败等。
 4. **新增 `docs/assets/` 目录并补充截图**:在 README 顶部添加 1-2 张测试页面截图或 Demo GIF,显著提升项目第一印象。开源项目带截图的 README 平均 star 数比无截图高 30%+。
@@ -126,7 +126,7 @@
 | `.env` 被 `.gitignore` 排除 | ✅ | `.env` / `.env.agent` / `.env.prod` / `.env.dev` / `.env.qa` 全部排除 |
 | `!.env.template` 保留模板 | ✅ | 显式保留模板文件入仓 |
 | 安全漏洞披露流程 | ✅ | SECURITY.md 含邮箱 + GitHub Security Advisory 双渠道 + SLA |
-| 密钥管理规范 | ✅ | 仅环境变量注入,SHA256+BCrypt 双哈希,AGENTS.md 第 11 章硬约束 |
+| 密钥管理规范 | ✅ | 仅环境变量注入,SHA256+BCrypt 双哈希,项目安全硬约束 |
 | PII 保护 | ✅ | 会话内容加密存储,日志脱敏 |
 | Prompt Injection 防护 | ✅ | Pydantic 校验 + 工具权限隔离 + 禁 eval/exec |
 | CI 占位符密钥 | ✅ | ci.yml 使用 `sk-ci-placeholder` 占位符,非真实凭据 |
@@ -204,7 +204,7 @@
    ```toml
    [project]
    name = "agentinsight-researcher"
-   version = "0.1.0"
+   version = "1.0.0"
    dependencies = ["langgraph>=1.2", "litellm>=1.6", ...]
 
    [project.optional-dependencies]
@@ -301,7 +301,7 @@
        family-names: Team
    repository-code: https://github.com/AgentInsight/agentinsight-researcher
    license: MIT
-   version: 0.1.0
+   version: 1.0.0
    date-released: 2026-07-04
    ```
 2. **新增 `NOTICE` 或 `THIRD_PARTY_LICENSES.md`**:声明项目参考实现的第三方代码,列出关键第三方依赖及其许可证。可用 `pip-licenses` 工具自动生成。
@@ -325,7 +325,7 @@
 |---|------|------|------|
 | 1 | 新增 `.pre-commit-config.yaml` | 3/6 | 本地无自动化检查,贡献者提交前无法自查,CI 往返成本高 |
 | 2 | 启用 GitHub Dependabot security alerts | 4 | 依赖漏洞无自动告警,安全风险 |
-| 3 | 新增密钥泄露扫描(gitleaks) | 4 | 防止密钥意外入仓,AGENTS.md 第 11 章硬约束的自动化保障 |
+| 3 | 新增密钥泄露扫描(gitleaks) | 4 | 防止密钥意外入仓,项目安全硬约束的自动化保障 |
 | 4 | 新增 `CITATION.cff` + `NOTICE`/`THIRD_PARTY_LICENSES.md` | 10 | 法律合规硬要求,缺第三方引用说明有法律风险 |
 
 ### P1 — 推荐修复(开源后 1-2 周内)
@@ -361,7 +361,7 @@
 | 维度 | 本项目 | 同类开源项目(对标) | 评价 |
 |------|--------|---------------------|------|
 | 必备文件 | 全部双语 | 单语(英文) | ✅ 优于 |
-| AGENTS.md 规范 | 14 章详尽 | 无 | ✅ 优于 |
+| 项目规范 | 14 章详尽 | 无 | ✅ 优于 |
 | 架构文档 | Mermaid 图 + 双语 | 有架构图 | ✅ 相当 |
 | API 文档 | 19 端点 + 示例 | 基础 | ✅ 优于 |
 | CI/CD | 4 Job + 评测门禁 | 基础 CI | ✅ 优于 |

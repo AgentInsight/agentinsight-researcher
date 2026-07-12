@@ -37,6 +37,17 @@
     <Content Include="NOTICE" />
     <Content Include="THIRD_PARTY_LICENSES.md" />
     <Content Include="CONTRIBUTORS.md" />
+    <Content Include="CHANGELOG.md" />
+    <Content Include="CODE_OF_CONDUCT.md" />
+    <Content Include="CONTRIBUTING.md" />
+    <Content Include="LICENSE" />
+    <Content Include="README.md" />
+    <Content Include="SECURITY.md" />
+  </ItemGroup>
+  <!-- 示例代码 (AGENTS.md 第 2 章示例, examples/ 全量 Python 文件) -->
+  <ItemGroup>
+    <Content Include="examples\**\*.py" />
+    <Content Include="examples\README.md" />
   </ItemGroup>
   <!-- Docker 编排与构建脚本 (联网模式入仓; QA/离线模式由 .gitignore 排除; SearXNG 镜像构建入仓) -->
   <ItemGroup>
@@ -54,6 +65,7 @@
     <Content Include="scripts\build-online.ps1" />
     <Content Include="scripts\init.sql" />
     <Content Include="scripts\convert_bge_small_zh_to_onnx.py" />
+    <Content Include="scripts\patch-searxng-engines.py" />
     <Content Include="scripts\prepare-nodejs-packages.ps1" />
     <Content Include="scripts\prepare-nodejs-packages.sh" />
     <Content Include="scripts\prepare-playwright-chromium.ps1" />
@@ -62,6 +74,12 @@
     <Content Include="scripts\prepare-searxng-packages.sh" />
     <Content Include="scripts\prepare-uv-packages.ps1" />
     <Content Include="scripts\prepare-uv-packages.sh" />
+  </ItemGroup>
+  <!-- SearXNG 配置 (config/searxng/, AGENTS.md 第 12 章 SearXNG 容器) -->
+  <ItemGroup>
+    <Content Include="config\searxng\settings.yml" />
+    <Content Include="config\searxng\limiter.toml" />
+    <Content Include="config\searxng\engines\*.py" />
   </ItemGroup>
   <!-- 前端测试页面 (AGENTS.md 第 14 章) -->
   <ItemGroup>
@@ -80,12 +98,18 @@
     <Content Include="docs\**\*.md" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="config\" />
+    <Folder Include="config\searxng\" />
+    <Folder Include="config\searxng\engines\" />
     <Folder Include="docs\" />
+    <Folder Include="examples\" />
     <Folder Include="evals\" />
     <Folder Include="evals\agent\" />
     <Folder Include="evals\hallucination_eval\" />
+    <Folder Include="evals\hallucination_eval\inputs\" />
     <Folder Include="evals\rag\" />
     <Folder Include="evals\simple_evals\" />
+    <Folder Include="evals\simple_evals\problems\" />
     <Folder Include="packages\" />
     <Folder Include="scripts\" />
     <Folder Include="src\" />

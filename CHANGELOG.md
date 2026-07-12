@@ -22,7 +22,17 @@
 
 ---
 
-## [0.1.0] - 2026-07-04
+## [1.0.0] - 2026-07-12
+
+### 首个正式发布版本
+
+- 完成全项目注释清理和文档脱钩
+- 配置默认值对齐 .env.template
+- 版本号统一为 1.0.0
+
+---
+
+## [1.0.0] - 2026-07-04
 
 ### 首次发布
 
@@ -169,7 +179,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.0] - 2026-07-04
+## [1.0.0] - 2026-07-12
+
+### First Official Release
+
+- Completed project-wide comment cleanup and documentation decoupling
+- Aligned configuration defaults with .env.template
+- Unified version number to 1.0.0
+
+---
+
+## [1.0.0] - 2026-07-04
 
 ### Initial Release
 
