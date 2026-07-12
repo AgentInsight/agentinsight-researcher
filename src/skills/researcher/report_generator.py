@@ -41,10 +41,6 @@ _SECTION_FAILURE_PLACEHOLDER = "[此章节生成失败, 请重试]"
 # LLM 调用单章节重试次数 (失败后再试 1 次)
 _LLM_RETRY_TIMES = 1
 
-# 短报告 FAST tier 阈值 — word_limit <= 此值时优先用 FAST tier (低延迟),
-# 失败回退 SMART tier. 默认 2000 字 (FAST tier fast_token_limit=3000 足以覆盖).
-_FAST_TIER_WORD_THRESHOLD: int = 2000
-
 # 报告风格预设描述 (用于 detailed_report 内联 prompt 注入,
 # 与 prompts.py DefaultPromptFamily._STYLE_PROMPTS 保持一致)
 _REPORT_STYLE_DESCRIPTIONS: dict[str, str] = {
@@ -253,51 +249,22 @@ class ReportGenerator:
                 prompt += f"\n\n{lang_instruction}"
 
             messages = [{"role": "user", "content": prompt}]
-            # 短报告 (word_limit <= _FAST_TIER_WORD_THRESHOLD) 优先用 FAST tier
-            # (低延迟), 失败回退 SMART tier; 长报告直接用 SMART tier (支持 2k+ 字长响应).
+            # 报告写作统一用 SMART tier (deepseek-v4-flash), 启用推理模式.
+            # 对标 GPTR: 报告写作全程用 smart_llm (gpt-4.1 / deepseek-v4-flash).
+            # FAST tier (glm-4-flash) 不用于产生报告内容 (质量不足).
             # LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
-            use_fast_tier = word_limit <= _FAST_TIER_WORD_THRESHOLD
-            if use_fast_tier:
-                report_md = await self._achat_with_retry(
-                    messages,
-                    tier=LLMTier.FAST,
-                    temperature=0.4,
-                    max_tokens=self.settings.fast_token_limit,
-                    user_id=user_id,
-                    session_id=session_id,
-                    span_name="writer-llm-fast",
-                    step="writer",
-                    fallback=_SECTION_FAILURE_PLACEHOLDER,
-                )
-                # FAST tier 失败 (返回占位文本) 时回退 SMART tier
-                if report_md == _SECTION_FAILURE_PLACEHOLDER:
-                    logger.info(
-                        "FAST tier 失败, 回退 SMART tier (word_limit=%d)",
-                        word_limit,
-                    )
-                    report_md = await self._achat_with_retry(
-                        messages,
-                        tier=LLMTier.SMART,
-                        temperature=0.4,
-                        max_tokens=self.settings.smart_token_limit,
-                        user_id=user_id,
-                        session_id=session_id,
-                        span_name="writer-llm",
-                        step="writer",
-                        fallback=_SECTION_FAILURE_PLACEHOLDER,
-                    )
-            else:
-                report_md = await self._achat_with_retry(
-                    messages,
-                    tier=LLMTier.SMART,
-                    temperature=0.4,
-                    max_tokens=self.settings.smart_token_limit,
-                    user_id=user_id,
-                    session_id=session_id,
-                    span_name="writer-llm",
-                    step="writer",
-                    fallback=_SECTION_FAILURE_PLACEHOLDER,
-                )
+            report_md = await self._achat_with_retry(
+                messages,
+                tier=LLMTier.SMART,
+                temperature=0.4,
+                max_tokens=self.settings.smart_token_limit,
+                user_id=user_id,
+                session_id=session_id,
+                span_name="writer-llm",
+                step="writer",
+                fallback=_SECTION_FAILURE_PLACEHOLDER,
+                reasoning_effort=self.settings.deep_research_reasoning_effort,
+            )
 
             # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
             report_md = self._normalize_markdown(report_md)
@@ -798,7 +765,7 @@ class ReportGenerator:
         优化:
         - prompt 提取到 PromptFamily.subtopics_prompt
         - temperature: 0.4 → 0.25
-        - 用 STRATEGIC LLM 拆解
+        - 用 STRATEGIC LLM (deepseek-v4-pro) 拆解, 高质量推理
 
         用 safe_json_parse 解析 LLM 输出的 JSON 数组.
         LLM 调用增加 try/except + 1 次重试, 失败降级为 [query].
@@ -813,10 +780,10 @@ class ReportGenerator:
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # LLM 调用增加重试, 失败降级为 [query]
         # temperature 0.4 → 0.25
-        # 子主题列表生成是短 JSON 数组任务, SMART 足够, 省 2/3 成本
+        # 子主题拆解是规划任务, 用 STRATEGIC (deepseek-v4-pro) 高质量推理
         content = await self._achat_with_retry(
             messages,
-            tier=LLMTier.SMART,
+            tier=LLMTier.STRATEGIC,
             temperature=0.25,
             max_tokens=800,
             user_id=user_id,
@@ -824,6 +791,7 @@ class ReportGenerator:
             span_name="detailed-subtopics",
             step="planner",
             fallback=f'["{query}"]',
+            reasoning_effort=self.settings.deep_research_reasoning_effort,
         )
         topics = safe_json_parse(content, fallback=[query])
         if isinstance(topics, list) and topics:
@@ -869,6 +837,7 @@ class ReportGenerator:
         )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.25
+        # 对标 GPTR: 报告引言用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -879,6 +848,7 @@ class ReportGenerator:
             span_name="detailed-intro",
             step="writer",
             fallback=_SECTION_FAILURE_PLACEHOLDER,
+            reasoning_effort=self.settings.deep_research_reasoning_effort,
         )
         content = content.strip()
         # 清洗引言末尾 LLM 偶尔生成的 **参考文献** 粗体块 (参考文献由报告组装层统一追加)
@@ -1006,6 +976,7 @@ class ReportGenerator:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.35
+        # 对标 GPTR: 报告章节正文用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -1016,6 +987,7 @@ class ReportGenerator:
             span_name="detailed-section",
             step="writer",
             fallback=_SECTION_FAILURE_PLACEHOLDER,
+            reasoning_effort=self.settings.deep_research_reasoning_effort,
         )
         content = content.strip()
         # 清洗冲突子标题 (引言/总结/结论)
@@ -1062,6 +1034,7 @@ class ReportGenerator:
         )
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.25
+        # 对标 GPTR: 报告结论用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -1072,6 +1045,7 @@ class ReportGenerator:
             span_name="detailed-conclusion",
             step="writer",
             fallback=_SECTION_FAILURE_PLACEHOLDER,
+            reasoning_effort=self.settings.deep_research_reasoning_effort,
         )
         content = content.strip()
         # 清洗结论末尾 LLM 偶尔生成的 **参考文献** 粗体块 (参考文献由报告组装层统一追加)
@@ -1092,6 +1066,7 @@ class ReportGenerator:
         span_name: str,
         step: str,
         fallback: str,
+        reasoning_effort: str | None = None,
     ) -> str:
         """LLM 调用通用重试封装.
 
@@ -1108,6 +1083,7 @@ class ReportGenerator:
             span_name: trace span 名称
             step: 流程步骤标识
             fallback: 失败时的占位文本
+            reasoning_effort: 推理强度 (仅 STRATEGIC tier 有效, None 时不添加)
 
         Returns:
             LLM 响应内容, 或失败时的 fallback 占位文本
@@ -1120,6 +1096,7 @@ class ReportGenerator:
                     tier=tier,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    reasoning_effort=reasoning_effort,
                     user_id=user_id,
                     session_id=session_id,
                     span_name=span_name,
