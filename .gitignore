@@ -96,3 +96,4 @@ tests/manual/
 /evals/rag/results
 /docker-build.offline.self.sh
 /docker-compose-offline-self.yaml
+/docs/OPEN_SOURCE_READINESS_ASSESSMENT.md
