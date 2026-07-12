@@ -1,6 +1,12 @@
 -- agentinsight-researcher 数据库初始化
 -- 单库 agents, 业务表含 agent_id+user_id 双列复合索引
 -- LangGraph PostgresSaver 表由官方 SDK 管理 (thread_id 已含会话隔离)
+--
+-- 设计原则 (10 角色 AI 专家团队审查):
+-- 1. CREATE TABLE 定义与最终状态一致 (新部署直接正确)
+-- 2. ALTER TABLE 保留作为旧表兜底 (CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op, 不会添加新列)
+-- 3. 所有 DDL 使用 IF NOT EXISTS / IF EXISTS / CREATE OR REPLACE 保证幂等 (Agent 启动时重复执行不出错)
+-- 4. 唯一索引创建前清理重复数据 (防止历史脏数据导致索引创建失败)
 
 -- 启用扩展
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -11,16 +17,18 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 实际表名: checkpoints / writes / migrations (由 SDK 创建)
 
 -- ========== 业务表: 研究会话 ==========
+-- 合并: title 字段 + query/report_type/report_format 去掉 NOT NULL (原 ALTER 迁移, 现合并到 CREATE)
 CREATE TABLE IF NOT EXISTS research_sessions (
     id BIGSERIAL PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,           -- 即 thread_id
     agent_id VARCHAR(64) NOT NULL,             -- agent_name, 全局唯一隔离键
     user_id VARCHAR(64) NOT NULL,              -- 用户隔离
-    query TEXT NOT NULL,                       -- 原始研究请求
-    report_type VARCHAR(32) NOT NULL DEFAULT 'basic_report',
-    report_format VARCHAR(16) NOT NULL DEFAULT 'markdown',
+    query TEXT,                                -- 原始研究请求 (允许空会话)
+    report_type VARCHAR(32) DEFAULT 'basic_report',  -- 空会话无报告类型
+    report_format VARCHAR(16) DEFAULT 'markdown',    -- 空会话无报告格式
     agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona
     agent_role_server VARCHAR(64),             -- 角色简称 (如 financial_analyst)
+    title VARCHAR(256),                        -- 会话列表显示标题
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/running/completed/failed
     total_cost_usd NUMERIC(12,6) DEFAULT 0,
     total_tokens BIGINT DEFAULT 0,
@@ -28,12 +36,14 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
 );
-CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user ON research_sessions(agent_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_research_sessions_session ON research_sessions(session_id);
+-- 索引: 删除被复合索引前缀覆盖的冗余单列索引 (idx_research_sessions_agent_user, idx_research_sessions_session)
 CREATE INDEX IF NOT EXISTS idx_research_sessions_expires ON research_sessions(expires_at);
+-- 复合索引 (agent_id + user_id + updated_at DESC): 支持按用户列出会话列表 (按最近更新排序)
+CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user_updated
+    ON research_sessions(agent_id, user_id, updated_at DESC);
 
 -- ========== 业务表: 研究报告存储 ==========
--- report_id UUID 主键, 支持 save/get/list/delete 四类操作
+-- 合并: created_at/updated_at 加 NOT NULL 约束 (原 ALTER 迁移, 现合并到 CREATE)
 CREATE TABLE IF NOT EXISTS research_reports (
     report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id VARCHAR(64) NOT NULL,
@@ -44,24 +54,35 @@ CREATE TABLE IF NOT EXISTS research_reports (
     report_format VARCHAR(32) DEFAULT 'markdown',
     sources JSONB DEFAULT '[]'::jsonb,
     agent_role VARCHAR(256),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_research_reports_session ON research_reports(session_id);
-CREATE INDEX IF NOT EXISTS idx_research_reports_user ON research_reports(user_id);
-CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
--- 复合索引 (agent_id + user_id), 多 Agent 数据隔离约定
+-- 索引: 删除被复合索引前缀覆盖的冗余单列索引 (idx_research_reports_session, idx_research_reports_user, idx_research_reports_created)
+-- 复合索引 (agent_id, user_id): 多 Agent 数据隔离
 CREATE INDEX IF NOT EXISTS idx_research_reports_agent_user ON research_reports(agent_id, user_id);
--- session + agent + user 三列复合索引, 加速按会话检索报告
+-- 复合索引 (session_id, agent_id, user_id): 加速按会话检索报告
 CREATE INDEX IF NOT EXISTS idx_research_reports_session_agent_user ON research_reports(session_id, agent_id, user_id);
--- 迁移: 已有 research_reports 表补充新增列 (PostgreSQL 9.6+)
+-- 迁移: 已有 research_reports 表补充新增列 (PostgreSQL 9.6+, 旧表兜底)
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_id UUID DEFAULT gen_random_uuid();
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS query TEXT;
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS report_format VARCHAR(32) DEFAULT 'markdown';
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS agent_role VARCHAR(256);
 ALTER TABLE IF EXISTS research_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
--- 兜底唯一索引: 旧表无 report_id PK 时保证唯一 (新表已有 PK, IF NOT EXISTS 跳过)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_research_reports_report_id ON research_reports(report_id);
+-- 兜底唯一索引: 旧表无 report_id PK 时保证唯一 (新表已有 PK, DO 块条件化避免冗余)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE tablename = 'research_reports'
+          AND indexname = 'research_reports_pkey'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE tablename = 'research_reports'
+          AND indexname = 'idx_research_reports_report_id'
+    ) THEN
+        CREATE UNIQUE INDEX idx_research_reports_report_id ON research_reports(report_id);
+    END IF;
+END $$;
 
 -- ========== 业务表: 搜索记录 (用于审计与质量分析) ==========
 CREATE TABLE IF NOT EXISTS research_search_logs (
@@ -80,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_research_search_logs_agent_user ON research_searc
 CREATE INDEX IF NOT EXISTS idx_research_search_logs_session ON research_search_logs(session_id);
 
 -- ========== 业务表: 上传文件元数据 (用户需求 8) ==========
+-- 合并: updated_at 字段 (原 ALTER 迁移, 现合并到 CREATE)
 CREATE TABLE IF NOT EXISTS uploaded_files (
     id BIGSERIAL PRIMARY KEY,
     agent_id VARCHAR(64) NOT NULL,
@@ -92,7 +114,8 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     content_hash VARCHAR(64),                  -- SHA256, 用于去重
     namespace VARCHAR(128),                    -- Qdrant namespace
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/embedded/failed
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_uploaded_files_agent_user ON uploaded_files(agent_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_uploaded_files_session ON uploaded_files(session_id);
@@ -117,18 +140,19 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_logs_session ON token_usage_logs(sess
 CREATE INDEX IF NOT EXISTS idx_token_usage_logs_stage ON token_usage_logs(stage);
 
 -- ========== V7: 时间戳字段完整性修复 (P0) ==========
--- 1. 回填 research_reports 历史 NULL 值
+-- 1. 回填 research_reports 历史 NULL 值 (幂等: 二次执行无 NULL 行可更新)
 UPDATE research_reports SET created_at = NOW() WHERE created_at IS NULL;
 UPDATE research_reports SET updated_at = NOW() WHERE updated_at IS NULL;
 
--- 2. 加固 research_reports NOT NULL 约束 (对齐 research_sessions)
+-- 2. 加固 research_reports NOT NULL 约束 (旧表兜底, 新表 CREATE TABLE 已含 NOT NULL)
+-- SET NOT NULL 在列已为 NOT NULL 时是 no-op, 幂等安全
 ALTER TABLE IF EXISTS research_reports
     ALTER COLUMN created_at SET NOT NULL,
     ALTER COLUMN created_at SET DEFAULT NOW(),
     ALTER COLUMN updated_at SET NOT NULL,
     ALTER COLUMN updated_at SET DEFAULT NOW();
 
--- 3. 为 uploaded_files 补 updated_at 字段 (status 会变更, 需要追踪)
+-- 3. 为 uploaded_files 补 updated_at 字段 (旧表兜底, 新表 CREATE TABLE 已含)
 ALTER TABLE IF EXISTS uploaded_files
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
@@ -141,7 +165,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 5. 为状态会变更的 3 张表挂触发器 (PostgreSQL 14+ 支持 CREATE OR REPLACE TRIGGER)
+-- 5. 为状态会变更的 4 张表挂触发器 (PostgreSQL 14+ 支持 CREATE OR REPLACE TRIGGER)
 CREATE OR REPLACE TRIGGER trg_research_sessions_updated_at
     BEFORE UPDATE ON research_sessions
     FOR EACH ROW
@@ -157,35 +181,34 @@ CREATE OR REPLACE TRIGGER trg_uploaded_files_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- 6. 新增 MCP 配置表 (前端 MCP 配置 + Postgres 持久化)
+-- ========== 业务表: MCP 配置 (前端 MCP 配置 + Postgres 持久化) ==========
 -- is_system=TRUE 为系统预置公用 MCP (用户不可编辑/删除, 可克隆到自己的列表)
 CREATE TABLE IF NOT EXISTS mcp_configs (
     id BIGSERIAL PRIMARY KEY,
     agent_id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
     name VARCHAR(128) NOT NULL,
-    server_url TEXT,
+    server_url TEXT,                           -- stdio 模式不需要 URL, 允许为空
     transport_type VARCHAR(32) NOT NULL DEFAULT 'stdio',
     command VARCHAR(512),
     args JSONB,
     env_vars JSONB,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     is_system BOOLEAN NOT NULL DEFAULT FALSE,
-    version INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1,        -- 版本控制: 重大变更递增
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- 兼容已有数据库: 移除 server_url 的 NOT NULL 约束 (stdio 模式不需要 URL)
-ALTER TABLE mcp_configs ALTER COLUMN server_url DROP NOT NULL;
--- 兼容已有数据库: 添加 is_system 列 (IF NOT EXISTS, PostgreSQL 9.6+)
-ALTER TABLE mcp_configs ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
--- 兼容已有数据库: 添加 version 列 (IF NOT EXISTS, 用于控制 MCP 配置更新)
--- 版本号规则: 重大变更递增主版本 (如 v2=2026-07-06 MCP 修复), 小修复递增次版本
+-- 旧表兜底: 移除 server_url 的 NOT NULL 约束 (stdio 模式不需要 URL)
+ALTER TABLE IF EXISTS mcp_configs ALTER COLUMN server_url DROP NOT NULL;
+-- 旧表兜底: 添加 is_system 列 (IF NOT EXISTS, PostgreSQL 9.6+)
+ALTER TABLE IF EXISTS mcp_configs ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
+-- 旧表兜底: 添加 version 列 (IF NOT EXISTS, 用于控制 MCP 配置更新)
 -- ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段 (避免覆盖用户克隆后的定制)
-ALTER TABLE mcp_configs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE IF EXISTS mcp_configs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
 
-CREATE INDEX IF NOT EXISTS idx_mcp_configs_agent_user ON mcp_configs (agent_id, user_id);
+-- 索引: 删除被复合索引前缀覆盖的冗余单列索引 (idx_mcp_configs_agent_user)
 CREATE INDEX IF NOT EXISTS idx_mcp_configs_enabled ON mcp_configs (agent_id, user_id, enabled);
 CREATE INDEX IF NOT EXISTS idx_mcp_configs_system ON mcp_configs (is_system) WHERE is_system = TRUE;
 
@@ -194,12 +217,12 @@ CREATE OR REPLACE TRIGGER trg_mcp_configs_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- 6.1 预置系统公用 MCP 服务 (is_system=TRUE, user_id='system')
+-- ========== 预置系统公用 MCP 服务 ==========
 -- 来源: https://github.com/modelcontextprotocol/servers 官方参考实现 + 国内外流行 MCP 服务
 -- 用户可查看但不可编辑/删除, 可克隆到自己的列表后定制
 -- 使用 ON CONFLICT (agent_id, user_id, name) 保证幂等 (重复启动不重复插入)
 
--- 6.1.1 清理历史重复数据 (保留每个 name 的最小 id, 防止唯一索引创建失败)
+-- 清理历史重复数据 (保留每个 name 的最小 id, 防止唯一索引创建失败)
 -- 同时清理系统 MCP 和用户私有 MCP 的重复记录
 DELETE FROM mcp_configs
 WHERE id NOT IN (
@@ -207,23 +230,12 @@ WHERE id NOT IN (
     GROUP BY agent_id, user_id, name
 );
 
--- 6.1.2 添加唯一索引 (agent_id, user_id, name) 防止重复插入
+-- 添加唯一索引 (agent_id, user_id, name) 防止重复插入
 -- 同一 agent + 同一 user 下 name 唯一 (系统 MCP 与用户私有 MCP 共用此约束)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_configs_unique_name
     ON mcp_configs (agent_id, user_id, name);
 
--- 6.2 预置系统公用 MCP 服务 (is_system=TRUE, user_id='system')
--- 来源: https://github.com/modelcontextprotocol/servers 官方参考实现 + 国内外流行 MCP 服务
--- 用户可查看但不可编辑/删除, 可克隆到自己的列表后定制
--- 使用 ON CONFLICT (agent_id, user_id, name) 保证幂等 (重复启动不重复插入)
---
--- 精简治理 (2026-07-05): 经 12 角色 AI 专家团队多轮分析, 从原 130 个精简至 23 个
---   - 核心保留 12 个: 研究场景高价值、与项目无冗余、合规无冲突、npm 包真实存在
---   - 推荐保留 11 个: 有价值但需用户按需配置 Key 或验证场景、npm 包真实存在
---   - 已移除 107 个: 冗余/合规冲突/安全风险高/非研究场景/包名不存在于 npm registry
--- 详见 docs/system-mcp-analysis.md
-
--- 6.2.1 清理已移除的系统 MCP (从 130 精简至 23, 仅保留包名真实存在的核心+推荐档)
+-- 清理已移除的系统 MCP (从 130 精简至 23, 仅保留包名真实存在的核心+推荐档)
 -- 用户私有克隆 (is_system=FALSE) 不受影响
 DELETE FROM mcp_configs
 WHERE is_system = TRUE
@@ -241,7 +253,7 @@ WHERE is_system = TRUE
     'chrome-mcp', 'aws-kb-retrieval'
   );
 
--- 6.3 预置系统公用 MCP 服务 (v3=2026-07-06 MCP 修复版, 修正 wikipedia 可执行文件名)
+-- 预置系统公用 MCP 服务 (v3=2026-07-06 MCP 修复版, 修正 wikipedia 可执行文件名)
 -- 修复内容: 替换 8 个 npm 失效包为 PyPI/社区包 (官方已迁移 npm → PyPI)
 --   fetch:        @modelcontextprotocol/server-fetch (npm 404) → mcp-server-fetch (PyPI, uvx)
 --   git:          @modelcontextprotocol/server-git (npm 404) → mcp-server-git (PyPI, uvx, 需系统 git)
@@ -348,7 +360,7 @@ INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, co
     ('agentinsight-researcher', 'system', 'pdf-tools', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-pdf"]'::jsonb, NULL,
      TRUE, TRUE, 3, 'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
--- v2 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
+-- v3 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
 -- 避免每次启动都 UPDATE (旧 v1 DO NOTHING 无法更新已部署配置)
 -- 避免覆盖用户克隆后的定制 (仅系统 MCP is_system=TRUE 且 version 落后时更新)
 -- 注意: 用户私有克隆 (is_system=FALSE) 不受此 UPSERT 影响 (user_id 不同)
@@ -364,8 +376,8 @@ ON CONFLICT (agent_id, user_id, name) DO UPDATE SET
 WHERE mcp_configs.version < EXCLUDED.version
   AND mcp_configs.is_system = TRUE;
 
--- 7. research_reports 字段长度统一 VARCHAR(64) (与其他表一致)
--- 已有部署的 research_reports 表通过 ALTER 迁移, 新部署由 CREATE TABLE 直接正确
+-- 旧表兜底: research_reports 字段长度统一 VARCHAR(64) (与其他表一致)
+-- 新表 CREATE TABLE 已是 VARCHAR(64), 旧表通过 ALTER 迁移
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN session_id TYPE VARCHAR(64);
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN user_id TYPE VARCHAR(64);
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN agent_id TYPE VARCHAR(64);
@@ -390,21 +402,25 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_session
 CREATE INDEX IF NOT EXISTS idx_chat_messages_agent_user
     ON chat_messages(agent_id, user_id, created_at DESC);
 
--- 8. research_sessions 表适配会话持久化需求
--- 8.1 新增 title 字段 (用于会话列表显示)
+-- ========== research_sessions 表适配会话持久化需求 ==========
+-- 旧表兜底: 新增 title 字段 (新表 CREATE TABLE 已含)
 ALTER TABLE IF EXISTS research_sessions
     ADD COLUMN IF NOT EXISTS title VARCHAR(256);
--- 8.2 放宽 query 约束: 允许创建空会话 (首次对话前先创建 session 记录)
+-- 旧表兜底: 放宽 query 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN query DROP NOT NULL;
--- 8.3 放宽 report_type 约束: 空会话无报告类型
+-- 旧表兜底: 放宽 report_type 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_type DROP NOT NULL;
--- 8.4 放宽 report_format 约束: 空会话无报告格式
+-- 旧表兜底: 放宽 report_format 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_format DROP NOT NULL;
--- 8.5 为 research_sessions 添加 (agent_id, user_id, updated_at DESC) 复合索引
--- 支持按用户列出会话列表 (按最近更新排序)
-CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user_updated
-    ON research_sessions(agent_id, user_id, updated_at DESC);
--- 8.6 为 research_sessions 添加 (session_id, agent_id, user_id) 唯一约束
--- 支持 ON CONFLICT (session_id, agent_id, user_id) 幂等插入 (ensure_session 方法)
+
+-- 清理 research_sessions 历史重复数据 (保留每个 session 三元组的最小 id, 防止唯一索引创建失败)
+-- 与 mcp_configs 的清理模式对齐 (P0 修复: 原脚本缺少此前置清理)
+DELETE FROM research_sessions
+WHERE id NOT IN (
+    SELECT MIN(id) FROM research_sessions
+    GROUP BY session_id, agent_id, user_id
+);
+
+-- 唯一索引 (session_id, agent_id, user_id): 支持 ON CONFLICT 幂等插入 (ensure_session 方法)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
     ON research_sessions(session_id, agent_id, user_id);
