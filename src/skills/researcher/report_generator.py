@@ -889,18 +889,16 @@ class ReportGenerator:
 
     @staticmethod
     def _strip_inline_references_block(content: str) -> str:
-        """清洗章节末尾 LLM 偶尔生成的 ``**参考文献**`` 粗体块和 ``[^xxx]:`` 脚注定义块.
+        """清洗章节末尾 LLM 偶尔生成的参考文献块.
 
         LLM 在 ``section_prompt``/``introduction_prompt`` 注入完整 references 后, 倾向于在章节末尾
-        "复制" 出 ``**参考文献**`` / ``**References**`` 块及编号条目列表,
-        或生成 ``[^xxx]:`` 脚注定义块 (含完整文献标题、期刊名、URL).
-        参考文献列表应由报告组装层 (``_format_sources``) 在报告末尾统一追加,
+        "复制" 出参考文献列表. 参考文献列表应由报告组装层 (``_format_sources``) 在报告末尾统一追加,
         章节内仅保留 ``[n]`` 行内编号引用.
 
-        本方法匹配并移除:
-        - 前置可选 ``---`` 分隔线
-        - ``**参考文献**`` / ``**References**`` / ``**参考来源**`` / ``**Bibliography**`` 粗体标题 + 后续所有内容
-        - ``[^xxx]:`` 脚注定义块 (连续多行, 含文献标题/期刊/URL)
+        本方法匹配并移除以下 3 种格式:
+        - 模式 1: ``**参考文献**`` / ``**References**`` / ``**参考来源**`` / ``**Bibliography**`` 粗体标题 + 后续所有内容
+        - 模式 2: ``[^xxx]:`` 脚注定义块 (连续多行, 含文献标题/期刊/URL)
+        - 模式 3: 无标题的 ``- \\`[n]\\` xxx`` 或 ``- [n] xxx`` 编号列表 (前置可选 ``---`` 分隔线, 含 URL/Retrieved from)
 
         Args:
             content: 章节内容 (独立章节, 不含其他章节).
@@ -925,6 +923,20 @@ class ReportGenerator:
             re.MULTILINE,
         )
         content = pattern_footnote.sub("", content).rstrip() + "\n"
+
+        # 模式 3: 无标题的编号参考文献列表 (LLM 在章节末尾生成 `- `[n]` xxx` 格式)
+        # 特征: 前置 2+ 空行 + 可选 --- 分隔线 + 连续的 `- `[n]` xxx` 或 `- [n] xxx` 列表项 (含 URL/Retrieved from)
+        # 示例:
+        #   ---
+        #   - `[1]` Title. Retrieved from `https://...`
+        #   - `[2]` Title. Retrieved from `https://...`
+        # 正则说明: `?\[?\[?\d+\]?\]?`? 允许反引号/方括号包裹编号 (如 `[1]` / `[1]` / `1`)
+        pattern_inline_list = re.compile(
+            r"\n{2,}(?:---\s*\n\s*)?"  # 前置 2+ 空行 + 可选 --- 分隔线
+            r"(?:-\s+`?\[?\[?\d+\]?\]?`?\s*[^\n]*(?:\n|$))+\s*$",  # 连续的 - `[n]` xxx 列表项到文末
+            re.MULTILINE,
+        )
+        content = pattern_inline_list.sub("", content).rstrip() + "\n"
 
         return content
 
