@@ -57,7 +57,9 @@ def _mock_heavy_constructors() -> Any:
         patch("src.skills.researcher.report_generator.WrittenContentCompressor"),
         patch("src.skills.researcher.report_generator.ImageGenerator") as mock_img_cls,
     ):
-        mock_img_cls.return_value.generate_image = AsyncMock(return_value={"url": None, "b64": None})
+        mock_img_cls.return_value.generate_image = AsyncMock(
+            return_value={"url": None, "b64": None}
+        )
         yield
 
 

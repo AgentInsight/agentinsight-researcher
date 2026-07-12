@@ -39,8 +39,7 @@ class QuotaCache:
         self._enabled = bool(self._redis_url)
 
     async def _get_redis(self) -> Any | None:
-        """惰性初始化 Redis 连接 (复用 common.redis_client 全局单例).
-        """
+        """惰性初始化 Redis 连接 (复用 common.redis_client 全局单例)."""
         if not self._enabled:
             return None
         if self._redis is not None:

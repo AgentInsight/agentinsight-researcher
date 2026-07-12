@@ -40,6 +40,134 @@ def _read_init_sql() -> str:
     return INIT_SQL_PATH.read_text(encoding="utf-8")
 
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """智能拆分 SQL 脚本为独立语句.
+
+    正确处理:
+    - dollar-quoted 字符串 ($$ ... $$ 或 $tag$ ... $tag$): 内部分号不拆分
+    - 单引号字符串 ('...;...'): 内部分号不拆分
+    - 行注释 (-- ...): 不影响分号识别
+    - 块注释 (/* ... */): 不影响分号识别
+
+    Args:
+        sql: 完整 SQL 脚本文本.
+
+    Returns:
+        拆分后的 SQL 语句列表 (已 strip, 过滤空语句和纯注释语句).
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    i = 0
+    n = len(sql)
+    in_single_quote = False
+    in_line_comment = False
+    in_block_comment = False
+    dollar_tag: str | None = None  # 当前 dollar-quote 标签 (如 $$ 或 $func$)
+
+    while i < n:
+        ch = sql[i]
+        # 预读后续字符用于模式匹配
+        next_ch = sql[i + 1] if i + 1 < n else ""
+
+        # 1. dollar-quoted 字符串处理 (PostgreSQL 特有, 如 $$ ... $$ 或 $tag$ ... $tag$)
+        if ch == "$" and not in_single_quote and not in_line_comment and not in_block_comment:
+            # 尝试匹配 dollar tag: $tag$
+            j = sql.find("$", i + 1)
+            if j > i:
+                tag = sql[i : j + 1]  # 如 $$ 或 $func$
+                # 验证 tag 格式: $ 后跟字母/下划线/空 (空= $$), 再跟 $
+                inner = tag[1:-1]
+                if inner == "" or (inner[0].isalpha() or inner[0] == "_"):
+                    if dollar_tag is None:
+                        # 进入 dollar-quoted 字符串
+                        dollar_tag = tag
+                        current.append(tag)
+                        i = j + 1
+                        continue
+                    elif tag == dollar_tag:
+                        # 退出 dollar-quoted 字符串
+                        dollar_tag = None
+                        current.append(tag)
+                        i = j + 1
+                        continue
+            # 普通 $ 字符 (不在 dollar-quoted 上下文中)
+            current.append(ch)
+            i += 1
+            continue
+
+        # 2. 在 dollar-quoted 字符串内: 所有字符原样保留 (包括分号)
+        if dollar_tag is not None:
+            current.append(ch)
+            i += 1
+            continue
+
+        # 3. 单引号字符串处理
+        if ch == "'" and not in_line_comment and not in_block_comment:
+            if in_single_quote:
+                # 检查是否为转义单引号 ''
+                if next_ch == "'":
+                    current.append("''")
+                    i += 2
+                    continue
+                # 退出单引号字符串
+                in_single_quote = False
+            else:
+                in_single_quote = True
+            current.append(ch)
+            i += 1
+            continue
+
+        # 4. 行注释处理 (内容不追加到 current, 避免 stmt.startswith("--") 误过滤)
+        if ch == "-" and next_ch == "-" and not in_single_quote and not in_block_comment:
+            in_line_comment = True
+            i += 2
+            continue
+
+        # 5. 块注释处理 (保留在 current, PostgreSQL 解析器会忽略)
+        if ch == "/" and next_ch == "*" and not in_single_quote and not in_line_comment:
+            in_block_comment = True
+            current.append("/*")
+            i += 2
+            continue
+        if in_block_comment and ch == "*" and next_ch == "/":
+            in_block_comment = False
+            current.append("*/")
+            i += 2
+            continue
+
+        # 6. 行注释结束 (换行): 保留换行符以维持 SQL 格式
+        if in_line_comment and ch == "\n":
+            in_line_comment = False
+            current.append(ch)
+            i += 1
+            continue
+
+        # 6.1 行注释内字符: 跳过 (不追加)
+        if in_line_comment:
+            i += 1
+            continue
+
+        # 7. 分号: 语句分隔符 (仅在不在字符串/注释内时)
+        if ch == ";" and not in_single_quote and not in_line_comment and not in_block_comment:
+            stmt = "".join(current).strip()
+            if stmt and not stmt.startswith("--"):
+                statements.append(stmt)
+            current = []
+            i += 1
+            continue
+
+        # 默认: 追加字符
+        current.append(ch)
+        i += 1
+
+    # 处理最后一个语句 (无分号结尾)
+    last_stmt = "".join(current).strip()
+    if last_stmt and not last_stmt.startswith("--"):
+        statements.append(last_stmt)
+
+    return statements
+
+
 async def init_database(settings: Settings | None = None) -> bool:
     """初始化 PostgreSQL 业务表 (Agent 启动时触发).
 
@@ -86,18 +214,23 @@ async def init_database(settings: Settings | None = None) -> bool:
     try:
         conn = await asyncpg.connect(dsn)
         try:
-            # 按分号拆分逐条执行, 独立事务隔离错误
-            # 原 conn.execute(sql) 在非 autocommit 模式下隐式开启事务,
-            # 中间失败会回滚全部已执行的 DDL. 拆分后每条独立执行.
-            statements = [
-                s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")
-            ]
+            # 每条语句独立事务: BEGIN/COMMIT/ROLLBACK 隔离错误, 单条失败不影响后续
+            # 修复: 原 sql.split(";") 会错误拆分 dollar-quoted 字符串 $$ ... $$ 内的分号
+            #   (如 CREATE OR REPLACE FUNCTION 体内的 NEW.updated_at = NOW(); )
+            #   导致函数体被截断, 后续语句在 aborted 事务中全部失败 (chat_messages 表未创建)
+            statements = _split_sql_statements(sql)
             failed_count = 0
             for stmt in statements:
                 try:
+                    await conn.execute("BEGIN")
                     await conn.execute(stmt)
+                    await conn.execute("COMMIT")
                 except Exception as stmt_err:  # noqa: BLE001
-                    # 单条失败不阻断后续 (DDL 幂等, 可能是列已存在等)
+                    # 单条失败: ROLLBACK 清理事务状态, 不阻断后续 (DDL 幂等)
+                    try:
+                        await conn.execute("ROLLBACK")
+                    except Exception:  # noqa: BLE001
+                        pass  # ROLLBACK 失败忽略 (连接可能已断)
                     logger.debug("SQL 语句执行跳过 (可能已存在): %s", str(stmt_err)[:200])
                     failed_count += 1
             logger.info(

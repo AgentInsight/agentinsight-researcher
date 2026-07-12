@@ -26,6 +26,7 @@ from src.api.middleware import (
     close_jwt_middleware,
 )
 from src.api.routes import router as api_router
+from src.api.session_routes import router as session_router
 from src.common.exceptions import AgentError
 from src.config.settings import get_settings
 
@@ -220,6 +221,9 @@ def create_app() -> FastAPI:
 
     # Agent Discovery Protocol 公开发现端点 (无需鉴权)
     app.include_router(discovery_router)
+
+    # 会话管理端点 (以 UserId 为单位的会话持久化: 列表/创建/删除/消息分页)
+    app.include_router(session_router)
 
     # WebSocket 双向实时通信端点
     # SSE 仍是主通道, WebSocket 是增强通道 (人在回路审核请求 + 实时进度)

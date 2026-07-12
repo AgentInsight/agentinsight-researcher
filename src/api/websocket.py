@@ -112,8 +112,7 @@ async def _verify_token(token: str, settings: Settings) -> bool:
 
 
 class WebSocketManager:
-    """按 session_id 索引的 WebSocket 连接管理器.
-    """
+    """按 session_id 索引的 WebSocket 连接管理器."""
 
     _instance: ClassVar[WebSocketManager | None] = None
     _MAX_CONNECTIONS: ClassVar[int] = 100  # 并发连接上限, 防止内存无界增长

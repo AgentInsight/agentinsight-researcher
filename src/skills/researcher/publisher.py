@@ -141,6 +141,26 @@ class Publisher:
                 if not line:
                     i += 1
                     continue
+                # SVG 代码块检测 (```svg ... ```)
+                if line.strip() == "```svg":
+                    svg_lines: list[str] = []
+                    i += 1
+                    while i < len(lines) and lines[i].strip() != "```":
+                        svg_lines.append(lines[i])
+                        i += 1
+                    if i < len(lines):
+                        i += 1  # 跳过结束 ```
+
+                    # SVG 转 PNG 后插入 DOCX
+                    svg_code = "\n".join(svg_lines)
+                    png_bytes = self._svg_to_png_bytes(svg_code)
+                    if png_bytes:
+                        doc.add_picture(io.BytesIO(png_bytes), width=Pt(400))
+                    else:
+                        # 转换失败, 降级显示占位文本 + SVG 源代码
+                        doc.add_paragraph("[SVG 配图 (转换失败, 显示源代码)]")
+                        doc.add_paragraph(svg_code[:500])
+                    continue
                 # 表格检测: 当前行以 | 开头, 且下一行是分隔行 (| :--- | :--- |)
                 if (
                     line.lstrip().startswith("|")
@@ -237,6 +257,27 @@ class Publisher:
                 if j < num_cols:
                     self._set_docx_cell_text(table.rows[row_idx + 1].cells[j], cell_text)
 
+    @staticmethod
+    def _svg_to_png_bytes(svg_code: str) -> bytes | None:
+        """SVG 代码转 PNG bytes (用 cairosvg).
+
+        cairosvg 不可用时返回 None (降级显示源代码, 不阻断主流程).
+        """
+        try:
+            import cairosvg
+
+            return cairosvg.svg2png(
+                bytestring=svg_code.encode("utf-8"),
+                output_width=1024,
+                output_height=768,
+            )
+        except ImportError:
+            logger.warning("cairosvg 未安装, SVG 配图无法转 PNG (DOCX/PDF 降级显示源代码)")
+            return None
+        except Exception as e:  # noqa: BLE001
+            logger.warning("SVG 转 PNG 失败: %s", e)
+            return None
+
     def _to_json(
         self,
         content: str,
@@ -265,10 +306,22 @@ class Publisher:
     def _md_to_html(self, md: str) -> str:
         """Markdown 转 HTML (用 mistune + jinja2 模板)."""
         try:
+            import html
+
             import mistune
 
             markdown = mistune.create_markdown(plugins=["table"])
             body = markdown(md)
+
+            # 后处理: 将 ```svg 代码块转为内联 SVG (浏览器原生渲染)
+            # mistune 将 ```svg 渲染为 <pre><code class="language-svg">...</code></pre>
+            # 浏览器不直接渲染该格式, 需替换为 <div>{svg_code}</div> 并还原 HTML 实体
+            svg_pattern = r'<pre><code class="language-svg">([\s\S]*?)</code></pre>'
+
+            def _unescape_svg(m: re.Match) -> str:
+                return f'<div class="report-image">{html.unescape(m.group(1))}</div>'
+
+            body = re.sub(svg_pattern, _unescape_svg, body)
 
             # HTML 模板 (内联 CSS, 离线友好)
             template = """<!DOCTYPE html>

@@ -14,6 +14,12 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
+# 安装 cairo 系统库 (cairosvg 依赖, DOCX/PDF SVG 配图渲染)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcairo2 \
+    libcairo2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # 联网安装 Python 依赖 (从 PyPI 下载, 联网模式)
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt

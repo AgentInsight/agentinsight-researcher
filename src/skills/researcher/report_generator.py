@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -331,15 +332,22 @@ class ReportGenerator:
             # 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
+            image_svg: str | None = None
             if self.settings.image_generation_enabled:
-                image_url, image_b64 = await self._generate_report_image(query, user_id, session_id)
-                if image_url or image_b64:
-                    report_md = self._insert_image_into_report(report_md, image_url, image_b64)
+                image_url, image_b64, image_svg = await self._generate_report_image(
+                    query, user_id, session_id
+                )
+                if image_url or image_b64 or image_svg:
+                    report_md = self._insert_image_into_report(
+                        report_md, image_url, image_b64, image_svg=image_svg
+                    )
 
             span.update(
                 output={
                     "report_len": len(report_md),
-                    "has_image": image_url is not None or image_b64 is not None,
+                    "has_image": image_url is not None
+                    or image_b64 is not None
+                    or image_svg is not None,
                 }
             )
             return {
@@ -545,8 +553,20 @@ class ReportGenerator:
             )
 
             # 追加引用来源列表 (APA 格式, 含子主题研究新增源)
-            # 避免双重参考章节: 仅追加一次 _format_sources (含 ## 参考来源 章节标题)
-            full_report += self._format_sources(all_sources)
+            # 避免双重参考章节: 若 LLM 已在章节内/结论中生成参考文献块, 不再追加 _format_sources
+            # 检测 H2 标题 (## 参考文献/References/参考来源/Bibliography) 和粗体块 (**参考文献** 等)
+            has_references_section = (
+                "## 参考文献" in full_report
+                or "## References" in full_report
+                or "## 参考来源" in full_report
+                or "## Bibliography" in full_report
+                or "**参考文献**" in full_report
+                or "**References**" in full_report
+                or "**参考来源**" in full_report
+                or "**Bibliography**" in full_report
+            )
+            if not has_references_section:
+                full_report += self._format_sources(all_sources)
 
             # 规范化 Markdown 输出 (修复 LLM 常见格式问题: 段落紧贴、表格无空行、引用紧贴等)
             full_report = self._normalize_markdown(full_report)
@@ -554,15 +574,22 @@ class ReportGenerator:
             # 报告配图生成 (image_generation_enabled=True 时启用)
             image_url: str | None = None
             image_b64: str | None = None
+            image_svg: str | None = None
             if self.settings.image_generation_enabled:
-                image_url, image_b64 = await self._generate_report_image(query, user_id, session_id)
-                if image_url or image_b64:
-                    full_report = self._insert_image_into_report(full_report, image_url, image_b64)
+                image_url, image_b64, image_svg = await self._generate_report_image(
+                    query, user_id, session_id
+                )
+                if image_url or image_b64 or image_svg:
+                    full_report = self._insert_image_into_report(
+                        full_report, image_url, image_b64, image_svg=image_svg
+                    )
 
             span.update(
                 output={
                     "report_len": len(full_report),
-                    "has_image": image_url is not None or image_b64 is not None,
+                    "has_image": image_url is not None
+                    or image_b64 is not None
+                    or image_svg is not None,
                     "subtopics_count": len(subtopics),
                     "sections_count": len(sections),
                     "skipped_count": skipped_count,
@@ -855,9 +882,70 @@ class ReportGenerator:
             fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
         content = content.strip()
+        # 清洗引言末尾 LLM 偶尔生成的 **参考文献** 粗体块 (参考文献由报告组装层统一追加)
+        content = self._strip_inline_references_block(content)
         if not content.startswith("## 引言"):
             content = "## 引言\n\n" + content
         return content
+
+    @staticmethod
+    def _sanitize_section_subtitles(content: str) -> str:
+        """清洗章节内部的冲突子标题.
+
+        检测 ``###`` 子标题, 若为"引言"/"总结"/"结论"等与报告级章节冲突的标题:
+        - "引言"/"Introduction" → 移除子标题行 (引言只在报告开头)
+        - "总结"/"结论"/"Summary"/"Conclusion" → 重命名为 "小结"
+
+        Args:
+            content: 章节内容 (含 ``##`` 章节标题 + ``###`` 子小节).
+
+        Returns:
+            清洗后的内容.
+        """
+        # 匹配 ### 引言 / ### 总结 / ### 结论 (含中英文)
+        conflict_pattern = re.compile(
+            r"^###\s+(引言|总结|结论|Introduction|Summary|Conclusion)\s*$",
+            re.MULTILINE,
+        )
+
+        def _replace_subtitle(m: re.Match[str]) -> str:
+            keyword = m.group(1)
+            if keyword in ("引言", "Introduction"):
+                # 引言: 移除子标题行 (内容保留, 引言只在报告开头)
+                return ""
+            # 总结/结论/Summary/Conclusion: 重命名为 "小结"
+            return "### 小结"
+
+        return conflict_pattern.sub(_replace_subtitle, content)
+
+    @staticmethod
+    def _strip_inline_references_block(content: str) -> str:
+        """清洗章节末尾 LLM 偶尔生成的 ``**参考文献**`` 粗体块.
+
+        LLM 在 ``section_prompt`` 注入完整 references 后, 倾向于在章节末尾
+        "复制" 出 ``**参考文献**`` / ``**References**`` 块及编号条目列表.
+        参考文献列表应由报告组装层 (``_format_sources``) 在报告末尾统一追加,
+        章节内仅保留 ``[n]`` 行内编号引用.
+
+        本方法匹配并移除:
+        - 前置可选 ``---`` 分隔线
+        - ``**参考文献**`` / ``**References**`` / ``**参考来源**`` / ``**Bibliography**`` 粗体标题
+        - 标题后续所有内容 (编号条目列表, 直到文末)
+
+        Args:
+            content: 章节内容 (独立章节, 不含其他章节).
+
+        Returns:
+            清洗后的内容, 末尾保留单个换行.
+        """
+        # 匹配: (2+ 空行 + 可选 --- 分隔线 + 空行) + 粗体参考文献标题 + 后续所有内容到文末
+        pattern = re.compile(
+            r"\n{2,}(?:---\s*\n\s*)?"  # 前置空行 + 可选 --- 分隔线
+            r"\*\*(?:参考文献|References|参考来源|Bibliography)\*\*"  # 粗体标题
+            r"\s*\n[\s\S]*$",  # 标题后续所有内容到文末 (贪婪)
+            re.MULTILINE,
+        )
+        return pattern.sub("", content).rstrip() + "\n"
 
     async def _write_section(
         self,
@@ -919,6 +1007,10 @@ class ReportGenerator:
             fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
         content = content.strip()
+        # 清洗冲突子标题 (引言/总结/结论)
+        content = self._sanitize_section_subtitles(content)
+        # 清洗章节末尾 LLM 偶尔生成的 **参考文献** 粗体块 (参考文献由报告组装层统一追加)
+        content = self._strip_inline_references_block(content)
         if not (content.startswith("## ") or content.startswith("### ")):
             content = f"## {topic}\n\n" + content
         return content
@@ -971,6 +1063,8 @@ class ReportGenerator:
             fallback=_SECTION_FAILURE_PLACEHOLDER,
         )
         content = content.strip()
+        # 清洗结论末尾 LLM 偶尔生成的 **参考文献** 粗体块 (参考文献由报告组装层统一追加)
+        content = self._strip_inline_references_block(content)
         if not content.startswith("## 结论"):
             content = "## 结论\n\n" + content
         return content
@@ -1080,11 +1174,11 @@ class ReportGenerator:
         query: str,
         user_id: str | None,
         session_id: str | None,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         """生成报告配图.
 
         图像生成失败时降级 (报告不带图, 记录 warning), 不阻断主流程.
-        返回 (image_url, image_b64), 失败均为 None.
+        返回 (image_url, image_b64, image_svg), 失败均为 None.
         """
         try:
             if self._image_generator is None:
@@ -1099,8 +1193,9 @@ class ReportGenerator:
                 size=self.settings.image_size,
                 user_id=user_id,
                 session_id=session_id,
+                topic=query,  # 传入主题用于风格路由
             )
-            return result.get("url"), result.get("b64")
+            return result.get("url"), result.get("b64"), result.get("svg")
         except Exception as e:  # noqa: BLE001
             # 图像生成失败降级: 报告不带图, 不阻断主流程
             logger.warning(
@@ -1108,27 +1203,34 @@ class ReportGenerator:
                 query[:100],
                 e,
             )
-            return None, None
+            return None, None, None
 
     @staticmethod
     def _insert_image_into_report(
         report_md: str,
         image_url: str | None,
         image_b64: str | None,
+        *,
+        image_svg: str | None = None,
     ) -> str:
         """在报告 Markdown 中插入配图.
 
         策略: 在第一个 H1 标题后插入 (标题下方, 正文上方).
-        若无 H1, 则在报告开头插入.
+        支持三种格式:
+        - image_svg: 直接嵌入 ```svg 代码块 (GitHub/VSCode/mistune 原生渲染)
+        - image_url: ![报告配图](url)
+        - image_b64: ![报告配图](data:image/png;base64,...)
         """
-        if image_url:
-            image_ref = image_url
+        if image_svg:
+            # SVG 模式: 直接嵌入 ```svg 代码块
+            # Markdown 渲染器 (GitHub/VSCode/mistune) 原生支持 ```svg 渲染
+            image_md = f"\n\n```svg\n{image_svg}\n```\n\n"
+        elif image_url:
+            image_md = f"\n\n![报告配图]({image_url})\n\n"
         elif image_b64:
-            image_ref = f"data:image/png;base64,{image_b64}"
+            image_md = f"\n\n![报告配图](data:image/png;base64,{image_b64})\n\n"
         else:
             return report_md
-
-        image_md = f"\n\n![报告配图]({image_ref})\n\n"
 
         # 在第一个 H1 后插入
         lines = report_md.split("\n")

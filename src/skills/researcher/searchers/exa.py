@@ -35,9 +35,7 @@ class ExaSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.exa_api_key
-        self._client = httpx.AsyncClient(
-            timeout=10.0
-        )  # 超时 10s, 消除 >10s 离群点
+        self._client = httpx.AsyncClient(timeout=10.0)  # 超时 10s, 消除 >10s 离群点
         self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
         self._max_retries = 2  # 限制 2 次避免 API 成本激增
 

@@ -84,6 +84,7 @@ markitdown==0.1.6  # Office 文档转 Markdown
 jinja2==3.1.6  # HTML 模板
 weasyprint==69.0  # PDF 输出(纯 Python, 中文支持好)
 mistune==3.3.2  # Markdown 解析
+cairosvg>=2.7.0  # SVG 转 PNG (DOCX 配图渲染, 可选)
 
 # === Token 优化 (用户需求 10) ===
 tiktoken==0.13.0  # Token 计数

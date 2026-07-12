@@ -32,8 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class ContextManager:
-    """上下文管理者 (Token 优化核心).
-    """
+    """上下文管理者 (Token 优化核心)."""
 
     settings: Settings
     # _embeddings 仅用于 is_circuit_open() 探测 TEI 健康状态 (Qdrant 索引/检索共用 TEI);

@@ -294,3 +294,117 @@ def test_language_instruction_unknown_returns_empty(generator: ReportGenerator) 
     """测试未知语言降级为空串 (视为 zh)."""
     assert generator._get_language_instruction("de") == ""
     assert generator._get_language_instruction("xxx") == ""
+
+
+# ========== _sanitize_section_subtitles ==========
+
+
+def test_sanitize_removes_introduction_subtitle_zh() -> None:
+    """测试 ### 引言 子标题被移除 (中文)."""
+    content = "## 章节\n\n### 引言\n\n正文内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 引言" not in result
+    assert "正文内容" in result
+
+
+def test_sanitize_renames_summary_subtitle_zh() -> None:
+    """测试 ### 总结 子标题重命名为 ### 小结."""
+    content = "## 章节\n\n### 总结\n\n正文内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 总结" not in result
+    assert "### 小结" in result
+
+
+def test_sanitize_renames_conclusion_subtitle_zh() -> None:
+    """测试 ### 结论 子标题重命名为 ### 小结."""
+    content = "## 章节\n\n### 结论\n\n正文内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 结论" not in result
+    assert "### 小结" in result
+
+
+def test_sanitize_removes_introduction_subtitle_en() -> None:
+    """测试 ### Introduction 子标题被移除 (英文)."""
+    content = "## Section\n\n### Introduction\n\nBody text"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### Introduction" not in result
+    assert "Body text" in result
+
+
+def test_sanitize_renames_summary_subtitle_en() -> None:
+    """测试 ### Summary 子标题重命名为 ### 小结."""
+    content = "## Section\n\n### Summary\n\nBody text"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### Summary" not in result
+    assert "### 小结" in result
+
+
+def test_sanitize_renames_conclusion_subtitle_en() -> None:
+    """测试 ### Conclusion 子标题重命名为 ### 小结."""
+    content = "## Section\n\n### Conclusion\n\nBody text"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### Conclusion" not in result
+    assert "### 小结" in result
+
+
+def test_sanitize_preserves_report_level_introduction_heading() -> None:
+    """测试 ## 引言 报告级标题不受影响."""
+    content = "## 引言\n\n这是报告引言"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert result == content
+
+
+def test_sanitize_preserves_report_level_conclusion_heading() -> None:
+    """测试 ## 结论 报告级标题不受影响."""
+    content = "## 结论\n\n这是报告结论"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert result == content
+
+
+def test_sanitize_preserves_report_level_summary_heading() -> None:
+    """测试 ## 总结 报告级标题不受影响."""
+    content = "## 总结\n\n这是报告总结"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert result == content
+
+
+def test_sanitize_preserves_numbered_subsection() -> None:
+    """测试 ### 1. 研究设计 编号子标题不受影响."""
+    content = "## 章节\n\n### 1. 研究设计\n\n正文内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 1. 研究设计" in result
+    assert result == content
+
+
+def test_sanitize_preserves_descriptive_subsection() -> None:
+    """测试 ### 研究设计与数据来源 描述性子标题不受影响."""
+    content = "## 章节\n\n### 研究设计与数据来源\n\n正文内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 研究设计与数据来源" in result
+    assert result == content
+
+
+def test_sanitize_handles_multiple_conflicting_subtitles() -> None:
+    """测试同时存在多个冲突子标题时全部清洗."""
+    content = "## 章节\n\n### 引言\n\n引言内容\n\n### 总结\n\n总结内容"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert "### 引言" not in result
+    assert "### 总结" not in result
+    assert "### 小结" in result
+    assert "引言内容" in result
+    assert "总结内容" in result
+
+
+def test_sanitize_is_idempotent() -> None:
+    """测试幂等: 重复调用不会改变已清洗的内容."""
+    content = "## 章节\n\n### 总结\n\n正文内容"
+    once = ReportGenerator._sanitize_section_subtitles(content)
+    twice = ReportGenerator._sanitize_section_subtitles(once)
+    assert once == twice
+
+
+def test_sanitize_preserves_content_without_subtitles() -> None:
+    """测试无 ### 子标题的内容原样返回."""
+    content = "## 章节\n\n纯文本内容, 无子标题"
+    result = ReportGenerator._sanitize_section_subtitles(content)
+    assert result == content

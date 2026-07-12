@@ -300,6 +300,90 @@ class ChatCompletionResponse(BaseModel):
     report_id: str | None = None
 
 
+# ========== 会话持久化辅助 (以 UserId 为单位的对话保存) ==========
+
+
+async def _persist_user_message(
+    session_id: str,
+    agent_id: str,
+    user_id: str,
+    query: str,
+) -> None:
+    """保存用户消息到 chat_messages, 并确保 research_sessions 记录存在.
+
+    在 chat_completions 端点处理请求前调用:
+    - ensure_session: 不存在则创建 research_sessions (含 query + title)
+    - save_message: 保存 user 消息到 chat_messages
+
+    失败仅告警, 不阻断主流程 (消息持久化为辅助功能).
+    """
+    try:
+        from src.memory.session_store import get_session_store
+
+        store = get_session_store()
+        # 确保会话记录存在 (首次对话时创建, 已存在则更新 query + updated_at)
+        title = query[:100] if query else ""
+        await store.ensure_session(session_id, agent_id, user_id, query=query)
+        # 若标题为空, 更新为 query 前 100 字符
+        if title:
+            existing_title = await store.get_session_title(session_id, agent_id, user_id)
+            if not existing_title:
+                await store.update_session_title(session_id, agent_id, user_id, title)
+        # 保存 user 消息
+        await store.save_message(
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            role="user",
+            content=query,
+        )
+    except Exception:
+        logger.warning(
+            "保存用户消息失败 (不阻断主流程, session=%s): ",
+            session_id,
+            exc_info=True,
+        )
+
+
+async def _persist_assistant_message(
+    session_id: str,
+    agent_id: str,
+    user_id: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """保存 assistant 消息到 chat_messages.
+
+    在流式/非流式响应完成后调用 (后台任务, 不阻塞用户响应).
+    失败仅告警, 不阻断主流程.
+
+    Args:
+        session_id: 会话 ID
+        agent_id: Agent 名称
+        user_id: 用户 ID
+        content: assistant 响应内容
+        metadata: 可选元数据 (如 sources, report_id)
+    """
+    try:
+        from src.memory.session_store import get_session_store
+
+        store = get_session_store()
+        await store.save_message(
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            role="assistant",
+            content=content,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.warning(
+            "保存 assistant 消息失败 (不阻断主流程, session=%s): ",
+            session_id,
+            exc_info=True,
+        )
+
+
 # ========== 端点实现 ==========
 
 
@@ -330,6 +414,11 @@ async def chat_completions(
     # user_id / agent_id 由中间件注入
     user_id = get_request_user_id()
     agent_id = get_request_agent_id()
+
+    # 会话持久化: 保存 user 消息到 chat_messages + 确保 research_sessions 存在
+    # (以 UserId 为单位的会话持久化, 失败不阻断主流程)
+    if user_id and agent_id:
+        await _persist_user_message(session_id, agent_id, user_id, query)
 
     # 查询意图分类 (短查询 + 离题闲聊 + 对话/研究路由)
     # 先检查会话是否已有报告 (用于分类器 has_report 参数)
@@ -397,14 +486,23 @@ async def chat_completions(
                 session_id,
                 intent=intent.value,
             )
-            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer
+            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer + chat_messages
+            chitchat_content = response.choices[0]["message"]["content"]
             await _save_chitchat_response(
                 session_id,
                 query,
-                response.choices[0]["message"]["content"],
+                chitchat_content,
                 user_id=user_id,
                 agent_id=agent_id,
             )
+            if user_id and agent_id:
+                await _persist_assistant_message(
+                    session_id,
+                    agent_id,
+                    user_id,
+                    chitchat_content,
+                    metadata={"intent": intent.value},
+                )
             return _with_session_id(response, session_id)
         else:  # OFF_TOPIC
             if request.stream:
@@ -445,14 +543,23 @@ async def chat_completions(
                 session_id,
                 intent=intent.value,
             )
-            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer
+            # 会话持久化: 保存 ChitchatResponder 响应回 checkpointer + chat_messages
+            chitchat_content = response.choices[0]["message"]["content"]
             await _save_chitchat_response(
                 session_id,
                 query,
-                response.choices[0]["message"]["content"],
+                chitchat_content,
                 user_id=user_id,
                 agent_id=agent_id,
             )
+            if user_id and agent_id:
+                await _persist_assistant_message(
+                    session_id,
+                    agent_id,
+                    user_id,
+                    chitchat_content,
+                    metadata={"intent": intent.value},
+                )
             return _with_session_id(response, session_id)
 
     # CHAT 意图走 chat graph (仅追问场景, 首轮已被降级到 OFF_TOPIC)
@@ -471,7 +578,14 @@ async def chat_completions(
         chat_config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
         if request.stream:
             return StreamingResponse(
-                _stream_chat(chat_state, chat_config, request, session_id),
+                _stream_chat(
+                    chat_state,
+                    chat_config,
+                    request,
+                    session_id,
+                    save_user_id=user_id,
+                    save_agent_id=agent_id,
+                ),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -480,10 +594,19 @@ async def chat_completions(
                 },
             )
         else:
-            return _with_session_id(
-                await _run_chat(chat_state, chat_config, request, session_id),
-                session_id,
-            )
+            chat_response = await _run_chat(chat_state, chat_config, request, session_id)
+            # 会话持久化: 保存 assistant 消息到 chat_messages
+            if user_id and agent_id:
+                chat_content = chat_response.choices[0]["message"]["content"]
+                if chat_content:
+                    await _persist_assistant_message(
+                        session_id,
+                        agent_id,
+                        user_id,
+                        chat_content,
+                        metadata={"intent": "chat"},
+                    )
+            return _with_session_id(chat_response, session_id)
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
     # SELF_HOST=False 时, 进入研究前校验 Agent 点数
@@ -638,7 +761,15 @@ async def chat_completions(
 
     if request.stream:
         return StreamingResponse(
-            _stream_research(initial_state, graph_config, request, session_id, authorization),
+            _stream_research(
+                initial_state,
+                graph_config,
+                request,
+                session_id,
+                authorization,
+                save_user_id=user_id,
+                save_agent_id=agent_id,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -648,10 +779,31 @@ async def chat_completions(
         )
     else:
         # 非流式: 完整执行后返回
-        return _with_session_id(
-            await _run_research(initial_state, graph_config, request, session_id, authorization),
+        research_response = await _run_research(
+            initial_state,
+            graph_config,
+            request,
             session_id,
+            authorization,
         )
+        # 会话持久化: 保存 assistant 消息到 chat_messages
+        if user_id and agent_id:
+            research_content = research_response.choices[0]["message"]["content"]
+            if research_content:
+                await _persist_assistant_message(
+                    session_id,
+                    agent_id,
+                    user_id,
+                    research_content,
+                    metadata={
+                        "intent": "research",
+                        "report_id": research_response.report_id,
+                        "sources": research_response.sources[:10]
+                        if research_response.sources
+                        else [],
+                    },
+                )
+        return _with_session_id(research_response, session_id)
 
 
 def _with_session_id(response: ChatCompletionResponse, session_id: str) -> JSONResponse:
@@ -680,11 +832,17 @@ async def _stream_research(
     request: ChatCompletionRequest,
     session_id: str,
     authorization: str | None = None,
+    *,
+    save_user_id: str | None = None,
+    save_agent_id: str | None = None,
 ) -> Any:
     """流式 SSE 响应生成器.
 
     接入 LangGraph astream, 逐节点 yield 进度 + 最终报告.
     用 trace_agent 包裹 graph.ainvoke 作为根 span.
+
+    会话持久化: 流式结束后保存完整报告内容到 chat_messages
+    (save_user_id + save_agent_id 非空时触发).
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -708,6 +866,9 @@ async def _stream_research(
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
+
+    # 收集流式内容 (用于会话持久化)
+    collected_content: list[str] = []
 
     # 根 span 包裹整次研究
     async with trace_agent(
@@ -795,7 +956,9 @@ async def _stream_research(
                         # 分块输出报告 (按段落)
                         paragraphs = report_md.split("\n\n")
                         for para in paragraphs:
-                            yield _sse_chunk({"content": para + "\n\n"})
+                            chunk_text = para + "\n\n"
+                            collected_content.append(chunk_text)
+                            yield _sse_chunk({"content": chunk_text})
                             # 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                             await asyncio.sleep(0.001)
                         continue  # 跳过下面的进度提示
@@ -808,8 +971,10 @@ async def _stream_research(
                         # 流式推送最终格式的报告内容 (统一从 report_formats 读取)
                         new_formats = delta.get("report_formats") or {}
                         if new_formats.get("html"):
+                            collected_content.append(new_formats["html"])
                             yield _sse_chunk({"content": new_formats["html"]})
                         elif new_formats.get("json"):
+                            collected_content.append(new_formats["json"])
                             yield _sse_chunk({"content": new_formats["json"]})
                         elif new_formats.get("pdf"):
                             yield _sse_chunk(
@@ -819,6 +984,8 @@ async def _stream_research(
                         continue
 
                     yield _sse_chunk({"content": progress})
+                    if progress:
+                        collected_content.append(progress)
                     # 背压: 让出控制权, 允许消费者 (SSE writer) 刷出缓冲
                     await asyncio.sleep(0.001)
 
@@ -834,7 +1001,9 @@ async def _stream_research(
                 or ""
             )
             if not final_content:
-                yield _sse_chunk({"content": "\n\n*未生成报告内容 (可能上下文为空)*"})
+                _empty_hint = "\n\n*未生成报告内容 (可能上下文为空)*"
+                collected_content.append(_empty_hint)
+                yield _sse_chunk({"content": _empty_hint})
             # 如果是 PDF, 推送 file_path
             pdf_path = final_formats.get("pdf") or final_state.get("report_pdf_path")
             if fmt == "pdf" and pdf_path:
@@ -891,11 +1060,38 @@ async def _stream_research(
 
         except Exception as e:
             logger.exception("研究流水线执行失败")
-            yield _sse_chunk({"content": f"\n\n**研究执行失败**: {str(e)[:200]}"})
+            _err_msg = f"\n\n**研究执行失败**: {str(e)[:200]}"
+            collected_content.append(_err_msg)
+            yield _sse_chunk({"content": _err_msg})
+            # 会话持久化: 保存 assistant 消息到 chat_messages (含错误消息)
+            # 必须在 yield [DONE] 之前, 否则 SSE 连接中断后 yield 之后的代码不执行
+            if save_user_id and save_agent_id and collected_content:
+                full_response = "".join(collected_content)
+                if full_response:
+                    await _persist_assistant_message(
+                        session_id,
+                        save_agent_id,
+                        save_user_id,
+                        full_response,
+                        metadata={"intent": "research", "status": "error"},
+                    )
             # 错误时 finish_reason="error" (客户端可据此区分失败)
             yield _sse_chunk({}, finish_reason="error")
             yield "data: [DONE]\n\n"
             return
+
+    # 会话持久化: 保存 assistant 消息到 chat_messages (必须在 yield [DONE] 之前,
+    # 否则 SSE 连接中断后 yield 之后的代码不执行, 导致历史消息丢失)
+    if save_user_id and save_agent_id and collected_content:
+        full_response = "".join(collected_content)
+        if full_response:
+            await _persist_assistant_message(
+                session_id,
+                save_agent_id,
+                save_user_id,
+                full_response,
+                metadata={"intent": "research"},
+            )
 
     # SSE 末块 (finish_reason)
     yield _sse_chunk({}, finish_reason="stop")
@@ -1264,7 +1460,9 @@ async def _stream_chitchat(
     从 ChitchatResponder 的 AsyncIterator 逐块 yield 内容, 包装为 SSE 格式.
     trace_agent 根 span.
 
-    会话持久化: 流式结束后将完整响应保存回 checkpointer (save_query 非空时).
+    会话持久化:
+    - 流式结束后将完整响应保存回 checkpointer (save_query 非空时)
+    - 同时保存 assistant 消息到 chat_messages (以 UserId 为单位的会话持久化)
 
     Args:
         content_iterator: ChitchatResponder 返回的 AsyncIterator[str]
@@ -1318,11 +1516,8 @@ async def _stream_chitchat(
                 collected_content.append(chunk)
                 yield _sse_chunk({"content": chunk})
 
-    # SSE 末块 (finish_reason)
-    yield _sse_chunk({}, finish_reason="stop")
-    yield "data: [DONE]\n\n"
-
-    # 会话持久化: 流式结束后保存完整响应回 checkpointer
+    # 会话持久化: 流式结束后保存完整响应回 checkpointer + chat_messages
+    # 必须在 yield [DONE] 之前, 否则 SSE 连接中断后 yield 之后的代码不执行, 导致历史消息丢失
     if save_query is not None:
         full_response = "".join(collected_content)
         if full_response:
@@ -1333,6 +1528,19 @@ async def _stream_chitchat(
                 user_id=save_user_id,
                 agent_id=save_agent_id,
             )
+            # 保存 assistant 消息到 chat_messages (以 UserId 为单位的会话持久化)
+            if save_user_id and save_agent_id:
+                await _persist_assistant_message(
+                    session_id,
+                    save_agent_id,
+                    save_user_id,
+                    full_response,
+                    metadata={"intent": intent},
+                )
+
+    # SSE 末块 (finish_reason)
+    yield _sse_chunk({}, finish_reason="stop")
+    yield "data: [DONE]\n\n"
 
 
 async def _run_chitchat(
@@ -1402,11 +1610,17 @@ async def _stream_chat(
     graph_config: dict[str, Any],
     request: ChatCompletionRequest,
     session_id: str,
+    *,
+    save_user_id: str | None = None,
+    save_agent_id: str | None = None,
 ) -> Any:
     """流式 SSE 对话追问响应生成器.
 
     走 chat graph (单节点), 流式输出 AI 回答.
     用 trace_agent 包裹 graph.ainvoke 作为根 span.
+
+    会话持久化: 流式结束后保存完整 assistant 响应到 chat_messages
+    (save_user_id + save_agent_id 非空时触发).
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -1430,6 +1644,9 @@ async def _stream_chat(
 
     # SSE 首块 (role)
     yield _sse_chunk({"role": "assistant"})
+
+    # 收集流式内容 (用于会话持久化)
+    collected_content: list[str] = []
 
     # 根 span 包裹对话追问
     async with trace_agent(
@@ -1463,6 +1680,7 @@ async def _stream_chat(
                                     if isinstance(msg.content, str)
                                     else str(msg.content)
                                 )
+                                collected_content.append(msg_text)
                                 paragraphs = msg_text.split("\n\n")
                                 for para in paragraphs:
                                     yield _sse_chunk({"content": para + "\n\n"})
@@ -1476,6 +1694,19 @@ async def _stream_chat(
             yield _sse_chunk({}, finish_reason="error")
             yield "data: [DONE]\n\n"
             return
+
+    # 会话持久化: 保存 assistant 消息到 chat_messages
+    # 必须在 yield [DONE] 之前, 否则 SSE 连接中断后 yield 之后的代码不执行, 导致历史消息丢失
+    if save_user_id and save_agent_id and collected_content:
+        full_response = "".join(collected_content)
+        if full_response:
+            await _persist_assistant_message(
+                session_id,
+                save_agent_id,
+                save_user_id,
+                full_response,
+                metadata={"intent": "chat"},
+            )
 
     # SSE 末块 (finish_reason)
     yield _sse_chunk({}, finish_reason="stop")

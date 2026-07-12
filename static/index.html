@@ -67,11 +67,14 @@
       background: var(--bg);
       color: var(--text);
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       overflow: hidden;
       font-size: 15px;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
+    }
+    .main-wrap {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
     }
     button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
     input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; }
@@ -555,6 +558,50 @@
     .dl-json { background: #a855f7; } /* JSON - 紫色 */
     .reports-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 32px 16px; }
 
+    /* ===== 会话列表侧边栏 (以 UserId 为单位的会话持久化) ===== */
+    .sidebar {
+      width: 260px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .sidebar-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .sidebar-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+    .sidebar-title .icon { font-size: 16px; }
+    .session-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .session-list::-webkit-scrollbar { width: 6px; }
+    .session-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+    .session-list::-webkit-scrollbar-track { background: transparent; }
+    .session-item {
+      display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; cursor: pointer;
+      border-left: 3px solid transparent; transition: background .12s, border-color .12s;
+    }
+    .session-item:hover { background: var(--surface-2); }
+    .session-item.active { background: var(--primary-soft); border-left-color: var(--primary); }
+    .session-item .session-info { flex: 1; min-width: 0; }
+    .session-item .session-title-text {
+      font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      color: var(--text);
+    }
+    .session-item .session-meta {
+      font-size: 11px; color: var(--text-muted); margin-top: 3px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .session-item .session-msg-count {
+      background: var(--primary-soft); color: var(--primary); padding: 0 6px; border-radius: 8px;
+      font-size: 10px; font-weight: 600;
+    }
+    .session-item .session-del {
+      width: 24px; height: 24px; border-radius: 4px; font-size: 12px; color: var(--text-muted);
+      flex-shrink: 0; display: none; align-items: center; justify-content: center;
+      transition: background .12s, color .12s;
+    }
+    .session-item:hover .session-del { display: inline-flex; }
+    .session-item .session-del:hover { background: var(--error-bg); color: var(--error); }
+    .session-empty { text-align: center; color: var(--text-muted); font-size: 12px; padding: 24px 14px; }
+    .session-loading { text-align: center; color: var(--text-muted); font-size: 12px; padding: 12px; }
+
     /* ===== 响应式 ===== */
     @media (max-width: 640px) {
       .config-grid { grid-template-columns: 1fr; }
@@ -562,6 +609,7 @@
       .chat-inner { padding: 16px 10px 24px; }
       .config-head { padding: 8px 12px; }
       .config-title { font-size: 13px; }
+      .sidebar { width: 200px; }
     }
     /* 滚动条 */
     .chat-wrap::-webkit-scrollbar { width: 8px; }
@@ -570,6 +618,19 @@
   </style>
 </head>
 <body>
+  <!-- ========== 会话列表侧边栏 (以 UserId 为单位的会话持久化) ========== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title"><span class="icon">💬</span> 会话列表</span>
+      <button class="small-btn primary" id="sidebarNewSession" title="新建会话">+ 新建</button>
+    </div>
+    <div class="session-list" id="sessionList">
+      <div class="session-loading">加载中...</div>
+    </div>
+  </aside>
+
+  <!-- ========== 主区域 ========== -->
+  <div class="main-wrap">
   <!-- ========== 顶部配置栏 ========== -->
   <header class="config-bar">
     <div class="config-head">
@@ -634,14 +695,8 @@
   </header>
 
   <!-- ========== 主聊天区 ========== -->
-  <main class="chat-wrap" id="chatWrap">
-    <div class="chat-inner" id="messages">
-      <div class="empty-hint" id="emptyHint">
-        <h2>研究分析智能体 · 联调测试页</h2>
-        <p>输入研究问题开始对话。例如：「分析中国新能源汽车 2025 年出海格局」</p>
-      </div>
-    </div>
-  </main>
+  <!-- per-session DOM 容器: JS 动态将当前会话的 .chat-inner 容器挂载到 #chatWrap -->
+  <main class="chat-wrap" id="chatWrap"></main>
 
   <!-- ========== 底部输入区 ========== -->
   <footer class="input-area">
@@ -669,6 +724,7 @@
       <div class="input-hint">Enter 发送 · Shift+Enter 换行 · 仅做联调展示, 不含业务逻辑</div>
     </div>
   </footer>
+  </div><!-- /.main-wrap -->
 
   <!-- ========== 人在回路审核面板 (P2-03) ========== -->
   <div id="review-panel">
@@ -877,13 +933,62 @@
     }
 
     // ========== 状态 ==========
+    // per-session 流上下文: 每个会话独立维护 SSE 流式状态, 支持切换会话时旧流后台继续生成
+    // sessionStreams: Map<sessionId, StreamContext>
+    // StreamContext = {
+    //   streaming: boolean,             // 该会话是否正在流式
+    //   abortCtrl: AbortController|null,// 该会话的 AbortController
+    //   bubble: object|null,           // 当前 assistant 气泡对象 (闭包内创建, 此处仅用于状态查询)
+    //   messagesContainer: HTMLDivElement, // 该会话专属的消息容器 DOM (detach/attach 切换)
+    //   messageOffset, messageHasMore, messageTotal, loadingMoreMessages,
+    //   ws: WebSocket|null, wsReconnectTimer, wsReconnectAttempts,
+    //   files: [],                     // 该会话已上传文件 (per-session 隔离)
+    //   streamStartedAt: number|null,  // 流开始时间戳 (用于后台流限制 LRU 淘汰)
+    // }
+    const sessionStreams = new Map();
+    // 后台流并发上限: 最多 1 个后台流 (切换到第 3 个会话时, 最早的后台流自动中止)
+    const MAX_BACKGROUND_STREAMS = 1;
+
     const state = {
       sessionId: uuidv4(),
-      streaming: false,
-      abortCtrl: null,
-      // 已上传文件: [{file_id, filename, size_bytes, selected}]
+      // 全局文件列表 (向后兼容, 实际使用时按会话隔离到 sessionStreams)
       files: [],
     };
+
+    /** 获取或创建会话流上下文 */
+    function ensureSessionStream(sessionId) {
+      if (!sessionStreams.has(sessionId)) {
+        const container = document.createElement('div');
+        container.className = 'chat-inner';
+        container.dataset.sessionId = sessionId;
+        sessionStreams.set(sessionId, {
+          streaming: false,
+          abortCtrl: null,
+          bubble: null,
+          messagesContainer: container,
+          messageOffset: 0,
+          messageHasMore: false,
+          messageTotal: 0,
+          loadingMoreMessages: false,
+          ws: null,
+          wsReconnectTimer: null,
+          wsReconnectAttempts: 0,
+          files: [],
+          streamStartedAt: null,
+        });
+      }
+      return sessionStreams.get(sessionId);
+    }
+
+    /** 获取当前会话流上下文 */
+    function currentStream() {
+      return ensureSessionStream(state.sessionId);
+    }
+
+    /** 获取当前可见的消息容器 (挂载在 #chatWrap 下的) */
+    function currentMessagesContainer() {
+      return currentStream().messagesContainer;
+    }
 
     // ========== 主题切换 ==========
     const THEME_KEY = 'air-theme';
@@ -907,21 +1012,398 @@
       $('configBody').classList.toggle('open');
     });
 
-    // ========== 会话管理 ==========
+    // ========== 会话管理 (以 UserId 为单位的会话持久化) ==========
     function refreshSessionDisplay() {
       $('sessionIdDisplay').textContent = state.sessionId;
       $('sessionIdInput').value = state.sessionId;
     }
-    refreshSessionDisplay();
 
-    $('newSession').addEventListener('click', () => {
-      state.sessionId = uuidv4();
+    /** 构造请求头 (含 Authorization, 如有 Token) */
+    function buildHeaders(json = false) {
+      const token = $('tokenInput').value.trim();
+      const headers = {};
+      if (json) headers['Content-Type'] = 'application/json';
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      return headers;
+    }
+
+    /** 格式化时间 (相对时间, 如 "刚刚" / "3 分钟前" / "2025-01-01 12:30") */
+    function formatRelativeTime(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '—';
+      const now = Date.now();
+      const diff = now - d.getTime();
+      if (diff < 60000) return '刚刚';
+      if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
+      if (diff < 604800000) return Math.floor(diff / 86400000) + ' 天前';
+      return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    /** 加载会话列表 (GET /v1/sessions) */
+    async function loadSessionList() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const list = $('sessionList');
+      try {
+        const resp = await fetch(base + '/v1/sessions?limit=50&offset=0', { headers: buildHeaders() });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const sessions = await resp.json();
+        renderSessionList(sessions);
+      } catch (e) {
+        list.innerHTML = '<div class="session-empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    /** 渲染会话列表 */
+    function renderSessionList(sessions) {
+      const list = $('sessionList');
+      if (!sessions || sessions.length === 0) {
+        list.innerHTML = '<div class="session-empty">暂无会话, 点击「+ 新建」开始</div>';
+        return;
+      }
+      list.innerHTML = sessions.map((s) => {
+        const isActive = s.session_id === state.sessionId;
+        const title = s.title || s.query || '(无标题)';
+        const time = formatRelativeTime(s.updated_at || s.created_at);
+        const msgCount = s.message_count != null ? s.message_count : 0;
+        return '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '">' +
+          '<div class="session-info">' +
+            '<div class="session-title-text" title="' + escapeHtml(title) + '">' + escapeHtml(title) + '</div>' +
+            '<div class="session-meta">' +
+              '<span>' + escapeHtml(time) + '</span>' +
+              (msgCount > 0 ? '<span class="session-msg-count">' + msgCount + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<button class="session-del" data-session-id="' + escapeHtml(s.session_id) + '" title="删除会话">✕</button>' +
+        '</div>';
+      }).join('');
+      // 绑定点击切换事件
+      list.querySelectorAll('.session-item').forEach((item) => {
+        item.addEventListener('click', (e) => {
+          if (e.target.classList.contains('session-del')) return;
+          const sid = item.dataset.sessionId;
+          if (sid && sid !== state.sessionId) {
+            switchSession(sid);
+          }
+        });
+      });
+      // 绑定删除按钮
+      list.querySelectorAll('.session-del').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const sid = btn.dataset.sessionId;
+          if (sid && confirm('确定删除此会话? 所有对话消息将被清除, 此操作不可撤销。')) {
+            deleteSession(sid);
+          }
+        });
+      });
+    }
+
+    /** 加载最近会话 (GET /v1/sessions/latest), 页面初始化或删除当前会话时调用
+     *  优先切换到正在流式的后台会话 (如果存在), 避免后台流"看不到" */
+    async function loadLatestSession() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      try {
+        const resp = await fetch(base + '/v1/sessions/latest', { headers: buildHeaders() });
+        if (resp.status === 404) {
+          // 无会话记录, 创建新会话
+          await createNewSession();
+          return;
+        }
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const session = await resp.json();
+        if (session && session.session_id) {
+          // 优先切换到正在流式的后台会话 (如果后端返回的不是正在流式的会话)
+          // 避免删除当前会话后, 后台流的会话被"遗忘"导致流停止感知
+          let targetSessionId = session.session_id;
+          const streamingBg = [];
+          for (const [sid, s] of sessionStreams.entries()) {
+            if (s.streaming && sid !== session.session_id) {
+              streamingBg.push(sid);
+            }
+          }
+          if (streamingBg.length > 0) {
+            // 有正在流式的后台会话, 优先切换到第一个
+            targetSessionId = streamingBg[0];
+            console.log('[loadLatestSession] 检测到后台流式会话, 优先切换:', targetSessionId);
+          }
+          state.sessionId = targetSessionId;
+          refreshSessionDisplay();
+          // 挂载该会话的消息容器
+          attachSessionContainer(targetSessionId);
+          // 加载最近 10 条消息 (守卫会跳过正在流式或已加载历史的会话)
+          await loadMessages(targetSessionId, 0);
+          // 刷新会话列表 (高亮当前会话)
+          await loadSessionList();
+          // 连接 WebSocket (per-session) + 加载报告列表
+          connectWS(targetSessionId);
+          loadReportList();
+          // 页面初始化时滚动到最新消息
+          scrollBottom();
+        }
+      } catch (e) {
+        console.warn('加载最近会话失败:', e);
+        // 失败时降级为本地 UUID (不调用后端创建)
+        refreshSessionDisplay();
+        attachSessionContainer(state.sessionId);
+        showEmptyHint();
+      }
+    }
+
+    /** 将目标会话的消息容器挂载到 #chatWrap (切换会话时调用)
+     *  旧会话容器自动 detach (DOM 节点保留在内存中, 后台流仍可写入) */
+    function attachSessionContainer(sessionId) {
+      const chatWrap = $('chatWrap');
+      const target = ensureSessionStream(sessionId).messagesContainer;
+      // 如果目标容器已在 #chatWrap 下, 无需操作
+      if (chatWrap.contains(target) && chatWrap.firstChild === target) return;
+      // detach 旧容器 (若有)
+      while (chatWrap.firstChild) {
+        chatWrap.removeChild(chatWrap.firstChild);
+      }
+      // attach 目标容器
+      chatWrap.appendChild(target);
+    }
+
+    /** 根据当前可见会话的 streaming 状态更新发送/停止按钮显示 */
+    function updateSendStopButtons() {
+      const stream = currentStream();
+      if (stream.streaming) {
+        $('sendBtn').style.display = 'none';
+        $('stopBtn').style.display = 'inline-block';
+      } else {
+        $('sendBtn').style.display = 'inline-block';
+        $('stopBtn').style.display = 'none';
+      }
+    }
+
+    /** 后台流限制: 最多 MAX_BACKGROUND_STREAMS 个后台流
+     *  切换会话时调用, 超限时按 streamStartedAt 最早的流自动中止 (LRU 淘汰) */
+    function enforceBackgroundStreamLimit(currentSessionId) {
+      // 收集所有正在流式且非当前会话的后台流
+      const bgStreams = [];
+      for (const [sid, stream] of sessionStreams.entries()) {
+        if (sid !== currentSessionId && stream.streaming && stream.streamStartedAt != null) {
+          bgStreams.push({ sid, startedAt: stream.streamStartedAt });
+        }
+      }
+      if (bgStreams.length <= MAX_BACKGROUND_STREAMS) return;
+      // 按 streamStartedAt 升序排序, 中止最早的 (LRU)
+      bgStreams.sort((a, b) => a.startedAt - b.startedAt);
+      const toAbort = bgStreams.slice(0, bgStreams.length - MAX_BACKGROUND_STREAMS);
+      for (const { sid } of toAbort) {
+        const stream = sessionStreams.get(sid);
+        if (stream && stream.abortCtrl) {
+          console.log('[流限制] 后台流超过上限, 中止会话:', sid);
+          stream.abortCtrl.abort();
+        }
+      }
+    }
+
+    /** 中止指定会话的 SSE 流 (用于 stopBtn / 后台流限制 / 删除会话) */
+    function abortSessionStream(sessionId) {
+      const stream = sessionStreams.get(sessionId);
+      if (stream && stream.abortCtrl) {
+        stream.abortCtrl.abort();
+      }
+    }
+
+    /** 切换到指定会话 (加载最近 10 条消息)
+     *  per-session 独立流: 旧会话的 SSE 流在后台继续生成, 不中止
+     *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发, 切换会话本身不中止任何流 */
+    async function switchSession(sessionId) {
+      state.sessionId = sessionId;
       refreshSessionDisplay();
-      connectWS(); // P2-03: 切换会话后重连 WebSocket
-      // 任务8: 新会话无报告, 清空列表 (下次完成研究后由 SSE report_id 帧自动刷新)
-      $('report-list').innerHTML = '<div class="reports-empty">暂无报告,完成一次研究后自动刷新</div>';
-      toast('已新建会话: ' + state.sessionId);
-    });
+      // 挂载目标会话的消息容器 (旧容器自动 detach, DOM 保留在内存中供后台流写入)
+      attachSessionContainer(sessionId);
+      // 按当前会话的 streaming 状态更新按钮
+      updateSendStopButtons();
+      // 更新侧边栏高亮
+      document.querySelectorAll('.session-item').forEach((item) => {
+        item.classList.toggle('active', item.dataset.sessionId === sessionId);
+      });
+      // 首次切换到该会话时加载历史消息 (已在内存中的不重复加载)
+      const stream = currentStream();
+      if (stream.messageOffset === 0 && !stream.streaming) {
+        await loadMessages(sessionId, 0);
+      }
+      // 重连 WebSocket (per-session) + 加载报告列表
+      connectWS();
+      loadReportList();
+      // 切换会话后自动滚动到最新消息 (无论是否加载了历史)
+      scrollBottom();
+      toast('已切换到会话');
+    }
+
+    /** 加载会话消息 (GET /v1/sessions/{session_id}/messages)
+     *  offset=0: 加载最新 limit 条 (旧→新排序), 渲染到该会话的消息容器
+     *  offset>0: 加载更早的消息, 插入到容器顶部 (滚动加载)
+     *  per-session: 消息写入会话专属的 messagesContainer, 分页状态存入 StreamContext
+     *  守卫: offset=0 时, 若该会话正在流式或已加载过历史(messageOffset>0), 跳过清空
+     *        (避免销毁后台流的 bubble DOM, 或重复加载已有历史)
+     */
+    async function loadMessages(sessionId, offset) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      const limit = 10;
+      const stream = ensureSessionStream(sessionId);
+      // 守卫: 首次加载(offset=0)时, 若该会话正在流式或已加载过历史, 不清空容器
+      // - stream.streaming: 后台流正在运行, bubble DOM 在容器中, 清空会销毁渲染目标
+      // - stream.messageOffset > 0: 该会话已加载过历史消息, 容器中已有内容, 无需重复加载
+      if (offset === 0 && (stream.streaming || stream.messageOffset > 0)) {
+        return;
+      }
+      try {
+        const resp = await fetch(
+          base + '/v1/sessions/' + encodeURIComponent(sessionId) + '/messages?limit=' + limit + '&offset=' + offset,
+          { headers: buildHeaders() }
+        );
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        const messages = data.messages || [];
+        stream.messageTotal = data.total || 0;
+        stream.messageHasMore = data.has_more || false;
+
+        if (offset === 0) {
+          // 首次加载: 清空并渲染
+          stream.messagesContainer.innerHTML = '';
+          if (messages.length === 0) {
+            showEmptyHint();
+          } else {
+            messages.forEach((msg) => renderHistoricalMessage(msg));
+            stream.messageOffset = messages.length;
+            scrollBottom();
+          }
+        } else {
+          // 滚动加载: 插入到顶部
+          if (messages.length === 0) return;
+          const prevScrollHeight = $('chatWrap').scrollHeight;
+          const prevScrollTop = $('chatWrap').scrollTop;
+          // 倒序插入到顶部 (messages 已是旧→新排序, 直接 prepend)
+          const frag = document.createDocumentFragment();
+          messages.forEach((msg) => {
+            const el = createMessageElement(msg);
+            frag.appendChild(el);
+          });
+          stream.messagesContainer.insertBefore(frag, stream.messagesContainer.firstChild);
+          stream.messageOffset += messages.length;
+          // 保持滚动位置 (加载后补上新增高度)
+          const newScrollHeight = $('chatWrap').scrollHeight;
+          $('chatWrap').scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+        }
+      } catch (e) {
+        if (offset === 0) {
+          showEmptyHint();
+          toast('加载消息失败: ' + e.message);
+        }
+      }
+    }
+
+    /** 显示空提示 (渲染到当前会话容器) */
+    function showEmptyHint() {
+      currentMessagesContainer().innerHTML =
+        '<div class="empty-hint" id="emptyHint">' +
+        '<h2>研究分析智能体 · 联调测试页</h2>' +
+        '<p>输入研究问题开始对话。例如：「分析中国新能源汽车 2025 年出海格局」</p>' +
+        '</div>';
+    }
+
+    /** 创建历史消息 DOM 元素 (不重新渲染, 仅用于历史加载) */
+    function createMessageElement(msg) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + (msg.role === 'user' ? 'user' : 'assistant');
+      const avatar = msg.role === 'user' ? '我' : 'AI';
+      const content = msg.content || '';
+      if (msg.role === 'user') {
+        el.innerHTML =
+          '<div class="avatar">' + avatar + '</div>' +
+          '<div class="bubble"><div class="content">' + escapeHtml(content).replace(/\n/g, '<br>') + '</div></div>';
+      } else {
+        el.innerHTML =
+          '<div class="avatar">' + avatar + '</div>' +
+          '<div class="bubble"><div class="content">' + renderMarkdown(content) + '</div></div>';
+      }
+      return el;
+    }
+
+    /** 渲染历史消息到当前会话容器 */
+    function renderHistoricalMessage(msg) {
+      const el = createMessageElement(msg);
+      currentMessagesContainer().appendChild(el);
+    }
+
+    /** 创建新会话 (POST /v1/sessions)
+     *  per-session 独立流: 旧会话的 SSE 流在后台继续生成, 不中止
+     *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发 */
+    async function createNewSession() {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      try {
+        const resp = await fetch(base + '/v1/sessions', {
+          method: 'POST',
+          headers: buildHeaders(true),
+          body: JSON.stringify({}),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const session = await resp.json();
+        if (session && session.session_id) {
+          state.sessionId = session.session_id;
+          refreshSessionDisplay();
+          // 挂载新会话的空容器
+          attachSessionContainer(session.session_id);
+          showEmptyHint();
+          // 按当前会话的 streaming 状态更新按钮
+          updateSendStopButtons();
+          // 刷新会话列表
+          await loadSessionList();
+          // 重连 WebSocket
+          connectWS();
+          // 新会话无报告
+          $('report-list').innerHTML = '<div class="reports-empty">暂无报告,完成一次研究后自动刷新</div>';
+          toast('已新建会话');
+        }
+      } catch (e) {
+        // 失败时降级为本地 UUID
+        state.sessionId = uuidv4();
+        refreshSessionDisplay();
+        attachSessionContainer(state.sessionId);
+        showEmptyHint();
+        updateSendStopButtons();
+        toast('新建会话 (本地模式): ' + e.message);
+      }
+    }
+
+    /** 删除会话 (DELETE /v1/sessions/{session_id})
+     *  per-session: 中止被删会话的 SSE 流 + 清理 WS + 移除 StreamContext */
+    async function deleteSession(sessionId) {
+      const base = $('apiBase').value.trim().replace(/\/+$/, '');
+      try {
+        const resp = await fetch(base + '/v1/sessions/' + encodeURIComponent(sessionId), {
+          method: 'DELETE',
+          headers: buildHeaders(),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        toast('会话已删除');
+        // 中止被删会话的 SSE 流 + 断开 WS
+        abortSessionStream(sessionId);
+        disconnectWS(sessionId);
+        // 移除 StreamContext (DOM 容器随 Map 条目移除而被 GC)
+        sessionStreams.delete(sessionId);
+        // 如果删除的是当前会话, 切换到最近会话或新建
+        if (sessionId === state.sessionId) {
+          await loadLatestSession();
+        } else {
+          // 仅刷新列表
+          await loadSessionList();
+        }
+      } catch (e) {
+        toast('删除失败: ' + e.message);
+      }
+    }
+
+    // 顶部配置栏: 新建会话按钮 (兼容旧按钮)
+    $('newSession').addEventListener('click', createNewSession);
+    // 侧边栏: 新建会话按钮
+    $('sidebarNewSession').addEventListener('click', createNewSession);
 
     $('copySession').addEventListener('click', async () => {
       try {
@@ -933,24 +1415,35 @@
     });
 
     $('clearSession').addEventListener('click', () => {
-      $('messages').innerHTML = '';
+      // 仅清空当前会话的前端消息 (后端 Checkpoint 仍保留), 不中止后台流
+      const container = currentMessagesContainer();
+      container.innerHTML = '';
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
       hint.id = 'emptyHint';
       hint.innerHTML = '<h2>研究分析智能体 · 联调测试页</h2><p>当前会话已清空 (仅前端消息, 后端 Checkpoint 仍保留)</p>';
-      $('messages').appendChild(hint);
+      container.appendChild(hint);
       toast('已清空当前会话消息');
     });
 
     // 切换会话: 输入新 ID 后失焦或回车即切换
     $('sessionIdInput').addEventListener('change', () => {
       const v = $('sessionIdInput').value.trim();
-      if (v) {
-        state.sessionId = v;
-        refreshSessionDisplay();
-        connectWS(); // P2-03: 切换会话后重连 WebSocket
-        loadReportList(); // 任务8: 切换会话后加载该会话的报告列表
-        toast('已切换到会话: ' + v);
+      if (v && v !== state.sessionId) {
+        switchSession(v);
+      }
+    });
+
+    // 滚动加载更多消息: 滚动到顶部时触发 (per-session: 使用当前会话的分页状态)
+    $('chatWrap').addEventListener('scroll', async () => {
+      const stream = currentStream();
+      if (stream.streaming || stream.loadingMoreMessages || !stream.messageHasMore) return;
+      const wrap = $('chatWrap');
+      // 滚动到顶部 (scrollTop < 50px) 时触发加载
+      if (wrap.scrollTop < 50) {
+        stream.loadingMoreMessages = true;
+        await loadMessages(state.sessionId, stream.messageOffset);
+        stream.loadingMoreMessages = false;
       }
     });
 
@@ -1069,7 +1562,8 @@
     });
     $('sendBtn').addEventListener('click', doSend);
     $('stopBtn').addEventListener('click', () => {
-      if (state.abortCtrl) state.abortCtrl.abort();
+      // 仅中止当前可见会话的 SSE 流 (per-session 独立)
+      abortSessionStream(state.sessionId);
     });
 
     // ========== 创建消息气泡 ==========
@@ -1085,11 +1579,12 @@
       el.innerHTML =
         '<div class="avatar">我</div>' +
         '<div class="bubble"><div class="content">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div></div>';
-      $('messages').appendChild(el);
+      currentMessagesContainer().appendChild(el);
       scrollBottom();
     }
 
-    /** 创建 assistant 气泡骨架, 返回 {root, contentEl, progressEl, toolsEl, sourcesEl, statusEl, ...} */
+    /** 创建 assistant 气泡骨架, 返回 {root, contentEl, progressEl, toolsEl, sourcesEl, statusEl, ...}
+     *  per-session: 气泡 append 到当前会话的消息容器 */
     function createAssistantBubble() {
       removeEmptyHint();
       const el = document.createElement('div');
@@ -1103,7 +1598,7 @@
           '<div class="sources-wrap"></div>' +
           '<div class="status-line"><span class="typing-dot"><span></span><span></span><span></span></span>生成中…</div>' +
         '</div>';
-      $('messages').appendChild(el);
+      currentMessagesContainer().appendChild(el);
       scrollBottom();
       return {
         root: el,
@@ -1117,6 +1612,8 @@
         sourcesMeta: [],
         // 任务7: 保存本次响应收到的 report_id (仅 publisher 节点推送时存在, 用于条件显示下载链接)
         reportId: null,
+        // per-session: 记录该 bubble 所属会话 ID, 用于后台流渲染时判断是否可见
+        sessionId: state.sessionId,
       };
     }
 
@@ -1127,7 +1624,7 @@
       el.innerHTML =
         '<div class="avatar">AI</div>' +
         '<div class="bubble"><div class="error-box">⚠ ' + escapeHtml(message) + '</div></div>';
-      $('messages').appendChild(el);
+      currentMessagesContainer().appendChild(el);
       scrollBottom();
     }
 
@@ -1251,12 +1748,20 @@
       } else {
         bubble.sourcesEl.innerHTML = '';
       }
-      scrollBottom();
+      // per-session: 仅当该 bubble 所属会话是当前可见会话时才滚动 (后台流不干扰前台滚动位置)
+      if (bubble.sessionId === state.sessionId) {
+        scrollBottom();
+      }
     }
 
     // ========== 发送 + SSE 流式 ==========
+    // per-session 独立流: 每个会话维护独立的 streaming/abortCtrl, 切换会话时旧流后台继续生成
     async function doSend() {
-      if (state.streaming) return;
+      // 捕获当前会话 ID 到闭包, 整个流式过程绑定到该会话 (即使后续切换到其他会话)
+      const streamSessionId = state.sessionId;
+      const stream = ensureSessionStream(streamSessionId);
+      // per-session 发送守卫: 仅当前会话正在流式时拒绝发送
+      if (stream.streaming) return;
       const query = msgInput.value.trim();
       if (!query) return;
 
@@ -1272,7 +1777,7 @@
         model: modelInput,
         messages: [{ role: 'user', content: query }],
         stream: true,
-        session_id: state.sessionId,
+        session_id: streamSessionId,
         report_type: reportType,
         report_format: reportFormat,
         uploaded_files: selectedFileIds.length ? selectedFileIds : undefined,
@@ -1283,17 +1788,30 @@
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
 
-      // 渲染 user 气泡 + assistant 骨架
+      // 渲染 user 气泡 + assistant 骨架 (写入该会话的 messagesContainer)
+      // 注意: appendUserBubble/createAssistantBubble 写入 currentMessagesContainer()
+      //       若用户在 doSend 前已切换会话, 需确保写入 streamSessionId 的容器
+      //       此处先临时切换 state.sessionId 到 streamSessionId 渲染, 再恢复
+      const prevSessionId = state.sessionId;
+      state.sessionId = streamSessionId;
       appendUserBubble(query);
       msgInput.value = '';
       autoGrow();
       const bubble = createAssistantBubble();
+      state.sessionId = prevSessionId;
 
-      // 切换到流式状态
-      state.streaming = true;
-      state.abortCtrl = new AbortController();
-      $('sendBtn').style.display = 'none';
-      $('stopBtn').style.display = 'inline-block';
+      // 切换到流式状态 (per-session)
+      // 后台流限制: 用户发送新请求时才触发, 超过 MAX_BACKGROUND_STREAMS 时中止最早的后台流
+      enforceBackgroundStreamLimit(streamSessionId);
+      stream.streaming = true;
+      stream.abortCtrl = new AbortController();
+      stream.bubble = bubble;
+      stream.streamStartedAt = Date.now();
+      // 仅当该会话是当前可见会话时才更新按钮
+      if (state.sessionId === streamSessionId) {
+        $('sendBtn').style.display = 'none';
+        $('stopBtn').style.display = 'inline-block';
+      }
 
       let accumulated = '';
       let rafPending = false;
@@ -1352,7 +1870,7 @@
           method: 'POST',
           headers,
           body: JSON.stringify(body),
-          signal: state.abortCtrl.signal,
+          signal: stream.abortCtrl.signal,
         });
 
         if (!resp.ok) {
@@ -1408,7 +1926,10 @@
               // 该帧通常为 {"report_id": "..."}, 无 choices 字段, 由下方 !choice 兜底跳过
               if (chunk.report_id) {
                 bubble.reportId = chunk.report_id;  // 保存到 bubble 供后续下载链接判断使用
-                handleReportId(chunk.report_id);
+                // per-session: 仅当该会话是当前可见会话时才刷新报告列表
+                if (state.sessionId === streamSessionId) {
+                  handleReportId(chunk.report_id);
+                }
               }
               // 默认: OpenAI chat completion chunk
               const choice = chunk.choices && chunk.choices[0];
@@ -1442,10 +1963,10 @@
         }
         // 隐藏"生成中"状态
         bubble.statusEl.style.display = 'none';
-        // 任务7: 响应完成后, 仅当本次生成了报告 (收到 report_id) 时才显示下载链接
-        if (bubble.reportId) {
+        // 任务7: 响应完成后, 仅当本次生成了报告 (收到 report_id) 且该会话可见时才显示下载链接
+        if (bubble.reportId && state.sessionId === streamSessionId) {
           updateDownloadLinks(bubble.reportId);
-        } else {
+        } else if (state.sessionId === streamSessionId) {
           // 无报告时主动隐藏 (避免前一次响应的下载链接残留)
           $('download_links').style.display = 'none';
         }
@@ -1458,35 +1979,47 @@
             '<div class="error-box">⚠ 请求失败: ' + escapeHtml(err.message) + '</div>';
         }
       } finally {
-        state.streaming = false;
-        state.abortCtrl = null;
-        $('sendBtn').style.display = 'inline-block';
-        $('stopBtn').style.display = 'none';
+        // per-session: 仅重置该会话的流式状态
+        stream.streaming = false;
+        stream.abortCtrl = null;
+        stream.bubble = null;
+        stream.streamStartedAt = null;
+        // 仅当该会话是当前可见会话时才更新按钮
+        if (state.sessionId === streamSessionId) {
+          updateSendStopButtons();
+        }
+        // 会话持久化: 刷新侧边栏 (消息计数 + updated_at 变化)
+        loadSessionList();
       }
     }
 
     // ========== 人在回路审核 UI (P2-03) ==========
     // WebSocket 双向通道: 连接 /v1/ws/{session_id}, 接收 human_feedback_request 等结构化消息
     // SSE (/v1/chat/completions stream=true) 仍为主通道, WS 仅用于人在回路审核请求推送与反馈接收 (AGENTS.md 第 14 章)
-    let ws = null;
-    let wsReconnectTimer = null;
-    let wsReconnectAttempts = 0;
+    // per-session: 每个会话维护独立的 WS 连接, 存储在 StreamContext.ws 中
     const WS_MAX_RECONNECT = 5;
     const WS_RECONNECT_INTERVAL = 5000;
 
-    /** 由 apiBase + 当前 session_id 构造 WebSocket URL (http→ws / https→wss) */
-    function buildWsUrl() {
+    /** 由 apiBase + 指定 session_id 构造 WebSocket URL (http→ws / https→wss) */
+    function buildWsUrl(sessionId) {
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       const wsBase = base.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
-      return wsBase + '/v1/ws/' + encodeURIComponent(state.sessionId);
+      return wsBase + '/v1/ws/' + encodeURIComponent(sessionId);
     }
 
-    /** 连接 WebSocket (会话切换 / 页面加载时调用) */
-    function connectWS() {
-      disconnectWS();
-      if (!state.sessionId) return;
+    /** 连接 WebSocket (per-session, 会话切换 / 页面加载时调用)
+     *  每个会话维护独立的 WS 连接, 存储在 StreamContext.ws 中 */
+    function connectWS(sessionId) {
+      // 默认使用当前会话
+      if (sessionId == null) sessionId = state.sessionId;
+      if (!sessionId) return;
+      const stream = ensureSessionStream(sessionId);
+      // 已连接且就绪则跳过
+      if (stream.ws && stream.ws.readyState === WebSocket.OPEN) return;
+      // 先断开旧连接 (若有)
+      disconnectWS(sessionId);
       let url;
-      try { url = buildWsUrl(); } catch (e) { return; }
+      try { url = buildWsUrl(sessionId); } catch (e) { return; }
       let socket;
       try {
         socket = new WebSocket(url);
@@ -1494,61 +2027,71 @@
         console.warn('[WS] 连接失败:', e);
         return;
       }
-      ws = socket;
+      stream.ws = socket;
       socket.onopen = () => {
-        wsReconnectAttempts = 0;
+        stream.wsReconnectAttempts = 0;
         console.log('[WS] 已连接:', url);
       };
       socket.onmessage = (ev) => {
         let msg;
         try { msg = JSON.parse(ev.data); }
         catch (e) { console.warn('[WS] 消息解析失败:', ev.data); return; }
-        handleWsMessage(msg);
+        handleWsMessage(msg, sessionId);
       };
       socket.onerror = () => { /* onclose 随后触发, 在此处理重连 */ };
       socket.onclose = () => {
-        if (ws === socket) ws = null;
+        if (stream.ws === socket) stream.ws = null;
         // 节流重连, 最多尝试 WS_MAX_RECONNECT 次, 避免后端未启用 WS 时无限重连
-        if (wsReconnectAttempts < WS_MAX_RECONNECT) {
-          wsReconnectAttempts++;
-          wsReconnectTimer = setTimeout(() => connectWS(), WS_RECONNECT_INTERVAL);
+        if (stream.wsReconnectAttempts < WS_MAX_RECONNECT) {
+          stream.wsReconnectAttempts++;
+          stream.wsReconnectTimer = setTimeout(() => connectWS(sessionId), WS_RECONNECT_INTERVAL);
         }
       };
     }
 
-    /** 主动断开 WebSocket, 取消重连定时器 */
-    function disconnectWS() {
-      clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = null;
-      if (ws) {
-        const s = ws;
-        ws = null;
+    /** 主动断开指定会话的 WebSocket, 取消重连定时器
+     *  sessionId 为 null 时断开当前会话 */
+    function disconnectWS(sessionId) {
+      if (sessionId == null) sessionId = state.sessionId;
+      const stream = sessionStreams.get(sessionId);
+      if (!stream) return;
+      clearTimeout(stream.wsReconnectTimer);
+      stream.wsReconnectTimer = null;
+      if (stream.ws) {
+        const s = stream.ws;
+        stream.ws = null;
         try { s.close(); } catch { /* 忽略 */ }
       }
     }
 
-    /** 向 WebSocket 发送 JSON 消息 (连接未就绪时静默跳过) */
+    /** 向当前会话的 WebSocket 发送 JSON 消息 (连接未就绪时静默跳过) */
     function wsSend(obj) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify(obj)); }
+      const stream = currentStream();
+      if (stream.ws && stream.ws.readyState === WebSocket.OPEN) {
+        try { stream.ws.send(JSON.stringify(obj)); }
         catch (e) { console.warn('[WS] 发送失败:', e); }
       }
     }
 
-    /** 处理 WS 推送的 8 类结构化消息 (AGENTS.md 第 14 章) */
-    function handleWsMessage(msg) {
+    /** 处理 WS 推送的 8 类结构化消息 (AGENTS.md 第 14 章)
+     *  per-session: sessionId 标识消息来源会话, 审核请求仅当该会话可见时才显示面板 */
+    function handleWsMessage(msg, sessionId) {
       if (!msg || typeof msg !== 'object') return;
       const type = msg.type;
       switch (type) {
         case 'ping':
-          // 心跳: 回复 pong
-          wsSend({ type: 'pong' });
+          // 心跳: 回复 pong (通过来源会话的 WS 发送)
+          wsSendTo(sessionId, { type: 'pong' });
           break;
         case 'pong':
           // 服务端对客户端 ping 的回复, 忽略
           break;
         case 'human_feedback_request': {
-          // 人在回路审核请求: 显示审核面板
+          // 人在回路审核请求: 仅当该会话是当前可见会话时才显示审核面板
+          if (sessionId !== state.sessionId) {
+            console.log('[WS] 后台会话收到审核请求, 当前会话不可见, 跳过面板:', sessionId);
+            break;
+          }
           // 计划内容字段兼容 plan / outline / content / message / data
           const plan = msg.plan || msg.outline || msg.content || msg.message || msg.data;
           showReviewPanel(plan != null ? String(plan) : '(未提供计划内容)', msg);
@@ -1565,6 +2108,15 @@
           break;
         default:
           console.log('[WS] 未识别消息类型:', type, msg);
+      }
+    }
+
+    /** 向指定会话的 WebSocket 发送 JSON 消息 */
+    function wsSendTo(sessionId, obj) {
+      const stream = sessionStreams.get(sessionId);
+      if (stream && stream.ws && stream.ws.readyState === WebSocket.OPEN) {
+        try { stream.ws.send(JSON.stringify(obj)); }
+        catch (e) { console.warn('[WS] 发送失败:', e); }
       }
     }
 
@@ -1636,12 +2188,16 @@
     });
 
     // 页面卸载时关闭 WS
-    window.addEventListener('beforeunload', () => disconnectWS());
+    // 页面卸载时关闭所有会话的 WS + 中止所有后台流
+    window.addEventListener('beforeunload', () => {
+      for (const [sid, stream] of sessionStreams.entries()) {
+        if (stream.abortCtrl) stream.abortCtrl.abort();
+        disconnectWS(sid);
+      }
+    });
 
-    // 页面加载后连接 WebSocket
-    connectWS();
-    // 任务8: 页面初始化时加载当前会话的报告列表
-    loadReportList();
+    // 注: 页面初始化的 connectWS + loadReportList 由 loadLatestSession() 内部调用
+    // loadLatestSession 在 initApiBase 之后执行 (需要 apiBase 已就绪)
 
     // ========== 下载链接 (任务7) ==========
     /** 响应完成后, 基于 report_id 生成多格式下载链接并显示 */
@@ -2463,7 +3019,7 @@
     // 策略: 若 input 为空, 根据当前页面 URL 自动推导 BaseURL.
     //       - 直连 (如 http://host:8066/ 或 http://host:8066/index.html) → origin
     //       - 子路径反代 (如 http://host/agent/agentinsight-researcher/) → origin + 子路径前缀
-    //       - 末尾不保留斜杠 (前端代码会自动拼接 /v1/...)
+    //       - 末尾不保留斜杠 (前端代码用 base + '/v1/...' 拼接)
     (function initApiBase() {
       const input = $('apiBase');
       if (input.value.trim()) return;  // 用户已手动填写则不覆盖
@@ -2475,6 +3031,15 @@
       base = base.replace(/\/+$/, '');
       input.value = base;
     })();
+
+    // ========== 页面初始化: 加载最近会话 + 会话列表 ==========
+    // 打开页面时展示最近一个 SessionId 的信息 (默认显示最后十条对话, 滚动加载更多)
+    // 没有会话则新建 (调用后端 POST /v1/sessions)
+    refreshSessionDisplay();  // 先显示初始 UUID (loadLatestSession 会覆盖)
+    attachSessionContainer(state.sessionId);  // 挂载初始会话容器 (loadLatestSession 会替换为实际会话)
+    showEmptyHint();
+    loadLatestSession();      // 异步加载最近会话 (内部调用 connectWS + loadReportList)
+    loadSessionList();        // 异步加载侧边栏会话列表
   </script>
 </body>
 </html>

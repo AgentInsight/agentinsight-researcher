@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -198,3 +199,144 @@ def test_get_api_key_no_keys_configured_returns_none(monkeypatch: pytest.MonkeyP
     # image_api_key 未配置, 走 resolve_api_key (deepseek_api_key 也未配置 → None)
     api_key = settings.image_api_key or resolve_api_key("deepseek/deepseek-v4-flash", settings)
     assert api_key is None
+
+
+# ========== SVG 矢量配图生成 ==========
+
+
+@pytest.fixture()
+def svg_settings() -> Settings:
+    """构造 SVG 模式 Settings (image_output_format=svg)."""
+    return Settings(
+        _env_file=None,
+        image_output_format="svg",
+        image_svg_max_tokens=8192,
+        image_svg_temperature=0.7,
+    )
+
+
+@pytest.fixture()
+def svg_generator(svg_settings: Settings) -> ImageGenerator:
+    """构造 SVG 模式 ImageGenerator."""
+    return ImageGenerator(svg_settings)
+
+
+async def test_generate_svg_image_success(svg_generator: ImageGenerator) -> None:
+    """测试 SVG 生成成功."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {
+                    "content": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+                    '<rect width="200" height="200" fill="#007BFF"/></svg>'
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "completion_tokens": 100,
+            "completion_tokens_details": {"reasoning_tokens": 80},
+        },
+    }
+
+    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
+        result = await svg_generator.generate_image(
+            "AI 概念图", topic="artificial intelligence", size="200x200"
+        )
+
+    assert result["svg"].startswith("<svg xmlns")
+    assert result["svg"].endswith("</svg>")
+    assert result["b64"] is not None
+    assert result["url"] is None
+    assert result["format"] == "svg"
+
+
+async def test_generate_svg_image_extraction_from_code_block(
+    svg_generator: ImageGenerator,
+) -> None:
+    """测试从 ```svg 代码块提取 SVG."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {
+                    "content": '```svg\n<svg xmlns="http://www.w3.org/2000/svg" '
+                    'viewBox="0 0 100 100">'
+                    '<rect width="100" height="100" fill="blue"/></svg>\n```'
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {},
+    }
+
+    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
+        result = await svg_generator.generate_image("test", topic="test")
+
+    assert "<svg" in result["svg"]
+    assert "</svg>" in result["svg"]
+
+
+async def test_generate_svg_image_truncated(svg_generator: ImageGenerator) -> None:
+    """测试 SVG 被截断 (finish_reason=length, 无 </svg> 闭合)."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {"content": '<svg xmlns="http://www.w3.org/2000/svg"><rect'},
+                "finish_reason": "length",
+            }
+        ],
+        "usage": {"completion_tokens": 8192},
+    }
+
+    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
+        with pytest.raises(RuntimeError, match="SVG 代码提取失败"):
+            await svg_generator.generate_image("test", topic="test")
+
+
+async def test_generate_svg_image_invalid_svg(svg_generator: ImageGenerator) -> None:
+    """测试 SVG 验证失败 (缺 viewBox)."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {"content": '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {},
+    }
+
+    with patch("litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
+        with pytest.raises(RuntimeError, match="SVG 验证失败"):
+            await svg_generator.generate_image("test", topic="test")
+
+
+def test_extract_svg_raw() -> None:
+    """测试裸 SVG 提取."""
+    content = '<svg xmlns="x" viewBox="0 0 100 100"><rect/></svg>'
+    svg = ImageGenerator._extract_svg(content)
+    assert svg is not None
+    assert "<svg" in svg
+
+
+def test_extract_svg_code_block() -> None:
+    """测试代码块 SVG 提取."""
+    content = '```svg\n<svg xmlns="x" viewBox="0 0 100 100"><rect/></svg>\n```'
+    svg = ImageGenerator._extract_svg(content)
+    assert svg is not None
+    assert svg.startswith("<svg")
+
+
+def test_validate_svg_valid() -> None:
+    """测试有效 SVG 验证."""
+    svg = '<svg xmlns="x" viewBox="0 0 100 100"><rect/></svg>'
+    result = ImageGenerator._validate_svg(svg)
+    assert result["valid"] is True
+    assert len(result["issues"]) == 0
+
+
+def test_validate_svg_missing_viewbox() -> None:
+    """测试缺 viewBox 的 SVG."""
+    svg = '<svg xmlns="x"><rect/></svg>'
+    result = ImageGenerator._validate_svg(svg)
+    assert result["valid"] is False
+    assert "缺少 viewBox" in " ".join(result["issues"])

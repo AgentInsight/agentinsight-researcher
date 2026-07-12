@@ -37,21 +37,21 @@ class Settings(BaseSettings):
     # - SMART: 复杂推理 (报告写作/章节生成/来源策展)
     # - STRATEGIC: 规划 (子主题拆解/agent 角色)
     #
-    # 推荐方案 H (DeepSeek 全栈 + 智谱免费层, 已应用为默认值):
-    #   fast_llm = "zhipuai/glm-4-flash"         # 智谱免费层, 极致成本 (8 个调用点)
-    #   smart_llm = "deepseek/deepseek-v4-flash"  # DeepSeek 轻量 (14 个调用点, 核心生成层)
+    # 推荐方案 H (DeepSeek 全栈, 已应用为默认值):
+    #   fast_llm = "deepseek/deepseek-v4-flash"    # DeepSeek 轻量 (8 个调用点, 意图分类/闲聊)
+    #   smart_llm = "deepseek/deepseek-v4-flash"   # DeepSeek 轻量 (14 个调用点, 核心生成层)
     #   strategic_llm = "deepseek/deepseek-v4-pro"  # DeepSeek 思考模式 (4 个调用点)
     #
     # 单次研究报告成本 ~0.18 元, 真正 3 层分离.
     # ⚠️ 旧模型名 deepseek-chat / deepseek-reasoner 将于 2026-07-24 停用, 已迁移到 v4 命名.
-    # ⚠️ 智谱 LiteLLM 路由前缀为 zhipuai/ (非 zhipu/).
+    # ⚠️ 如需使用智谱免费层: fast_llm = "zhipuai/glm-4-flash" + 配置 ZHIPU_API_KEY
     #
     # 备选方案 B (质量优先, 中文写作国产第一):
-    #   fast_llm = "zhipuai/glm-4-flash"
+    #   fast_llm = "deepseek/deepseek-v4-flash"
     #   smart_llm = "dashscope/qwen-max"        # 中文写作最强 (单次研究 ~0.80 元)
     #   strategic_llm = "deepseek/deepseek-v4-pro"
     # 启用方案 B 需配置 DASHSCOPE_API_KEY.
-    fast_llm: str = "zhipuai/glm-4-flash"
+    fast_llm: str = "deepseek/deepseek-v4-flash"
     smart_llm: str = "deepseek/deepseek-v4-flash"
     strategic_llm: str = "deepseek/deepseek-v4-pro"
     fast_token_limit: int = 3000
@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     image_size: str = "1024x1024"
     image_quality: str = "standard"
     image_api_key: str | None = None  # 单独 Key (可选, 留空则复用 deepseek_api_key)
+    # SVG 矢量配图 (DeepSeek V4 Flash 经 /chat/completions 生成 SVG 代码)
+    image_output_format: str = "svg"  # 图像输出格式: svg | url | b64
+    image_svg_max_tokens: int = 8192  # SVG 生成 max_tokens (推理模型需 ≥8192)
+    image_svg_temperature: float = 0.7  # SVG 生成温度 (0.7 平衡创意与稳定)
 
     # ========== Qdrant ==========
     qdrant_url: str = "http://qdrant:6333"
@@ -381,7 +385,7 @@ class Settings(BaseSettings):
     # Anthropic Claude system prompt 四段式 + Character.AI persona 一致性
     chitchat_config_dir: str = "src/config/researcher"  # 闲聊配置目录 (相对项目根)
     chitchat_temperature: float = 0.7  # 闲聊温度 (略高创意)
-    chitchat_max_tokens: int = 200  # 闲聊响应 max_tokens
+    chitchat_max_tokens: int = 1000  # 闲聊响应 max_tokens (推理模型需 ≥1000: 推理 500+回复 500)
     chitchat_stream_char_by_char: bool = True  # 流式是否逐字 yield
     chitchat_fallback_to_template: bool = True  # FAST 失败降级多模板
 
@@ -401,7 +405,7 @@ class Settings(BaseSettings):
     )  # 复杂追问关键词 (命中则走 SMART)
 
     # QueryClassifier 阈值
-    query_classify_llm_max_tokens: int = 64  # LLM 分类 max_tokens
+    query_classify_llm_max_tokens: int = 500  # LLM 分类 max_tokens (推理模型需 ≥500: 推理 400+分类 100)
     query_classify_llm_query_truncate: int = 1000  # LLM 分类 query 截断长度
     query_classify_single_word_max_chars: int = 6  # 单单词长度上限
     query_classify_trace_input_truncate: int = 200  # trace span input 截断长度

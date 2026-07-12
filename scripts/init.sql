@@ -369,3 +369,42 @@ WHERE mcp_configs.version < EXCLUDED.version
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN session_id TYPE VARCHAR(64);
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN user_id TYPE VARCHAR(64);
 ALTER TABLE IF EXISTS research_reports ALTER COLUMN agent_id TYPE VARCHAR(64);
+
+-- ========== 业务表: 对话消息存储 (以 UserId 为单位的会话持久化) ==========
+-- 存储用户与 Agent 的完整对话内容 (user / assistant 消息)
+-- 按 session_id + agent_id + user_id 三级隔离, 支持会话列表与消息分页加载
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGSERIAL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL,             -- 即 thread_id
+    agent_id VARCHAR(64) NOT NULL,               -- agent_name, 全局唯一隔离键
+    user_id VARCHAR(64) NOT NULL,                -- 用户隔离
+    role VARCHAR(16) NOT NULL,                   -- user | assistant
+    content TEXT NOT NULL,                       -- 消息内容
+    message_metadata JSONB,                      -- 可选元数据 (如 sources, tool_calls)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- 复合索引: 按 session + agent + user 隔离, 按时间倒序分页查询
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+    ON chat_messages(session_id, agent_id, user_id, created_at DESC);
+-- 复合索引: 按 agent + user 查询消息统计
+CREATE INDEX IF NOT EXISTS idx_chat_messages_agent_user
+    ON chat_messages(agent_id, user_id, created_at DESC);
+
+-- 8. research_sessions 表适配会话持久化需求
+-- 8.1 新增 title 字段 (用于会话列表显示)
+ALTER TABLE IF EXISTS research_sessions
+    ADD COLUMN IF NOT EXISTS title VARCHAR(256);
+-- 8.2 放宽 query 约束: 允许创建空会话 (首次对话前先创建 session 记录)
+ALTER TABLE IF EXISTS research_sessions ALTER COLUMN query DROP NOT NULL;
+-- 8.3 放宽 report_type 约束: 空会话无报告类型
+ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_type DROP NOT NULL;
+-- 8.4 放宽 report_format 约束: 空会话无报告格式
+ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_format DROP NOT NULL;
+-- 8.5 为 research_sessions 添加 (agent_id, user_id, updated_at DESC) 复合索引
+-- 支持按用户列出会话列表 (按最近更新排序)
+CREATE INDEX IF NOT EXISTS idx_research_sessions_agent_user_updated
+    ON research_sessions(agent_id, user_id, updated_at DESC);
+-- 8.6 为 research_sessions 添加 (session_id, agent_id, user_id) 唯一约束
+-- 支持 ON CONFLICT (session_id, agent_id, user_id) 幂等插入 (ensure_session 方法)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
+    ON research_sessions(session_id, agent_id, user_id);
