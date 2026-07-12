@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentInsight Researcher · 联调测试页</title>
+  <title>AgentInsight Researcher · 演示</title>
   <!--
     自包含前端测试页面 (项目前端测试页面规范)
     - 单文件, 原生 HTML + 原生 JS, 禁止框架/构建工具
-    - 仅做联调展示, 不写业务逻辑 (路由/鉴权/权限)
+    - 仅做演示, 不写业务逻辑 (路由/鉴权/权限)
     - 统一调用 POST /v1/chat/completions (stream:true) + POST /v1/files + /health
     - Markdown: marked CDN, 离线降级纯文本
   -->
@@ -180,6 +180,9 @@
     .bubble .content a { color: var(--primary); text-decoration: underline; }
     .bubble .content hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
     .bubble .content img { max-width: 100%; border-radius: var(--radius-sm); margin: 12px 0; }
+    /* SVG 配图容器: 强制限制宽度, 防止 SVG width="1024" 属性导致溢出 bubble 边界 */
+    .bubble .content .report-image { text-align: center; margin: 16px 0; max-width: 100%; overflow: hidden; }
+    .bubble .content .report-image svg { max-width: 100%; height: auto; display: inline-block; }
 
     /* 折叠面板 (进度 / 来源) */
     .panel {
@@ -636,7 +639,7 @@
     <div class="config-head">
       <div class="config-title">
         <span class="dot"></span>
-        <span>AgentInsight Researcher · 联调测试</span>
+        <span>AgentInsight Researcher · 演示</span>
       </div>
       <div class="config-actions">
         <button class="ghost-btn" id="toggleConfig" title="折叠/展开配置">⚙ 配置</button>
@@ -721,7 +724,7 @@
         <button class="send-btn" id="sendBtn">发送</button>
         <button class="stop-btn" id="stopBtn" style="display:none">停止</button>
       </div>
-      <div class="input-hint">Enter 发送 · Shift+Enter 换行 · 仅做联调展示, 不含业务逻辑</div>
+      <div class="input-hint">Enter 发送 · Shift+Enter 换行 · 仅做演示, 不含业务逻辑</div>
     </div>
   </footer>
   </div><!-- /.main-wrap -->
@@ -888,12 +891,52 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    /** Markdown 渲染: marked 可用则用, 离线降级纯文本 */
+    /** Markdown 渲染: marked 可用则用, 离线降级纯文本.
+     *  SVG 块绕过 marked: 提取 <div class="report-image">...</div> 块,
+     *  用占位符替换, marked 解析后插回. 避免 SVG 内部空行触发
+     *  CommonMark HTML 块中断规则导致子元素被 <p> 包装. */
     function renderMarkdown(text) {
       if (!window.__markedFailed && typeof marked !== 'undefined') {
         try {
+          // 预处理: 提取 SVG 块, 避免 marked CommonMark HTML 块在空行处中断
+          // 占位符用纯字母数字 (不含 _ 或 *), 避免 marked 解析为加粗/斜体
+          const svgBlocks = [];
+          const svgBlockPattern = /<div class="report-image">[\s\S]*?<\/div>/g;
+          const oldSvgPattern = /```svg\n([\s\S]*?)\n```/g;
+
+          // 提取 <div class="report-image">...</div> 块
+          text = text.replace(svgBlockPattern, (match) => {
+            svgBlocks.push(match);
+            return 'SVGBlockPlaceholder' + (svgBlocks.length - 1) + 'X';
+          });
+
+          // 提取 ```svg 代码块 (旧格式)
+          text = text.replace(oldSvgPattern, (match, svgCode) => {
+            svgBlocks.push('<div class="report-image">' + svgCode + '</div>');
+            return 'SVGBlockPlaceholder' + (svgBlocks.length - 1) + 'X';
+          });
+
           const fn = marked.parse ? marked.parse : marked;
-          return fn(text);
+          let html = fn(text);
+
+          // 后处理: 将 SVG 块占位符替换回原始内容 (绕过 marked)
+          for (let i = 0; i < svgBlocks.length; i++) {
+            // 给 <svg 标签注入 max-width style (防止图片超出容器)
+            const svgBlock = svgBlocks[i].replace(
+              /<svg(\s)/,
+              (match, space) => {
+                if (svgBlocks[i].includes('<svg style=')) return match;
+                return '<svg style="max-width:100%;height:auto;"' + space;
+              }
+            );
+            const placeholder = 'SVGBlockPlaceholder' + i + 'X';
+            // 清理 marked 可能添加的 <p> 包装和 <strong> 加粗
+            html = html.replace('<p><strong>' + placeholder + '</strong></p>', svgBlock);
+            html = html.replace('<p>' + placeholder + '</p>', svgBlock);
+            html = html.replace('<strong>' + placeholder + '</strong>', svgBlock);
+            html = html.replace(placeholder, svgBlock);
+          }
+          return html;
         } catch (e) { /* 降级 */ }
       }
       return '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
@@ -1303,7 +1346,7 @@
     function showEmptyHint() {
       currentMessagesContainer().innerHTML =
         '<div class="empty-hint" id="emptyHint">' +
-        '<h2>研究分析智能体 · 联调测试页</h2>' +
+        '<h2>研究分析智能体 · 演示页</h2>' +
         '<p>输入研究问题开始对话。例如：「分析中国新能源汽车 2025 年出海格局」</p>' +
         '</div>';
     }
@@ -1421,7 +1464,7 @@
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
       hint.id = 'emptyHint';
-      hint.innerHTML = '<h2>研究分析智能体 · 联调测试页</h2><p>当前会话已清空 (仅前端消息, 后端 Checkpoint 仍保留)</p>';
+      hint.innerHTML = '<h2>研究分析智能体 · 演示页</h2><p>当前会话已清空 (仅前端消息, 后端 Checkpoint 仍保留)</p>';
       container.appendChild(hint);
       toast('已清空当前会话消息');
     });

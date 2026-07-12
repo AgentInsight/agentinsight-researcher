@@ -919,17 +919,18 @@ class ReportGenerator:
 
     @staticmethod
     def _strip_inline_references_block(content: str) -> str:
-        """清洗章节末尾 LLM 偶尔生成的 ``**参考文献**`` 粗体块.
+        """清洗章节末尾 LLM 偶尔生成的 ``**参考文献**`` 粗体块和 ``[^xxx]:`` 脚注定义块.
 
-        LLM 在 ``section_prompt`` 注入完整 references 后, 倾向于在章节末尾
-        "复制" 出 ``**参考文献**`` / ``**References**`` 块及编号条目列表.
+        LLM 在 ``section_prompt``/``introduction_prompt`` 注入完整 references 后, 倾向于在章节末尾
+        "复制" 出 ``**参考文献**`` / ``**References**`` 块及编号条目列表,
+        或生成 ``[^xxx]:`` 脚注定义块 (含完整文献标题、期刊名、URL).
         参考文献列表应由报告组装层 (``_format_sources``) 在报告末尾统一追加,
         章节内仅保留 ``[n]`` 行内编号引用.
 
         本方法匹配并移除:
         - 前置可选 ``---`` 分隔线
-        - ``**参考文献**`` / ``**References**`` / ``**参考来源**`` / ``**Bibliography**`` 粗体标题
-        - 标题后续所有内容 (编号条目列表, 直到文末)
+        - ``**参考文献**`` / ``**References**`` / ``**参考来源**`` / ``**Bibliography**`` 粗体标题 + 后续所有内容
+        - ``[^xxx]:`` 脚注定义块 (连续多行, 含文献标题/期刊/URL)
 
         Args:
             content: 章节内容 (独立章节, 不含其他章节).
@@ -937,14 +938,25 @@ class ReportGenerator:
         Returns:
             清洗后的内容, 末尾保留单个换行.
         """
-        # 匹配: (2+ 空行 + 可选 --- 分隔线 + 空行) + 粗体参考文献标题 + 后续所有内容到文末
-        pattern = re.compile(
+        # 模式 1: (2+ 空行 + 可选 --- 分隔线 + 空行) + 粗体参考文献标题 + 后续所有内容到文末
+        pattern_bold = re.compile(
             r"\n{2,}(?:---\s*\n\s*)?"  # 前置空行 + 可选 --- 分隔线
             r"\*\*(?:参考文献|References|参考来源|Bibliography)\*\*"  # 粗体标题
             r"\s*\n[\s\S]*$",  # 标题后续所有内容到文末 (贪婪)
             re.MULTILINE,
         )
-        return pattern.sub("", content).rstrip() + "\n"
+        content = pattern_bold.sub("", content).rstrip() + "\n"
+
+        # 模式 2: [^xxx]: 脚注定义块 (LLM 偶尔生成 Markdown 脚注定义, 含完整文献条目)
+        # 匹配 2+ 空行后连续的 [^xxx]: 脚注定义行 (到文末)
+        # 脚注定义格式: [^ref4]: 文献标题. 期刊名. [链接](url)
+        pattern_footnote = re.compile(
+            r"\n{2,}(?:\[\^[^\]]+\]:[^\n]*(?:\n|$))+\s*$",
+            re.MULTILINE,
+        )
+        content = pattern_footnote.sub("", content).rstrip() + "\n"
+
+        return content
 
     async def _write_section(
         self,
@@ -1219,14 +1231,24 @@ class ReportGenerator:
         - image_svg: 嵌入 HTML <div> + 内联 <svg> (MD 渲染器原生支持内联 HTML)
         - image_url: ![报告配图](url)
         - image_b64: ![报告配图](data:image/png;base64,...)
+
+        SVG 预处理: 移除内部空行和 HTML 注释, 避免 CommonMark 渲染器
+        (mistune/marked) 在空行处中断 HTML 块导致子元素被 <p> 包装.
         """
         if image_svg:
+            # SVG 预处理: 移除 HTML 注释和连续空行, 避免触发 CommonMark HTML 块中断
+            # mistune/marked 在 HTML 块内遇到空行时会结束 HTML 块, 导致 SVG 子元素被 <p> 包装
+            cleaned_svg = re.sub(r"<!--[\s\S]*?-->", "", image_svg)
+            # 移除连续空行 (多个空行压缩为单个换行)
+            cleaned_svg = re.sub(r"\n\s*\n", "\n", cleaned_svg)
+            # 移除每行前导空白 (SVG 元素紧凑排列, 避免 mistune 将缩进行视为代码块)
+            cleaned_svg = "\n".join(line.strip() for line in cleaned_svg.split("\n") if line.strip())
+
             # SVG 模式: 嵌入 HTML <div> + 内联 <svg>
             # 不用 ```svg 代码块 (大多数 MD 渲染器不渲染, 只显示源代码)
             # 用内联 HTML, MD 渲染器 (GitHub/VSCode/Typora/mistune) 原生支持
-            # 添加 max-width:100% 确保图片不超出容器宽度
             image_md = (
-                f'\n\n<div class="report-image">\n{image_svg}\n</div>\n\n'
+                f'\n\n<div class="report-image">\n{cleaned_svg}\n</div>\n\n'
             )
         elif image_url:
             image_md = f"\n\n![报告配图]({image_url})\n\n"

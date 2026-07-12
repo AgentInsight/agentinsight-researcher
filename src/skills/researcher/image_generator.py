@@ -135,14 +135,17 @@ _SVG_IMAGE_PROMPT_TEMPLATE = """请生成一张表示「{topic}」概念的 SVG 
 
 - 禁止使用 emoji 字符 (如 📜📈🔬📚🎯🚀 等), cairosvg 无法渲染 emoji 会显示乱码
 - 禁止使用 HTML 实体 (如 &amp; &lt; &gt;), 直接使用原始字符
+- 禁止使用 HTML 注释 (如 <!-- 注释 -->), 注释会影响 Markdown 渲染器解析
 - 文字使用纯中文/英文, 不加装饰符号
 - font-family 使用 "Noto Sans CJK SC", "Arial", sans-serif
+- SVG 元素之间禁止有空行, 所有元素紧凑排列 (空行会触发 CommonMark HTML 块中断)
 
 ## 输出格式
 
 仅返回纯 SVG 代码, 不要 markdown 代码块, 不要任何解释.
 SVG 必须以 <svg xmlns 开头, 以 </svg> 结尾.
 保持 SVG 代码简洁 (控制在 5000 字符以内).
+SVG 内部元素之间不要留空行, 保持紧凑格式.
 
 ## 主题描述
 

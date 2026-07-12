@@ -629,6 +629,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 6. 注入当前日期: {current_date}
 7. 仅输出引言内容 (## 引言 标题下), 不含其他章节
 8. 写作风格: {style_desc}
+9. **严禁输出参考文献列表**: 引言内**不得**出现 `**参考文献**`/`**References**` 粗体块、`## 参考文献` 章节, 或 `[^xxx]:` Markdown 脚注定义 (如 `[^ref4]: 文献标题. 期刊. [链接](url)`). 参考文献列表由报告组装层在报告末尾统一追加, 引言内仅使用 `[n]` 行内编号引用或 `([说明](url))` 超链接引用.
 
 上下文:
 {context[:6000]}
@@ -663,7 +664,7 @@ task: "查询涉及环境/气候/可持续发展/生态" → response: {"server"
 4. **编号引用**: 行内引用使用 `[n]` 编号格式, 同时 Web 源附超链接 `([说明](url))`; 多个引用之间用空格分隔 (如 `[1] [2]`), 严禁紧贴
 5. **结构化标题**: `##` 章节标题 + `###` 子小节. 子小节必须使用描述性标题或编号标题 (如 `### 1. 研究设计` 或 `### 研究设计与数据来源`), **严禁**使用"引言"/"总结"/"结论"等与报告级章节冲突的子标题 (引言和结论已由报告层级统一生成). 子小节编号格式统一为 `### 1. 标题` (数字+点+空格).
 6. **来源可信度优先**: 优先引用 官方 > 学术 > 行业 > 自媒体
-7. **严禁输出参考文献列表**: 章节内**不得**出现 `**参考文献**`/`**References**`/`**参考来源**` 粗体块或 `## 参考文献`/`## 参考来源` 章节. 参考文献列表由报告组装层在报告末尾统一追加 (`## 参考来源`), 章节内仅使用 `[n]` 行内编号引用, 不输出引用条目列表. 章节末尾不得出现 `---` 分隔线.
+7. **严禁输出参考文献列表**: 章节内**不得**出现 `**参考文献**`/`**References**`/`**参考来源**` 粗体块、`## 参考文献`/`## 参考来源` 章节, 或 `[^xxx]:` Markdown 脚注定义 (如 `[^ref4]: 文献标题. 期刊. [链接](url)`). 参考文献列表由报告组装层在报告末尾统一追加 (`## 参考来源`), 章节内仅使用 `[n]` 行内编号引用, 不输出引用条目列表. 章节末尾不得出现 `---` 分隔线.
 
 【Markdown 排版规范】(严格遵守, 确保可读性):
 - **段落间距**: 段落之间必须空一行 (即两个 \\n), 严禁段落紧贴
@@ -1011,6 +1012,7 @@ Requirements:
 6. Current date: {current_date}
 7. Output only the introduction (under ## Introduction), no other sections
 8. Writing style: {style_desc}
+9. **NEVER output reference list**: The introduction MUST NOT contain `**References**`/`**Bibliography**` bold blocks, `## References` sections, or `[^xxx]:` Markdown footnote definitions (e.g., `[^ref4]: Title. Journal. [link](url)`). The reference list is appended by the report assembler at the end of the report. Within the introduction, only use `[n]` in-text numbered citations or `([description](url))` hyperlink citations.
 
 Context:
 {context[:6000]}
@@ -1042,7 +1044,7 @@ Based on the following subtopic context, write the "{topic}" section content.
 4. **Numbered citations**: Use `[n]` format for in-text citations, plus hyperlinks `([description](url))`
 5. **Structured headings**: `##` section title + `###` subsections. Subsections MUST use descriptive or numbered titles (e.g., `### 1. Research Design` or `### Research Design`). **NEVER** use "Introduction"/"Summary"/"Conclusion" as subsection titles (these are reserved for report-level sections). Use consistent numbering format `### 1. Title`.
 6. **Source credibility priority**: Official > Academic > Industry > Self-media
-7. **NEVER output reference list**: The section MUST NOT contain `**References**`/`**Bibliography**`/`**参考来源**` bold blocks or `## References`/`## Bibliography` sections. The reference list is appended by the report assembler at the end of the report (`## References`). Within the section, only use `[n]` in-text numbered citations; do not output citation entry lists. The section MUST NOT end with a `---` separator.
+7. **NEVER output reference list**: The section MUST NOT contain `**References**`/`**Bibliography**`/`**参考来源**` bold blocks, `## References`/`## Bibliography` sections, or `[^xxx]:` Markdown footnote definitions (e.g., `[^ref4]: Title. Journal. [link](url)`). The reference list is appended by the report assembler at the end of the report (`## References`). Within the section, only use `[n]` in-text numbered citations; do not output citation entry lists. The section MUST NOT end with a `---` separator.
 
 【Soft requirements】:
 - Tone: {tone}

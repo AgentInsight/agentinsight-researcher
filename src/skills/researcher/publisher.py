@@ -361,11 +361,41 @@ class Publisher:
         return json.dumps(report_data, ensure_ascii=False, indent=2)
 
     def _md_to_html(self, md: str) -> str:
-        """Markdown 转 HTML (用 mistune + jinja2 模板)."""
+        """Markdown 转 HTML (用 mistune + jinja2 模板).
+
+        SVG 块绕过 mistune: 提取 <div class="report-image">...</div> 块,
+        用占位符替换, mistune 解析后插回. 避免 SVG 内部空行触发
+        CommonMark HTML 块中断规则导致子元素被 <p> 包装.
+        """
         try:
             import html
 
             import mistune
+
+            # 预处理: 提取 <div class="report-image">...</div> 块, 用占位符替换
+            # 避免 mistune CommonMark HTML 块在空行处中断, 导致 SVG 子元素被 <p> 包装
+            # 占位符用纯字母数字 (不含 _ 或 *), 避免 mistune 解析为加粗/斜体
+            svg_blocks: list[str] = []
+
+            def _extract_svg_block(m: re.Match) -> str:
+                svg_blocks.append(m.group(0))
+                return f"SVGBlockPlaceholder{len(svg_blocks) - 1}X"
+
+            md = re.sub(
+                r'<div class="report-image">[\s\S]*?</div>',
+                _extract_svg_block,
+                md,
+            )
+
+            # 同步处理 ```svg 代码块 (旧格式), 也提取出来避免 mistune 转义
+            old_svg_pattern = r"```svg\n([\s\S]*?)\n```"
+
+            def _extract_old_svg(m: re.Match) -> str:
+                svg_code = m.group(1)
+                svg_blocks.append(f'<div class="report-image">{svg_code}</div>')
+                return f"SVGBlockPlaceholder{len(svg_blocks) - 1}X"
+
+            md = re.sub(old_svg_pattern, _extract_old_svg, md)
 
             markdown = mistune.create_markdown(plugins=["table"], escape=False)
             body = markdown(md)
@@ -394,6 +424,18 @@ class Publisher:
 
             body = re.sub(r'<svg[\s]', _constrain_svg, body)
 
+            # 后处理 3: 将 SVG 块占位符替换回原始 SVG 内容 (绕过 mistune)
+            # mistune 可能将占位符包裹在 <p> 中, 需同时清理 <p> 占位符 </p>
+            for idx, svg_block in enumerate(svg_blocks):
+                # 对替换回的 SVG 也应用 max-width 约束
+                svg_block = re.sub(r'<svg[\s]', _constrain_svg, svg_block)
+                placeholder = f"SVGBlockPlaceholder{idx}X"
+                # 清理 mistune 可能添加的 <p> 包装和 <strong> 加粗
+                body = body.replace(f"<p><strong>{placeholder}</strong></p>", svg_block)
+                body = body.replace(f"<p>{placeholder}</p>", svg_block)
+                body = body.replace(f"<strong>{placeholder}</strong>", svg_block)
+                body = body.replace(placeholder, svg_block)
+
             # HTML 模板 (内联 CSS, 离线友好)
             # 注意: CSS 花括号不需要转义 (用 .replace 不走 Jinja2 模板)
             template = """<!DOCTYPE html>
@@ -414,8 +456,8 @@ blockquote { border-left: 4px solid #3498db; margin: 0; padding-left: 16px; colo
 table { border-collapse: collapse; width: 100%; margin: 16px 0; }
 th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
 th { background: #f8f9fa; font-weight: 600; }
-.report-image { text-align: center; margin: 20px 0; }
-.report-image svg { max-width: 100%; height: auto; }
+.report-image { text-align: center; margin: 20px 0; max-width: 100%; overflow: hidden; }
+.report-image svg { max-width: 100%; height: auto; display: inline-block; }
 </style>
 </head>
 <body>
