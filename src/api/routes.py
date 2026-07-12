@@ -262,6 +262,14 @@ class ChatCompletionRequest(BaseModel):
             "行业适配采用 4 层机制, 不再使用行业分类器."
         ),
     )
+    language: str | None = Field(
+        None,
+        description=(
+            "报告语言代码, 可选 zh (中文, 默认) | en (英文). "
+            "不传或传 None 时降级为 settings.report_language. "
+            "影响 ReportGenerator 子主题/引言/章节/结论的撰写语言."
+        ),
+    )
     query_domains: list[str] | None = Field(
         None,
         description="域名过滤白名单, 仅检索这些域名的结果",
@@ -669,6 +677,9 @@ async def chat_completions(
         # agent_role (来自 ChatRequest 或 settings) 优先级高于 LLM 动态生成
         "agent_role": request.agent_role or settings.agent_role or "",
         "agent_role_server": "",
+        # 报告语言 (来自 ChatRequest.language 或 settings.report_language)
+        # 可选值: zh (中文, 默认) | en (英文)
+        "report_language": (request.language or settings.report_language or "zh").lower(),
         # 域名过滤白名单
         "query_domains": request.query_domains or [],
         "sub_queries": [],

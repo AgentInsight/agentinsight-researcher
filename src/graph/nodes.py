@@ -216,6 +216,7 @@ async def report_generator_node(
             agent_role=state.get("agent_role"),
             user_id=state.get("user_id"),
             session_id=state.get("session_id"),
+            language=state.get("report_language", settings.report_language or "zh"),
         )
         report_md = result["report_md"]
         # 同步写入 report_formats["md"] 与 report_md (兼容字段)

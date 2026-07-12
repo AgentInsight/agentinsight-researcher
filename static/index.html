@@ -713,6 +713,13 @@
             <option value="deep_research">deep_research</option>
           </select>
         </div>
+        <div class="field">
+          <label for="languageInput">报告语言 (language)</label>
+          <select id="languageInput">
+            <option value="zh" selected>zh (中文)</option>
+            <option value="en">en (English)</option>
+          </select>
+        </div>
       </div>
     </div>
   </header>
@@ -1840,6 +1847,7 @@
       const modelInput = $('modelInput').value.trim() || 'agentinsight-researcher';
       const reportFormat = $('reportFormat').value;
       const reportType = $('reportType').value;
+      const language = $('languageInput').value;
       const token = $('tokenInput').value.trim();
       const selectedFileIds = state.files.filter((f) => f.selected).map((f) => f.file_id);
 
@@ -1851,6 +1859,7 @@
         session_id: streamSessionId,
         report_type: reportType,
         report_format: reportFormat,
+        language: language,
         uploaded_files: selectedFileIds.length ? selectedFileIds : undefined,
       };
       // 移除 undefined 字段

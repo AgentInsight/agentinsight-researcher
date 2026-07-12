@@ -907,9 +907,11 @@ class ReportGenerator:
             清洗后的内容, 末尾保留单个换行.
         """
         # 模式 1: (2+ 空行 + 可选 --- 分隔线 + 空行) + 粗体参考文献标题 + 后续所有内容到文末
+        # 标题支持可选的括号注释 (如 "**参考文献（部分示例）**" / "**References (selected)**")
         pattern_bold = re.compile(
             r"\n{2,}(?:---\s*\n\s*)?"  # 前置空行 + 可选 --- 分隔线
-            r"\*\*(?:参考文献|References|参考来源|Bibliography)\*\*"  # 粗体标题
+            r"\*\*(?:参考文献|References|参考来源|Bibliography)"  # 粗体标题前缀
+            r"[ \t]*(?:[（(][^）)]*[）)])?\*\*"  # 可选空格 + 可选括号注释 (如 "（部分示例）") + 粗体闭合
             r"\s*\n[\s\S]*$",  # 标题后续所有内容到文末 (贪婪)
             re.MULTILINE,
         )
@@ -930,10 +932,12 @@ class ReportGenerator:
         #   ---
         #   - `[1]` Title. Retrieved from `https://...`
         #   - `[2]` Title. Retrieved from `https://...`
+        #   - 【1】 Title. (中文方括号格式)
         # 正则说明: `?\[?\[?\d+\]?\]?`? 允许反引号/方括号包裹编号 (如 `[1]` / `[1]` / `1`)
+        # 同时支持 `【n】` 中文方括号格式
         pattern_inline_list = re.compile(
             r"\n{2,}(?:---\s*\n\s*)?"  # 前置 2+ 空行 + 可选 --- 分隔线
-            r"(?:-\s+`?\[?\[?\d+\]?\]?`?\s*[^\n]*(?:\n|$))+\s*$",  # 连续的 - `[n]` xxx 列表项到文末
+            r"(?:-\s+`?(?:\[?\[?\d+\]?\]?|【\d+】)`?\s*[^\n]*(?:\n|$))+\s*$",  # 连续的列表项 (含 [n]/【n】) 到文末
             re.MULTILINE,
         )
         content = pattern_inline_list.sub("", content).rstrip() + "\n"
