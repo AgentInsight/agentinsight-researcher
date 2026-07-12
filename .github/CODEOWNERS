@@ -1,0 +1,69 @@
+# CODEOWNERS -- GitHub PR 自动审查分配规则
+# https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# 格式: <pattern> <owner1> <owner2> ...
+# owner 为 GitHub 用户名或团队名 (需带 @ 前缀)
+# 最后匹配的规则生效 (后面的覆盖前面的)
+
+# ===== 默认审查者 (所有未被更具体规则覆盖的文件) =====
+*                           @agentinsight
+
+# ===== 架构核心 (graph/agents/common) =====
+/src/graph/                 @agentinsight
+/src/agents/                @agentinsight
+/src/common/                @agentinsight
+/server.py                  @agentinsight
+
+# ===== RAG 检索层 =====
+/src/rag/                   @agentinsight
+/src/skills/researcher/context_manager.py @agentinsight
+
+# ===== API 与后端 =====
+/src/api/                   @agentinsight
+/src/llm/                   @agentinsight
+/src/memory/                @agentinsight
+
+# ===== MCP 工具与技能 =====
+/src/tools/                 @agentinsight
+/src/skills/                @agentinsight
+
+# ===== 配置与可观测性 =====
+/src/config/                @agentinsight
+/src/observability/        @agentinsight
+/.env.template              @agentinsight
+
+# ===== 数据库 =====
+/scripts/init.sql           @agentinsight
+/src/memory/                @agentinsight
+
+# ===== 部署 (Docker) =====
+/Dockerfile                 @agentinsight
+/docker-compose.yml         @agentinsight
+/docker-build.sh            @agentinsight
+
+# ===== SearXNG =====
+/Dockerfile.searxng         @agentinsight
+/config/searxng/            @agentinsight
+/scripts/patch-searxng-engines.py @agentinsight
+
+# ===== 前端测试页面 =====
+/static/                    @agentinsight
+
+# ===== 项目规范与文档 =====
+/AGENTS.md                  @agentinsight
+/SECURITY.md                @agentinsight
+/CONTRIBUTING.md            @agentinsight
+/CITATION.cff               @agentinsight
+/docs/                      @agentinsight
+
+# ===== CI/CD =====
+/.github/workflows/         @agentinsight
+/.github/dependabot.yml     @agentinsight
+/pyproject.toml             @agentinsight
+/.pre-commit-config.yaml    @agentinsight
+
+# ===== 评测 =====
+/evals/                     @agentinsight
+
+# ===== 测试 =====
+/tests/                     @agentinsight

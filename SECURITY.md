@@ -11,7 +11,7 @@
 如果您发现安全漏洞, 请**不要**通过公开 Issue 报告。
 请通过以下渠道私下报告:
 
-- 邮箱: security@goldebridge.com
+- 邮箱: agentinsightcn@gmail.com
 - GitHub Security Advisory (推荐): 使用仓库 "Security" 标签页的 "Report a vulnerability" 功能
 
 ## 响应 SLA
@@ -74,7 +74,7 @@
 If you discover a security vulnerability, please **do not** report it via public Issues.
 Report it privately via:
 
-- Email: security@goldebridge.com
+- Email: agentinsightcn@gmail.com
 - GitHub Security Advisory (recommended): Use the "Report a vulnerability" feature in the repository "Security" tab
 
 ## Response SLA

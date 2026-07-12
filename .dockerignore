@@ -28,7 +28,15 @@ evals/
 packages/images/
 packages/models/
 
-# 离线模式构建文件 (联网模式构建时排除, AGENTS.md 第 12 章双套构建模式)
-docker-compose.offline.yml
+# QA/离线模式构建文件 (联网模式构建时排除, AGENTS.md 第 12 章三套构建模式)
+# 注意: 文件名用连字符 + .yaml/.sh/.bat, 非 .yml/.ps1
+docker-compose-offline.yaml
+docker-compose-offline-self.yaml
+docker-compose-qa.yaml
 Dockerfile.offline
-scripts/build-offline.ps1
+Dockerfile.qa
+Dockerfile.searxng
+docker-build.offline.sh
+docker-build.offline.self.sh
+docker-build.sh
+docker-build.qa.bat

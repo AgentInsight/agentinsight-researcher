@@ -565,7 +565,23 @@
     .sidebar {
       width: 260px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
+      transition: width .25s ease, opacity .2s ease;
     }
+    .sidebar.collapsed { width: 0; opacity: 0; border-right: none; }
+    .sidebar.collapsed .sidebar-header,
+    .sidebar.collapsed .session-list { visibility: hidden; }
+    /* 收缩/展开 toggle 按钮 (sidebar 与 main-wrap 之间) */
+    .sidebar-toggle {
+      width: 18px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      transition: background .15s; position: relative;
+    }
+    .sidebar-toggle:hover { background: var(--surface-2); }
+    .sidebar-toggle .toggle-arrow {
+      width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: var(--text-muted); transition: transform .25s ease;
+    }
+    .sidebar-toggle.collapsed .toggle-arrow { transform: rotate(180deg); }
     .sidebar-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -612,7 +628,7 @@
       .chat-inner { padding: 16px 10px 24px; }
       .config-head { padding: 8px 12px; }
       .config-title { font-size: 13px; }
-      .sidebar { width: 200px; }
+      .sidebar:not(.collapsed) { width: 200px; }
     }
     /* 滚动条 */
     .chat-wrap::-webkit-scrollbar { width: 8px; }
@@ -631,6 +647,10 @@
       <div class="session-loading">加载中...</div>
     </div>
   </aside>
+  <!-- 侧边栏收缩/展开 toggle (默认展开, 点击向左收缩/向右展开) -->
+  <div class="sidebar-toggle" id="sidebarToggle" title="收起/展开会话列表">
+    <span class="toggle-arrow">◀</span>
+  </div>
 
   <!-- ========== 主区域 ========== -->
   <div class="main-wrap">
@@ -1447,6 +1467,14 @@
     $('newSession').addEventListener('click', createNewSession);
     // 侧边栏: 新建会话按钮
     $('sidebarNewSession').addEventListener('click', createNewSession);
+    // 侧边栏: 收缩/展开 toggle (默认展开, 点击切换)
+    $('sidebarToggle').addEventListener('click', () => {
+      const sidebar = $('sidebar');
+      const toggle = $('sidebarToggle');
+      const collapsed = sidebar.classList.toggle('collapsed');
+      toggle.classList.toggle('collapsed', collapsed);
+      toggle.title = collapsed ? '展开会话列表' : '收起会话列表';
+    });
 
     $('copySession').addEventListener('click', async () => {
       try {

@@ -7,8 +7,8 @@ authors:
     family-names: Team
 repository-code: https://github.com/AgentInsight/agentinsight-researcher
 license: MIT
-version: 0.1.0
-date-released: 2026-07-04
+version: 1.0.0
+date-released: 2026-07-12
 keywords:
   - ai-agent
   - langgraph

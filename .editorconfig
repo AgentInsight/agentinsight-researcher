@@ -1,0 +1,30 @@
+# EditorConfig -- https://editorconfig.org
+# 跨 IDE/编辑器统一编码风格 (AGENTS.md P2-1)
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{json,json5}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{cfg,ini,toml}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.{sh,bat}]
+indent_size = 4

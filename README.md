@@ -17,6 +17,9 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-%E2%89%A50.115-green.svg)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-%E2%89%A51.2-purple.svg)](https://langchain-ai.github.io/langgraph/)
 [![code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![GitHub Discussions](https://img.shields.io/github/discussions/AgentInsight/agentinsight-researcher)](https://github.com/AgentInsight/agentinsight-researcher/discussions)
+[![All Contributors](https://img.shields.io/badge/all%20contributors-1-orange.svg)](#contributors)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io-blue.svg)](https://github.com/AgentInsight/agentinsight-researcher/pkgs/container/agentinsight-researcher)
 
 [中文](#中文) | [English](#english)
 
@@ -104,6 +107,20 @@ QDRANT_API_KEY=sk-你的Qdrant密钥
 ## 项目简介
 
 **agentinsight-researcher** 是一个企业级 AI Agent 系统,对外暴露 OpenAI 兼容 API(SSE 流式),支持研究报告生成、混合 RAG 检索、多 Agent 协作、人在回路审核、全链路可观测等能力。
+
+### 📸 项目截图
+
+**测试页面界面**:
+
+![测试页面界面](docs/assets/screenshot-interface.png)
+
+**研究报告示例 — 分析跑步跟健康的关系**:
+
+![研究报告示例 - 跑步与健康](docs/assets/report-1-top.png)
+
+**研究报告示例 — 研究玉米的销量跟白酒的关系**:
+
+![研究报告示例 - 玉米与白酒](docs/assets/report-3-top.png)
 
 ### 核心能力
 
@@ -1055,6 +1072,20 @@ docker compose -p agentinsight down -v
 
 ---
 
+## 社区
+
+欢迎加入 AgentInsight 社区!通过以下渠道与我们交流:
+
+| 渠道 | 链接 | 说明 |
+|------|------|------|
+| **GitHub Discussions** ⭐ | [Discussions](https://github.com/AgentInsight/agentinsight-researcher/discussions) | 提问、分享、讨论(推荐) |
+| **GitHub Issues** | [Issues](https://github.com/AgentInsight/agentinsight-researcher/issues) | Bug 报告、功能请求 |
+| **邮箱** | agentinsightcn@gmail.com | 私下联系(安全漏洞报告请用 [SECURITY.md](SECURITY.md) 渠道) |
+
+> 💡 欢迎在 Discussions 分享你使用 agentinsight-researcher 的场景、生成的报告截图、自定义配置等。
+
+---
+
 ## 贡献
 
 欢迎贡献!请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发流程,遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 行为准则。
@@ -1155,6 +1186,20 @@ This project defaults to a DeepSeek stack + Zhipu free tier plan, with a single 
 ## Project Introduction
 
 **agentinsight-researcher** is an enterprise-grade AI Agent system that exposes an OpenAI-compatible API (SSE streaming), supporting research report generation, hybrid RAG retrieval, multi-agent collaboration, human-in-the-loop review, full-link observability, and more.
+
+### 📸 Screenshots
+
+**Test Page Interface**:
+
+![Test Page Interface](docs/assets/screenshot-interface.png)
+
+**Research Report Example — Analysis of Running and Health**:
+
+![Research Report - Running and Health](docs/assets/report-1-top.png)
+
+**Research Report Example — Analysis of Corn Sales and Baijiu**:
+
+![Research Report - Corn and Baijiu](docs/assets/report-3-top.png)
 
 ### Core Capabilities
 
@@ -2087,6 +2132,20 @@ docker compose -p agentinsight down -v
 ```
 
 > 💡 Use `-p agentinsight` project name (container name `agentinsight-<service>-1`), shared namespace with the AgentInsightService project, the two projects do not run in parallel.
+
+---
+
+## Community
+
+Join the AgentInsight community! Connect with us through:
+
+| Channel | Link | Description |
+|---------|------|-------------|
+| **GitHub Discussions** ⭐ | [Discussions](https://github.com/AgentInsight/agentinsight-researcher/discussions) | Ask questions, share, discuss (recommended) |
+| **GitHub Issues** | [Issues](https://github.com/AgentInsight/agentinsight-researcher/issues) | Bug reports, feature requests |
+| **Email** | agentinsightcn@gmail.com | Private contact (for security vulnerability reports, use [SECURITY.md](SECURITY.md) channels) |
+
+> 💡 Feel free to share your use cases, report screenshots, and custom configurations in Discussions.
 
 ---
 

@@ -114,7 +114,7 @@ def patch_crossref() -> bool:
 
     # 2. 添加 mailto 参数 (从环境变量 CROSSREF_MAILTO 读取)
     #    清理硬编码邮箱 patch, 改为环境变量
-    old_mailto = '        "mailto": "agentinsight@example.com",'
+    old_mailto = '        "mailto": "agentinsightcn@gmail.com",'
     new_mailto = '        "mailto": os.environ.get("CROSSREF_MAILTO", ""),'
     if old_mailto in content:
         content = content.replace(old_mailto, new_mailto, 1)
@@ -166,7 +166,7 @@ def patch_pubmed() -> bool:
 
     # 2. 添加 email 参数 (从环境变量 PUBMED_EMAIL 读取)
     #    清理硬编码邮箱 patch, 改为环境变量
-    old_email = '            "email": "agentinsight@example.com",'
+    old_email = '            "email": "agentinsightcn@gmail.com",'
     new_email = '            "email": os.environ.get("PUBMED_EMAIL", ""),'
     if old_email in content:
         content = content.replace(old_email, new_email)
