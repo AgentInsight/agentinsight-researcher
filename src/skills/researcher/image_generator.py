@@ -393,8 +393,10 @@ class ImageGenerator:
     ) -> dict[str, Any]:
         """通过 /chat/completions 生成 SVG 矢量配图.
 
-        DeepSeek V4 Flash 是推理模型, 必须设置 max_tokens >= 8192
-        (推理消耗 3K-7K tokens, 输出 SVG 代码 2K-4K tokens).
+        DeepSeek V4 Flash 是推理模型, 思考模式会消耗大量 reasoning_tokens
+        导致 max_tokens 全用于推理, 输出 content 为空.
+        SVG 生成是创意输出任务, 通过 extra_body={"thinking": {"type": "disabled"}}
+        关闭思考模式, 确保输出 SVG 代码.
 
         Returns:
             dict 含:
@@ -441,6 +443,10 @@ class ImageGenerator:
                     "max_tokens": self.settings.image_svg_max_tokens,
                     "timeout": self.settings.llm_timeout,
                     "num_retries": self.settings.llm_max_retries,
+                    # DeepSeek V4 Flash 是推理模型, 思考模式会消耗大量 reasoning_tokens
+                    # 导致 max_tokens=8192 全用于推理, 输出 content 为空 (finish_reason=length)
+                    # SVG 生成是创意输出任务, 不需要推理, 关闭思考模式
+                    "extra_body": {"thinking": {"type": "disabled"}},
                 }
                 if api_key:
                     kwargs["api_key"] = api_key
@@ -448,10 +454,16 @@ class ImageGenerator:
                 # 通过 LiteLLM acompletion 调用聊天接口 (非 aimage_generation)
                 response = await litellm.acompletion(**kwargs)
 
-                # 提取响应内容
+                # 提取响应内容 (LiteLLM ModelResponse 支持 dict 风格访问 choices/message/content)
                 content = response["choices"][0]["message"]["content"]
                 finish_reason = response["choices"][0].get("finish_reason", "")
-                usage = response.get("usage", {})
+
+                # usage 是 LiteLLM Usage pydantic model 对象 (非 dict),
+                # 必须用 getattr 访问属性, 不能用 .get() (CompletionTokensDetailsWrapper 无 .get 方法)
+                usage = getattr(response, "usage", None)
+                completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+                completion_tokens_details = getattr(usage, "completion_tokens_details", None) if usage else None
+                reasoning_tokens = getattr(completion_tokens_details, "reasoning_tokens", 0) if completion_tokens_details else 0
 
                 # 提取 SVG 代码
                 svg_code = self._extract_svg(content)
@@ -467,7 +479,7 @@ class ImageGenerator:
                     logger.warning(
                         "SVG 生成可能被 max_tokens 截断 (finish_reason=length, "
                         "completion_tokens=%s). 考虑提升 image_svg_max_tokens.",
-                        usage.get("completion_tokens", "?"),
+                        completion_tokens,
                     )
 
                 # SVG 验证
@@ -497,10 +509,8 @@ class ImageGenerator:
                         "finish_reason": finish_reason,
                     },
                     metadata={
-                        "completion_tokens": usage.get("completion_tokens", 0),
-                        "reasoning_tokens": usage.get("completion_tokens_details", {}).get(
-                            "reasoning_tokens", 0
-                        ),
+                        "completion_tokens": completion_tokens,
+                        "reasoning_tokens": reasoning_tokens,
                         "svg_validation": validation,
                     },
                 )

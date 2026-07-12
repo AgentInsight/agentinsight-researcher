@@ -135,7 +135,9 @@ class WebSocketManager:
         if origin_check_enabled:
             origin = websocket.headers.get("origin", "")
             allowed = settings.cors_origins_list  # 复用 CORS 白名单
-            if origin and origin not in allowed:
+            # 支持 CORS_ALLOW_ORIGINS=* 通配符 (与 Starlette CORSMiddleware 行为一致)
+            # "*" not in allowed 时才逐条匹配; 含 "*" 则放行所有 Origin
+            if origin and "*" not in allowed and origin not in allowed:
                 logger.warning(
                     "WebSocket Origin 拒绝: origin=%s session_id=%s",
                     origin,

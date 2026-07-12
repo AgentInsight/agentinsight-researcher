@@ -210,7 +210,7 @@ def svg_settings() -> Settings:
     return Settings(
         _env_file=None,
         image_output_format="svg",
-        image_svg_max_tokens=8192,
+        image_svg_max_tokens=16384,
         image_svg_temperature=0.7,
     )
 

@@ -78,30 +78,31 @@ botdetection:
 # engines 部分覆盖 keep_only 保留引擎的运行时配置
 # 说明: 仅 keep_only 列表中的引擎会被加载; google/duckduckgo 等未列入的引擎
 #       不会出现在实例中, 无需也无法在此处对其设置 disabled: true。
-#       bing 系列强制使用 cn.bing.com (中国可访问的官方镜像)。
+#       bing 系列使用 www.bing.com (cn.bing.com 会 301 重定向到 www.bing.com,
+#       SearXNG httpx 未正确跟随重定向导致 "Document is empty" 错误)。
 # =============================================================================
 engines:
   # ========== 国内引擎 (启用 + 配置中国镜像) ==========
-  # bing: 强制使用 cn.bing.com (官方推荐中国镜像)
+  # bing: 使用 www.bing.com (cn.bing.com 301 重定向会导致空文档错误)
   - name: bing
     engine: bing
     shortcut: bi
     disabled: false
-    base_url: https://cn.bing.com
+    base_url: https://www.bing.com
     timeout: 10.0
 
   - name: bing images
     engine: bing_images
     shortcut: bii
     disabled: false
-    base_url: https://cn.bing.com
+    base_url: https://www.bing.com
     timeout: 10.0
 
   - name: bing videos
     engine: bing_videos
     shortcut: biv
     disabled: false
-    base_url: https://cn.bing.com
+    base_url: https://www.bing.com
     timeout: 10.0
 
   # baidu: 显式启用 (P0 修复: engine 改用 baidu_stealth, curl_cffi Chrome TLS 指纹规避 CAPTCHA)
@@ -118,7 +119,7 @@ engines:
     disabled: false
     timeout: 10.0
 
-  # 360search: 显式启用
+  # 360search: 显式启用 (偶发超时可接受, 不调整全局超时)
   - name: 360search
     engine: 360search
     shortcut: 360so

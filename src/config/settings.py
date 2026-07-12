@@ -89,8 +89,9 @@ class Settings(BaseSettings):
     image_quality: str = "standard"
     image_api_key: str | None = None  # 单独 Key (可选, 留空则复用 deepseek_api_key)
     # SVG 矢量配图 (DeepSeek V4 Flash 经 /chat/completions 生成 SVG 代码)
+    # 关闭思考模式 (extra_body thinking=disabled), SVG 生成是创意输出任务不需要推理
     image_output_format: str = "svg"  # 图像输出格式: svg | url | b64
-    image_svg_max_tokens: int = 8192  # SVG 生成 max_tokens (推理模型需 ≥8192)
+    image_svg_max_tokens: int = 16384  # SVG 生成 max_tokens (DeepSeek API 上限远超 8192, 16K 确保复杂 SVG 输出)
     image_svg_temperature: float = 0.7  # SVG 生成温度 (0.7 平衡创意与稳定)
 
     # ========== Qdrant ==========
@@ -255,7 +256,7 @@ class Settings(BaseSettings):
     # 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
-    fastembed_model_path: str = "./packages/models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    fastembed_model_path: str = "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度
     # ONNX Runtime 并行执行 (推理加速 2-4x)

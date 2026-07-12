@@ -18,12 +18,17 @@ ARG SEARXNG_VENV_PY=/usr/local/searxng/.venv/bin/python3
 # 复制预下载的 wheel (离线模式); 若目录仅有 .gitkeep 则联网安装
 COPY packages/searxng-wheels/ /tmp/searxng-wheels/
 
+# 复制引擎源码 patch 脚本 (CrossRef/PubMed Polite Pool 修复 429 限流)
+COPY scripts/patch-searxng-engines.py /tmp/patch-searxng-engines.py
+
 # 安装 curl_cffi 到 SearXNG venv
 # 离线模式: --no-index --find-links 从本地 wheel 安装 (离线硬约束)
 # 联网模式: 联网 pip install (ensurepip 确保 pip 可用, 生产联网模式允许联网)
+# 关键: SearXNG venv 默认不含 pip, 必须先 ensurepip 安装 pip, 否则 pip install 静默失败
 # 安装失败不阻断构建 (|| true), stealth 引擎将降级为 httpx (可能触发 CAPTCHA 但引擎仍可加载)
 RUN if ls /tmp/searxng-wheels/*.whl 2>/dev/null 1>&2; then \
         echo "[SearXNG] 离线安装 curl_cffi (从 packages/searxng-wheels/)"; \
+        $SEARXNG_VENV_PY -m ensurepip --upgrade || true; \
         $SEARXNG_VENV_PY -m pip install --no-index --find-links=/tmp/searxng-wheels curl_cffi || true; \
     else \
         echo "[SearXNG] 联网安装 curl_cffi (packages/searxng-wheels/ 无 wheel)"; \
@@ -34,3 +39,9 @@ RUN if ls /tmp/searxng-wheels/*.whl 2>/dev/null 1>&2; then \
     # 验证安装结果 (不阻断构建)
     $SEARXNG_VENV_PY -c "import curl_cffi; print(f'[SearXNG] curl_cffi {curl_cffi.__version__} 已安装')" 2>/dev/null || \
     echo "[SearXNG][WARNING] curl_cffi 未安装, stealth 引擎将降级为 httpx (可能触发 CAPTCHA)"
+
+# Patch 引擎源码: CrossRef/PubMed 添加 Polite Pool 参数 (mailto/email) 避免 429 限流
+# 幂等设计: 重复构建不会重复添加; 任一失败仅告警不阻断构建
+# 详见: scripts/patch-searxng-engines.py
+RUN $SEARXNG_VENV_PY /tmp/patch-searxng-engines.py || true && \
+    rm -f /tmp/patch-searxng-engines.py
