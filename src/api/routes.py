@@ -1042,30 +1042,41 @@ async def _stream_research(
             # 报告持久化移到后台任务 (不阻塞 [DONE], 先 yield [DONE] 再后台持久化)
             # 保留 Task 引用防止 GC 取消
             async def _persist_report() -> None:
+                # 1. IP-based 用户报告生成成功后递增每日计数 (与 save_report 解耦)
+                #    报告内容非空且未失败即计数, 不依赖持久化是否成功
+                _report_md = final_state.get("report_md", "")
+                _uid = initial_state.get("user_id", "")
+                _aid = initial_state.get("agent_id", "")
+                if (
+                    _report_md
+                    and "研究执行失败" not in _report_md
+                    and _uid.startswith("ip_")
+                    and _aid
+                ):
+                    try:
+                        from src.api.ip_user_resolver import increment_daily_report_count
+
+                        await increment_daily_report_count(_uid, _aid)
+                    except Exception:
+                        logger.warning("每日报告计数递增失败 (不阻断主流程)", exc_info=True)
+
+                # 2. 报告持久化存储 (独立于计数逻辑, 失败不影响已递增的计数)
                 try:
                     from src.memory.report_store import get_report_store
 
                     _report_store = get_report_store()
-                    _saved_report_id = await _report_store.save_report(
+                    await _report_store.save_report(
                         session_id=session_id,
                         user_id=initial_state.get("user_id", ""),
                         agent_id=initial_state.get("agent_id", ""),
                         query=initial_state.get("query", ""),
-                        report_md=final_state.get("report_md", ""),
+                        report_md=_report_md,
                         report_format=final_state.get("report_format", "markdown"),
                         sources=(
                             final_state.get("curated_sources") or final_state.get("sources", [])
                         ),
                         agent_role=final_state.get("agent_role_server"),
                     )
-                    if _saved_report_id:
-                        # IP-based 用户报告生成成功后异步递增每日计数
-                        _uid = initial_state.get("user_id", "")
-                        _aid = initial_state.get("agent_id", "")
-                        if _uid.startswith("ip_") and _aid:
-                            from src.api.ip_user_resolver import increment_daily_report_count
-
-                            await increment_daily_report_count(_uid, _aid)
                 except Exception:
                     logger.warning("报告持久化存储失败 (不阻断主流程)", exc_info=True)
 

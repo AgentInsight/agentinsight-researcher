@@ -16,6 +16,7 @@ detailed_report 的子主题/引言/章节/结论 prompt 暂保留内联 (流程
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime
@@ -514,14 +515,32 @@ class ReportGenerator:
 
             # 多语言: 标题和日期标签翻译
             if language == "en":
-                # 英文报告: 翻译标题和日期标签
-                report_title = await self._translate_query_title(query, user_id, session_id)
+                # 英文报告: 如果标题包含中文, 翻译为英文; 否则保持原文
+                if self._contains_chinese(query):
+                    report_title = await self._translate_query_title(
+                        query, user_id, session_id, target_language="en"
+                    )
+                else:
+                    report_title = query
                 date_label = f"_Generated on: {datetime.now().strftime('%Y-%m-%d')}_"
                 empty_body_placeholder = "_(No section content)_"
-            else:
-                report_title = query
+            elif language == "zh":
+                # 中文报告: 如果标题不含中文 (如英文), 翻译为中文; 否则保持原文
+                if not self._contains_chinese(query):
+                    report_title = await self._translate_query_title(
+                        query, user_id, session_id, target_language="zh"
+                    )
+                else:
+                    report_title = query
                 date_label = f"_生成日期: {current_date}_"
                 empty_body_placeholder = "_(无子主题章节内容)_"
+            else:
+                # 其他语言 (ja/ko/fr): 翻译标题为目标语言
+                report_title = await self._translate_query_title(
+                    query, user_id, session_id, target_language=language
+                )
+                date_label = f"_Generated on: {datetime.now().strftime('%Y-%m-%d')}_"
+                empty_body_placeholder = "_(No section content)_"
 
             body = "\n\n".join(sections) if sections else empty_body_placeholder
             full_report = (
@@ -815,8 +834,76 @@ class ReportGenerator:
         )
         topics = safe_json_parse(content, fallback=[query])
         if isinstance(topics, list) and topics:
-            return [str(t) for t in topics if t][:5]
-        return [query]
+            topics = [str(t) for t in topics if t][:5]
+        else:
+            topics = [query]
+
+        # 后置语言保障: 目标语言非中文但子主题含中文时, 批量翻译子主题
+        # 解决 DefaultPromptFamily 中文 prompt 导致 LLM 偏向生成中文子主题的问题
+        if language != "zh" and any(self._contains_chinese(t) for t in topics):
+            topics = await self._translate_subtopics(topics, language, user_id, session_id)
+
+        return topics
+
+    async def _translate_subtopics(
+        self,
+        subtopics: list[str],
+        target_language: str,
+        user_id: str | None,
+        session_id: str | None,
+    ) -> list[str]:
+        """批量翻译子主题列表为目标语言 (后置语言保障).
+
+        当 LLM 生成的子主题语言与目标报告语言不一致时, 用 FAST LLM 批量翻译.
+        用 JSON 数组格式保证一一对应, 失败时返回原始列表.
+
+        Args:
+            subtopics: 原始子主题列表
+            target_language: 目标语言代码 (en|ja|ko|fr)
+            user_id: 用户 ID
+            session_id: 会话 ID
+
+        Returns:
+            翻译后的子主题列表, 失败时返回原始列表
+        """
+        _lang_names = {
+            "zh": "Chinese (Simplified)",
+            "en": "English",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "fr": "French",
+        }
+        target_lang_name = _lang_names.get(target_language, "English")
+        try:
+            topics_json = json.dumps(subtopics, ensure_ascii=False)
+            prompt = (
+                f"Translate each of the following subtopics to {target_lang_name}. "
+                f"Input is a JSON array of strings. Output ONLY a JSON array of "
+                f"translated strings, same order, same length, no explanations:\n\n{topics_json}"
+            )
+            messages = [{"role": "user", "content": prompt}]
+            content = await self._achat_with_retry(
+                messages,
+                tier=LLMTier.FAST,
+                temperature=0.0,
+                max_tokens=800,
+                user_id=user_id,
+                session_id=session_id,
+                span_name="subtopics-translation",
+                step="translator",
+                fallback=topics_json,
+            )
+            translated = safe_json_parse(content, fallback=subtopics)
+            if isinstance(translated, list) and len(translated) == len(subtopics):
+                return [str(t) for t in translated]
+            logger.warning(
+                "子主题翻译结果数量不匹配 (%d→%d), 保留原文",
+                len(subtopics),
+                len(translated) if isinstance(translated, list) else 0,
+            )
+            return subtopics
+        except Exception:  # noqa: BLE001
+            return subtopics
 
     async def _write_introduction(
         self,
@@ -1111,14 +1198,33 @@ class ReportGenerator:
         query: str,
         user_id: str | None,
         session_id: str | None,
+        target_language: str = "en",
     ) -> str:
-        """翻译报告标题为英文 (language=en 时使用).
+        """翻译报告标题为目标语言 (支持双向翻译).
 
         用 FAST LLM 快速翻译, 失败时返回原始 query.
+        支持中文→英文、英文→中文等多语言双向翻译.
+
+        Args:
+            query: 原始标题
+            user_id: 用户 ID
+            session_id: 会话 ID
+            target_language: 目标语言代码 (zh|en|ja|ko|fr)
+
+        Returns:
+            翻译后的标题, 失败时返回原始 query
         """
+        _lang_names = {
+            "zh": "Chinese (Simplified)",
+            "en": "English",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "fr": "French",
+        }
+        target_lang_name = _lang_names.get(target_language, "English")
         try:
             prompt = (
-                f"Translate the following title to English. "
+                f"Translate the following title to {target_lang_name}. "
                 f"Output ONLY the translated title, no explanations, no quotes:\n\n{query}"
             )
             messages = [{"role": "user", "content": prompt}]
@@ -1136,6 +1242,11 @@ class ReportGenerator:
             return translated.strip().strip('"').strip("'") or query
         except Exception:  # noqa: BLE001
             return query
+
+    @staticmethod
+    def _contains_chinese(text: str) -> bool:
+        """检查文本是否包含中文字符 (用于判断是否需要翻译)."""
+        return any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
     async def _achat_with_retry(
         self,

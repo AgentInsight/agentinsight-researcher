@@ -918,6 +918,27 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    /** i18n: 根据当前语言选择返回测试页面 UI 标签 */
+    const _I18N_LABELS = {
+      generating: { zh: '生成中…', en: 'Generating…' },
+      nodeProgress: { zh: '节点进度', en: 'Node Progress' },
+      toolCalls: { zh: '工具调用', en: 'Tool Calls' },
+      params: { zh: '参数', en: 'Parameters' },
+      result: { zh: '结果', en: 'Result' },
+      references: { zh: '参考来源', en: 'References' },
+      noTitle: { zh: '(无标题)', en: '(Untitled)' },
+      unknown: { zh: '(未知)', en: '(unknown)' },
+    };
+    function _getLang() {
+      const el = $('languageInput');
+      return (el && el.value) || 'zh';
+    }
+    function i18n(key) {
+      const lang = _getLang();
+      const entry = _I18N_LABELS[key];
+      return entry ? (entry[lang] || entry.en) : key;
+    }
+
     /** Markdown 渲染: marked 可用则用, 离线降级纯文本.
      *  SVG 块绕过 marked: 提取 <div class="report-image">...</div> 块,
      *  用占位符替换, marked 解析后插回. 避免 SVG 内部空行触发
@@ -1134,7 +1155,7 @@
       }
       list.innerHTML = sessions.map((s) => {
         const isActive = s.session_id === state.sessionId;
-        const title = s.title || s.query || '(无标题)';
+        const title = s.title || s.query || i18n('noTitle');
         const time = formatRelativeTime(s.updated_at || s.created_at);
         const msgCount = s.message_count != null ? s.message_count : 0;
         return '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '">' +
@@ -1674,7 +1695,7 @@
           '<div class="content"></div>' +
           '<div class="tools-wrap"></div>' +
           '<div class="sources-wrap"></div>' +
-          '<div class="status-line"><span class="typing-dot"><span></span><span></span><span></span></span>生成中…</div>' +
+          '<div class="status-line"><span class="typing-dot"><span></span><span></span><span></span></span>' + i18n('generating') + '</div>' +
         '</div>';
       currentMessagesContainer().appendChild(el);
       scrollBottom();
@@ -1772,7 +1793,7 @@
           '</div>'
         ).join('');
         bubble.progressEl.innerHTML =
-          '<details class="panel" open><summary>节点进度<span class="badge">' + progress.length + '</span></summary>' +
+          '<details class="panel" open><summary>' + i18n('nodeProgress') + '<span class="badge">' + progress.length + '</span></summary>' +
           '<div class="panel-body">' + items + '</div></details>';
       } else {
         bubble.progressEl.innerHTML = '';
@@ -1789,15 +1810,15 @@
           const outStr = t.output != null ? formatJson(t.output) : '';
           return '<div class="tool-item">' +
             '<div class="tool-head"><span class="tool-icon">🔧</span>' +
-            '<span class="tool-name">' + escapeHtml(t.name || '(unknown)') + '</span>' +
+            '<span class="tool-name">' + escapeHtml(t.name || i18n('unknown')) + '</span>' +
             (t.status ? '<span class="tool-status">' + escapeHtml(t.status) + '</span>' : '') +
             '</div>' +
-            (argsStr ? '<div class="tool-label">参数</div><pre class="tool-pre">' + escapeHtml(argsStr) + '</pre>' : '') +
-            (outStr ? '<div class="tool-label">结果</div><pre class="tool-pre">' + escapeHtml(outStr) + '</pre>' : '') +
+            (argsStr ? '<div class="tool-label">' + i18n('params') + '</div><pre class="tool-pre">' + escapeHtml(argsStr) + '</pre>' : '') +
+            (outStr ? '<div class="tool-label">' + i18n('result') + '</div><pre class="tool-pre">' + escapeHtml(outStr) + '</pre>' : '') +
             '</div>';
         }).join('');
         bubble.toolsEl.innerHTML =
-          '<details class="panel"><summary>工具调用<span class="badge">' + tools.length + '</span></summary>' +
+          '<details class="panel"><summary>' + i18n('toolCalls') + '<span class="badge">' + tools.length + '</span></summary>' +
           '<div class="panel-body">' + items + '</div></details>';
       } else {
         bubble.toolsEl.innerHTML = '';
@@ -1813,7 +1834,7 @@
           const score = (s.score != null && s.score !== '')
             ? '<span class="score-badge">score ' + formatScore(s.score) + '</span>'
             : '';
-          const title = s.title || s.url || '(无标题)';
+          const title = s.title || s.url || i18n('noTitle');
           const url = s.url || '';
           return '<div class="source-item"><span class="idx">' + (i + 1) + '.</span>' +
             (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' +
@@ -1821,7 +1842,7 @@
             score + '</div>';
         }).join('');
         bubble.sourcesEl.innerHTML =
-          '<details class="panel"><summary>参考来源<span class="badge">' + effectiveSources.length + '</span></summary>' +
+          '<details class="panel"><summary>' + i18n('references') + '<span class="badge">' + effectiveSources.length + '</span></summary>' +
           '<div class="panel-body">' + items + '</div></details>';
       } else {
         bubble.sourcesEl.innerHTML = '';
@@ -1933,7 +1954,7 @@
           const url = s.url || s.link || '';
           const score = (s.score != null) ? s.score : (s.relevance_score != null ? s.relevance_score : null);
           const item = {
-            title: s.title || s.name || url || '(无标题)',
+            title: s.title || s.name || url || i18n('noTitle'),
             url: url,
             score: score,
             snippet: s.snippet || s.content || '',
