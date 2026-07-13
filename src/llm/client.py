@@ -1,6 +1,6 @@
 """LiteLLM 网关封装.
 
-硬约束:
+设计约束:
 - 全部 LLM 调用经 llm/ 的 LLMClient (底层 LiteLLM ≥1.6)
 - 禁止直接 openai/anthropic 等 SDK
 - 模型名以 LiteLLM 路由前缀声明 (如 deepseek/deepseek-chat), 由配置注入, 禁止硬编码
@@ -361,7 +361,7 @@ class LLMClient:
         )
 
     # ========== LLM 响应缓存 (Redis) ==========
-    # 用户硬约束: "出错了不要存缓存" — 仅缓存成功响应, 异常/错误响应绝不缓存.
+    # 用户约束: "出错了不要存缓存" — 仅缓存成功响应, 异常/错误响应绝不缓存.
     # 放宽缓存条件 — temperature ≤ _CACHE_MAX_TEMPERATURE 时缓存
     # (planner/curator/context-summarize 等场景 temperature=0.2/0.3, 结构化 JSON 解析
     # 不受轻微随机性影响; 可通过本常量回退到 0.0 严格模式).
@@ -447,7 +447,7 @@ class LLMClient:
     async def _set_llm_cache(self, key: str, response: LLMResponse) -> None:
         """写入 LLM 响应缓存.
 
-        仅在 LLM 调用成功后由调用方触发 (用户硬约束: 出错了不要存缓存).
+        仅在 LLM 调用成功后由调用方触发 (用户约束: 出错了不要存缓存).
         缓存写入失败仅 warn, 不抛出 (不影响主流程).
         """
         if not self.settings.llm_response_cache_enabled:
@@ -500,7 +500,7 @@ class LLMClient:
         外层一个 trace span, 内部记录每次尝试的 tier 与最终结果.
         temperature ≤ _CACHE_MAX_TEMPERATURE 时接入 Redis 响应缓存,
               命中直接返回 (跳过 LLM 调用);
-              仅缓存成功响应, 异常/错误响应绝不缓存 (用户硬约束).
+              仅缓存成功响应, 异常/错误响应绝不缓存 (用户约束).
         放宽缓存条件 (0.0 → 0.3), 覆盖 planner/curator/context-summarize 等场景.
         reasoning_effort 透传 LiteLLM,
               None 时不添加该参数, 不支持该参数的模型由 LiteLLM 静默忽略.
@@ -608,7 +608,7 @@ class LLMClient:
                             budget_err,
                         )
                     # 写入 LLM 响应缓存 (仅成功响应)
-                    # 用户硬约束: "出错了不要存缓存" — 此处仅在成功路径, 异常路径不会到达
+                    # 用户约束: "出错了不要存缓存" — 此处仅在成功路径, 异常路径不会到达
                     if cache_key is not None:
                         await self._set_llm_cache(cache_key, response)
                     return response

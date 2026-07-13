@@ -5,11 +5,11 @@
 - Token 不存在时降级 (self_host=True → IP-based UserId; self_host=False → 401)
 - Token 调用失败时降级并告警 (self_host=True → IP-based UserId; self_host=False → 401)
 - 调用超时 (5s) 降级
-- 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全硬约束)
+- 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全约束)
 - user_info API 返回 5xx 时降级
 - user_info API 返回空 user_id 时降级
 
-安全硬约束:
+安全约束:
 - JWT 验证与 user_id 获取必须在 API 入口中间件完成
 - user_id 获取 API 调用应设超时 (默认 5s), 超时降级并告警
 - 禁止将原始 JWT token 写入日志或持久化存储
@@ -472,7 +472,7 @@ def test_timeout_config_value_is_5_seconds_by_default() -> None:
 
 
 # ============================================================================
-# 场景 5: 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全硬约束)
+# 场景 5: 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全约束)
 # 安全合规红线
 # ============================================================================
 
@@ -481,7 +481,7 @@ def test_jwt_token_not_in_logs_on_call_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """验证 token 调用失败时原始 JWT token 不写入日志 (PII 安全硬约束).
+    """验证 token 调用失败时原始 JWT token 不写入日志 (PII 安全约束).
 
     禁止将原始 JWT token 写入日志或持久化存储;
     仅保留解析后的 user_id.
@@ -513,7 +513,7 @@ def test_jwt_token_not_in_logs_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """验证超时时原始 JWT token 不写入日志 (PII 安全硬约束).
+    """验证超时时原始 JWT token 不写入日志 (PII 安全约束).
 
     禁止将原始 JWT token 写入日志.
     """
@@ -539,7 +539,7 @@ def test_jwt_token_not_in_logs_on_timeout(
 def test_jwt_token_not_in_response_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """验证响应 body 不含原始 JWT token (PII 安全硬约束).
+    """验证响应 body 不含原始 JWT token (PII 安全约束).
 
     API 响应禁止返回密码/密钥原文.
     """
@@ -566,7 +566,7 @@ def test_jwt_token_not_in_response_body(
 def test_jwt_token_not_in_401_error_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """验证 401 错误响应不含原始 JWT token (PII 安全硬约束).
+    """验证 401 错误响应不含原始 JWT token (PII 安全约束).
 
     API 响应禁止返回密码/密钥原文.
     self_host=False 时 token 失败返回 401, 错误信息不应回显 token.
@@ -592,7 +592,7 @@ def test_jwt_token_not_logged_at_any_log_level(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """验证所有日志级别都不泄漏原始 JWT token (PII 安全硬约束).
+    """验证所有日志级别都不泄漏原始 JWT token (PII 安全约束).
 
     禁止将原始 JWT token 写入日志或持久化存储.
     """
@@ -672,7 +672,7 @@ def test_jwt_verification_in_middleware_not_in_endpoint(
     """验证 JWT 验证在中间件完成, 业务节点直接读取 user_id.
 
     JWT 验证与 user_id 获取应在 API 入口中间件完成,
-    不推荐在业务节点内重复解析.
+    不应在业务节点内重复解析.
     """
     settings = Settings(
         _env_file=None,
@@ -843,7 +843,7 @@ def test_session_id_auto_generated_uuid_when_missing(
 ) -> None:
     """验证无显式 session_id 时自动生成 UUID (会话隔离键不可为空).
 
-    thread_id 从请求上下文注入, 不推荐客户端自造.
+    thread_id 从请求上下文注入, 不应由客户端自造.
     """
     settings = Settings(_env_file=None, self_host=True)
     _patch_httpx_client(monkeypatch, _FakeAsyncClient())

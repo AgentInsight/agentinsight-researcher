@@ -171,7 +171,7 @@ def test_updated_at_trigger() -> None:
 
     - 状态会变更的表 (research_sessions/research_reports/uploaded_files/mcp_configs)
       应含 updated_at + BEFORE UPDATE 触发器 (update_updated_at_column()) 自动维护
-    - 不推荐业务代码手动赋值 updated_at
+    - 不应在业务代码中手动赋值 updated_at
 
     通过 mcp_configs 表验证: INSERT → 记录 updated_at → UPDATE → 验证 updated_at 推进.
     使用 test_* agent_id/user_id/name 隔离, finally 清理.

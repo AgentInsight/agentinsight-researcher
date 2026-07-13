@@ -3,7 +3,7 @@
 - 会话持久化到 Postgres Checkpointer; 内存 Checkpointer 仅 ENV=dev 允许
 - thread_id (session_id) 做会话隔离键, 由请求上下文注入
 - 会话间状态通过 Postgres Checkpointer 隔离, 禁止共享可变内存
-- 回归测试为合并 main 前门禁, 不推荐跳过
+- 回归测试为合并 main 前门禁, 不应跳过
 - 超时设置: 回归测试 300s
 
 执行方式 (宿主机, 容器栈已 healthy):

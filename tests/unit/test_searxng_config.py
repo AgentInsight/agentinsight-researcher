@@ -6,11 +6,11 @@
 3. google / duckduckgo 不在 keep_only 列表 (从根源排除)
 4. bing 系列使用 www.bing.com (cn.bing.com 会 301 重定向到 www.bing.com, 导致空文档错误)
 5. secret_key 已配置 (容器间通信鉴权)
-6. server.port == 8099 (项目硬约束, 非 8080)
+6. server.port == 8099 (项目约束, 非 8080)
 7. limiter: false (无 redis, 不开启限流)
 
 单元测试在构建期执行, 不依赖外部服务.
-项目硬约束: SearXNG 服务端口 8099 (非 8080), SEARXNG_PORT 环境变量覆盖 settings.yml.
+项目约束: SearXNG 服务端口 8099 (非 8080), SEARXNG_PORT 环境变量覆盖 settings.yml.
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ def test_google_not_in_keep_only() -> None:
                     flat_keep_only.add(sub_item.strip().lower())
     google_engines = {e for e in _FORBIDDEN_ENGINES if "google" in e}
     found_google = google_engines & flat_keep_only
-    assert not found_google, f"keep_only 不应含 google 系列引擎 (用户硬约束), 发现: {found_google}"
+    assert not found_google, f"keep_only 不应含 google 系列引擎 (用户约束), 发现: {found_google}"
 
 
 def test_duckduckgo_not_in_keep_only() -> None:
@@ -197,7 +197,7 @@ def test_bing_engines_enabled() -> None:
 
 
 def test_server_port_is_8099() -> None:
-    """server.port == 8099 (项目硬约束, 非 8080).
+    """server.port == 8099 (项目约束, 非 8080).
 
     项目记忆: SearXNG 服务端口 8099 (非 8080); SEARXNG_PORT 环境变量
     覆盖 settings.yml 的 server.port.
@@ -205,7 +205,7 @@ def test_server_port_is_8099() -> None:
     settings = _load_searxng_settings()
     server = settings.get("server", {})
     assert server.get("port") == 8099, (
-        f"server.port 应为 8099 (项目硬约束), 实际: {server.get('port')}"
+        f"server.port 应为 8099 (项目约束), 实际: {server.get('port')}"
     )
 
 

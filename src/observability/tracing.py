@@ -1,6 +1,6 @@
 """AgentInsight SDK 可观测性封装.
 
-可观测性硬约束:
+可观测性约束:
 - 统一使用 agentinsight-sdk (pip 名 agentinsight-sdk, 导入名 agentinsight, ≥0.1.5)
 - 追踪调用方式唯一: 异步上下文管理器 async with trace_xxx(...) as span
 - 禁用观察者模式 (无 Subject/Observer, 无 attach/notify)

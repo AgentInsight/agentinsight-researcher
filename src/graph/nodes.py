@@ -1,6 +1,6 @@
 """LangGraph 节点定义 (完整实现).
 
-节点硬约束:
+节点约束:
 - 节点为纯函数 async def node(state: State) -> dict, 单一职责无副作用
 - 节点禁止原地修改入参 State, 必须返回 delta dict 由 reducer 合并
 - 节点内禁止直连厂商 LLM SDK, 统一走 llm/ 网关 (LiteLLM)

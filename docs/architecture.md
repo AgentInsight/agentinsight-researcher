@@ -76,7 +76,7 @@ src/
 │   └── researcher/         # reviewer / reviser / fact_checker / chat_agent / human / supervisor
 ├── skills/         # 技能定义
 │   └── researcher/
-│       ├── agent_creator.py     # 动态角色生成 (参考实现: choose_agent)
+│       ├── agent_creator.py     # 动态角色生成 (LLM few-shot 驱动)
 │       ├── research_conductor.py # 规划 + 并行检索
 │       ├── deep_research.py     # 递归深度研究
 │       ├── source_curator.py    # 来源策展
@@ -311,7 +311,7 @@ flowchart LR
 
 - **OpenTelemetry Context API 自动传播** — 父子关系在同一 asyncio task 内自动建立，不手动传递 span 对象
 - **`trace_agent` 包裹 `graph.ainvoke()` 作为根 span** — LangGraph 节点内创建的子 span 自动关联到根 span
-- **认证上下文不用 span 传播** — token/user_id 通过 `contextvars` + State 字段在节点入口显式恢复（安全硬约束）
+- **认证上下文不用 span 传播** — token/user_id 通过 `contextvars` + State 字段在节点入口显式恢复（安全约束）
 - **Null Object 降级** — SDK 初始化失败或运行时异常时，所有 `trace_xxx` yield `_NoopSpan`，业务代码无需判断 SDK 是否可用，`span.update()` 永远安全
 
 ### 6.3 采样策略

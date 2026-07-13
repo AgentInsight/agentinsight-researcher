@@ -83,7 +83,7 @@ RUN groupadd -r agent && useradd -r -g agent -d /app -s /sbin/nologin agent \
 # 复制业务代码
 COPY --chown=agent:agent . .
 
-# 生产联网模式: FastEmbed 模型在运行时自动从 HuggingFace 下载 (AGENTS.md 允许生产联网模式联网下载)
+# 生产联网模式: FastEmbed 模型在运行时自动从 HuggingFace 下载
 # 如需使用本地预下载模型, 在 docker-compose.yml 中挂载 bind mount:
 #   - ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
 

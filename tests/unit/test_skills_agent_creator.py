@@ -3,7 +3,7 @@
 验证 AUTO_AGENT_INSTRUCTIONS 常量 (10 行业 few-shot + 三要素要求) 与
 create_agent() 方法 (LLM 动态生成 / 兜底降级 / agent_role 优先级).
 
-行业适配 4 层机制之 Prompt 层 (AGENTS.md 第 7 章):
+行业适配 4 层机制之 Prompt 层:
 - Prompt 层: AUTO_AGENT_INSTRUCTIONS few-shot → LLM 自主生成 persona
 - Config 层: settings.agent_role / agent_role 参数注入 (优先级高于 LLM)
 

@@ -6,7 +6,7 @@
 - 子主题生成用 STRATEGIC tier (deepseek-v4-pro, 规划任务)
 - FAST tier 不用于产生报告内容 (质量不足, 仅用于轻量任务如意图分类)
 
-对标 GPTR: 报告写作全程用 smart_llm, 仅规划/推理任务用 strategic_llm.
+LLM 分层: 报告写作用 smart_llm, 规划/推理任务用 strategic_llm.
 单元测试不依赖外部服务 (LLM 全部 mock).
 """
 
@@ -53,7 +53,7 @@ async def test_basic_report_uses_smart_tier(
 ) -> None:
     """基础报告生成 → 用 SMART tier (deepseek-v4-flash).
 
-    对标 GPTR: 报告写作全程用 smart_llm, 不用 fast_llm (质量不足).
+    报告写作用 smart_llm, 不用 fast_llm (质量不足).
     """
     with patch.object(generator, "_achat_with_retry") as mock_retry:
         mock_retry.return_value = "smart tier report"
@@ -80,7 +80,7 @@ async def test_long_report_uses_smart_tier(
 ) -> None:
     """长报告 (word_limit > 2000) → 用 SMART tier.
 
-    对标 GPTR: 报告写作用 smart_llm (gpt-4.1 / deepseek-v4-flash).
+    报告写作用 smart_llm (deepseek-v4-flash).
     """
     with patch.object(generator, "_achat_with_retry") as mock_retry:
         mock_retry.return_value = "smart tier report"
@@ -205,7 +205,7 @@ async def test_generate_subtopics_uses_strategic_tier(
 ) -> None:
     """子主题生成 → 用 STRATEGIC tier (deepseek-v4-pro, 规划任务).
 
-    对标 GPTR: 子查询生成用 strategic_llm (o4-mini / deepseek-v4-pro).
+    子查询生成用 strategic_llm (deepseek-v4-pro).
     """
     with patch.object(generator, "_achat_with_retry") as mock_retry:
         mock_retry.return_value = '["topic1", "topic2"]'

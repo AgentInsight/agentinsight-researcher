@@ -26,7 +26,7 @@
 
 ## 安全合规红线
 
-本项目遵循严格的安全合规要求 (详见 AGENTS.md 第 11 章):
+本项目遵循严格的安全合规要求:
 
 ### 密钥管理
 - 密钥仅通过环境变量注入, 禁止入仓/硬编码/日志
@@ -89,7 +89,7 @@ Only the latest release receives security updates.
 
 ## Security Compliance
 
-This project follows strict security compliance requirements (see AGENTS.md Chapter 11):
+This project follows strict security compliance requirements:
 
 ### Key Management
 - Keys are injected via environment variables only; never committed/hardcoded/logged

@@ -9,7 +9,7 @@
 安全合规红线:
 - 所有外部输入经 Pydantic 校验
 - 工具调用权限隔离 (read/write/execute/network 显式授权)
-- 禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束)
+- 禁止 eval/exec 求值用户输入 (注入风险, 属安全约束)
 - LLM 输出经结构化校验后再入工具
 - 敏感工具 (写文件/执行命令) 应显式声明权限, 由中间件校验
 
@@ -125,7 +125,7 @@ class TestPydanticValidationExternalInput:
 class TestEvalExecBlocked:
     """验证 eval/exec 求值用户输入被阻断.
 
-    禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束).
+    禁止 eval/exec 求值用户输入 (注入风险, 属安全约束).
     """
 
     def test_eval_payload_not_executed(self) -> None:
@@ -181,8 +181,8 @@ class TestEvalExecBlocked:
 
         source_code = _get_module_source(routes_module)
         # 不应包含 eval( 或 exec( 调用 (字符串形式检查)
-        assert "eval(" not in source_code, "routes.py 源码包含 eval() 调用 (违反安全硬约束)"
-        assert "exec(" not in source_code, "routes.py 源码包含 exec() 调用 (违反安全硬约束)"
+        assert "eval(" not in source_code, "routes.py 源码包含 eval() 调用 (违反安全约束)"
+        assert "exec(" not in source_code, "routes.py 源码包含 exec() 调用 (违反安全约束)"
 
     def test_no_eval_in_middleware_source_code(self) -> None:
         """验证 middleware.py 源码中不存在 eval/exec 调用."""

@@ -251,7 +251,7 @@ class ReportGenerator:
 
             messages = [{"role": "user", "content": prompt}]
             # 报告写作统一用 SMART tier (deepseek-v4-flash), 启用推理模式.
-            # 对标 GPTR: 报告写作全程用 smart_llm (gpt-4.1 / deepseek-v4-flash).
+            # 报告写作统一用 SMART tier 保证内容质量.
             # FAST tier (glm-4-flash) 不用于产生报告内容 (质量不足).
             # LLM 调用增加 try/except + 1 次重试, 仍失败用占位文本
             report_md = await self._achat_with_retry(
@@ -950,7 +950,7 @@ class ReportGenerator:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.25
-        # 对标 GPTR: 报告引言用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
+        # 报告引言用 SMART tier, 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -1107,7 +1107,7 @@ class ReportGenerator:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.35
-        # 对标 GPTR: 报告章节正文用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
+        # 报告章节正文用 SMART tier, 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,
@@ -1171,7 +1171,7 @@ class ReportGenerator:
             prompt += f"\n\n{lang_instruction}"
         messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
         # temperature 0.4 → 0.25
-        # 对标 GPTR: 报告结论用 smart_llm (gpt-4.1 / deepseek-v4-flash), 启用推理模式
+        # 报告结论用 SMART tier, 启用推理模式
         content = await self._achat_with_retry(
             messages,
             tier=LLMTier.SMART,

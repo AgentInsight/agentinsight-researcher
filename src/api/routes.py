@@ -1,6 +1,6 @@
 """API 路由: OpenAI 兼容端点 + 文件上传.
 
-OpenAI 兼容端点与 API 测试硬约束:
+OpenAI 兼容端点与 API 测试设计约束:
 - 统一调用 OpenAI 兼容端点 POST /v1/chat/completions, 请求体带 stream: true
 - 测试页面只能走对外 OpenAI 兼容接口, 禁止调用后端私有端点
 - API 测试必须覆盖流式 SSE + 非流式 + 错误码

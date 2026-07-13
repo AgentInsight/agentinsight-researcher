@@ -7,7 +7,7 @@
 4. 源码无 bge-large-zh-v1.5 残留 (排除 requirements.in 等历史文件)
 
 单元测试在构建期执行, 不依赖外部服务.
-硬约束:
+约束:
 - 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
 - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """

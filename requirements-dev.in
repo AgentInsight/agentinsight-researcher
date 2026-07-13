@@ -7,17 +7,17 @@
 # 引用运行时依赖 (pip-compile 会合并并解析传递依赖)
 -r requirements.in
 
-# === 评测 (AGENTS.md 第 10 章, CI 门禁) ===
+# === 评测 (CI 门禁) ===
 ragas>=0.2
 deepeval>=2.0
 
-# === 测试 (AGENTS.md 第 13 章) ===
+# === 测试 ===
 # 注: httpx 已在 requirements.in (搜索引擎), 此处不重复声明
 pytest>=8.3
 pytest-asyncio>=0.24
 pytest-cov>=6.0
 
-# === 代码质量 (AGENTS.md 第 2 章) ===
+# === 代码质量 ===
 ruff>=0.8
 mypy>=1.13
 

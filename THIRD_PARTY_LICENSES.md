@@ -21,13 +21,11 @@ agentinsight-researcher.
 | langgraph-checkpoint-postgres | 3.1.0 | MIT |
 | langchain-core | 1.4.8 | MIT |
 | langchain-mcp-adapters | 0.3.0 | MIT |
-| langchain-protocol | 0.0.18 | MIT |
 | litellm | 1.91.0 | MIT |
 | openai | 2.44.0 | Apache-2.0 |
 | mcp | 1.28.1 | MIT |
 | fastapi | 0.139.0 | MIT |
 | uvicorn[standard] | 0.50.2 | BSD-3-Clause |
-| sse-starlette | 3.4.5 | BSD-3-Clause |
 | starlette | 1.3.1 | BSD-3-Clause |
 | python-multipart | 0.0.32 | Apache-2.0 |
 | aiofiles | 25.1.0 | Apache-2.0 OR MIT |
@@ -61,13 +59,11 @@ agentinsight-researcher.
 | jinja2 | 3.1.6 | BSD-3-Clause |
 | weasyprint | 69.0 | BSD-3-Clause |
 | mistune | 3.3.2 | BSD-3-Clause |
-| tiktoken | 0.13.0 | MIT |
+| cairosvg | 2.7.1 | LGPL-3.0-or-later |
 | json-repair | 0.61.2 | MIT |
-| tenacity | 9.1.4 | Apache-2.0 OR MIT |
 | orjson | 3.11.9 | Apache-2.0 OR MIT |
 | pyyaml | 6.0.3 | MIT |
 | python-dotenv | 1.2.2 | BSD-3-Clause |
-| cachetools | 7.1.4 | MIT |
 | numpy | 2.5.1 | BSD-3-Clause |
 
 ## Development Dependencies

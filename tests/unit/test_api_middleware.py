@@ -6,7 +6,7 @@
 - 请求上下文 getter: get_request_user_id/get_request_session_id/get_request_agent_id
 
 单元测试不依赖外部服务.
-JWT 解析 + 安全响应头硬约束.
+JWT 解析 + 安全响应头约束.
 """
 
 from __future__ import annotations

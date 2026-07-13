@@ -1,6 +1,6 @@
 """LangGraph 图构建器.
 
-硬约束:
+设计约束:
 - 生产 StateGraph 必须挂 PostgresSaver (PostgreSQL ≥16); 内存 Checkpoint 仅 ENV=dev
 - 路由必须显式 add_conditional_edges, 禁止隐式跳转
 - 每个图必须有终止节点; max_iterations 为硬上限

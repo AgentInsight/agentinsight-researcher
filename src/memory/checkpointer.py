@@ -1,6 +1,6 @@
 """Postgres Checkpointer 配置.
 
-硬约束:
+设计约束:
 - StateGraph 必须挂 PostgresSaver (PostgreSQL ≥16)
 - thread_id 从请求上下文注入做会话隔离键, 禁止客户端自造
 

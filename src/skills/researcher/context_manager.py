@@ -8,7 +8,7 @@ Token 优化核心.
 3. 跨子主题去重: WrittenContentCompressor 已写章节相似度过滤 (FastEmbed, 本地)
 4. Word Limit: MAX_CONTEXT_WORDS (25000) 截断
 
-Embeddings 分层硬约束:
+Embeddings 分层约束:
 - 远程 TEI Embeddings (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
 - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 不依赖远程 TEI
 """
@@ -746,7 +746,7 @@ class WrittenContentCompressor:
         退化为串行. 现将 embed_texts 移到锁外, 锁仅保护
         _written_embeddings / _written_chunks 的并发修改.
 
-        Embeddings 与追踪硬约束:
+        Embeddings 与追踪约束:
         - 上下文压缩统一用 FastEmbed (bge-small-zh-v1.5, 512维), 禁用远程 TEI
         - 高频 embedding 调用必带 trace_embedding span (含 model/usage_details)
 

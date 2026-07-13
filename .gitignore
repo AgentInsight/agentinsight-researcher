@@ -28,7 +28,7 @@ build/
 dist/
 *.egg
 
-# 环境变量 (含密钥, 禁止入仓, AGENTS.md 第 11 章)
+# 环境变量 (含密钥, 禁止入仓)
 .env
 .env.agent
 .env.prod
@@ -66,7 +66,7 @@ docker-build.qa.bat
 scripts/build-offline.ps1
 scripts/offline-deploy.ps1
 
-# 生产离线模式构建文件 (AGENTS.md 第 12 章三套构建模式, 不入仓)
+# 生产离线模式构建文件 (不入仓)
 docker-compose-offline.yaml
 Dockerfile.offline
 docker-build.offline.sh

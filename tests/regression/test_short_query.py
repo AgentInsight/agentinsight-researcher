@@ -1,7 +1,7 @@
 """回归测试: 短查询保护.
 
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
-- 回归测试为合并 main 前门禁, 不推荐跳过
+- 回归测试为合并 main 前门禁, 不应跳过
 
 短查询保护:
 - 短查询 (如"你好") 不走任何 graph, 直接返回 settings.short_query_reply

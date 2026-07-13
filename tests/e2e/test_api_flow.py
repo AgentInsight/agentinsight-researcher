@@ -490,7 +490,7 @@ async def test_error_handling_invalid_json_and_404() -> None:
 
     所有外部输入经 Pydantic 校验.
     API 测试应覆盖错误码.
-    错误处理应在页面显式提示, 不推荐静默失败.
+    错误处理应在页面显式提示, 不应静默失败.
     """
     async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
         # 子场景 1: 无效 JSON body → 422 (Pydantic 校验失败)

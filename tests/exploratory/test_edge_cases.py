@@ -524,7 +524,7 @@ async def test_rapid_sequential_requests() -> None:
 
     Redis 缓存不可用时应降级无缓存, 不阻断检索.
     LLM 调用经 llm/ 网关 (LiteLLM), 内置重试与降级链.
-    用户硬约束: 出错了不要存缓存 — 仅缓存成功响应.
+    用户约束: 出错了不要存缓存 — 仅缓存成功响应.
 
     本测试 mock Redis 客户端模拟缓存命中/未命中, 验证:
     1. 第一次请求: 缓存未命中 → 调用 litellm → 写入缓存

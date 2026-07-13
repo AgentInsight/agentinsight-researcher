@@ -239,7 +239,7 @@ GET /health
 {
   "status": "ok",
   "service": "agentinsight-researcher",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 
@@ -272,7 +272,7 @@ GET /.well-known/agent-discovery.json
 ```json
 {
   "name": "agentinsight-researcher",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "中文优先的研究分析智能体",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI 兼容研究端点 (流式 SSE + 非流式)"},
@@ -976,7 +976,7 @@ curl -X POST ${BASE_URL}/v1/mcp/1/test
 
 #### 10.7 列出系统 MCP 配置 `GET /v1/mcp/system`
 
-**用途**:列出所有系统公用 MCP 配置(用户可查看但不可编辑/删除),来源为 [MCP 官方参考实现](https://github.com/modelcontextprotocol/servers)。
+**用途**:列出所有系统公用 MCP 配置(用户可查看但不可编辑/删除),来源为 [MCP 官方 servers 仓库](https://github.com/modelcontextprotocol/servers)。
 
 **Response** `200 OK`(数组,按 `name` 排序,`is_system=true`)
 
@@ -1318,7 +1318,7 @@ No body, no auth.
 {
   "status": "ok",
   "service": "agentinsight-researcher",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 
@@ -1347,7 +1347,7 @@ No auth.
 ```json
 {
   "name": "agentinsight-researcher",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Chinese-first research analysis agent",
   "services": [
     {"name": "research", "path": "/v1/chat/completions", "method": "POST", "description": "OpenAI-compatible research endpoint (streaming SSE + non-streaming)"},

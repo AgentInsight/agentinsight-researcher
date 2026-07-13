@@ -1,6 +1,6 @@
 """PostgreSQL 数据库初始化器.
 
-硬约束:
+设计约束:
 - 单一数据库 agents, 业务表含 agent_id+user_id 双列复合索引
 - LangGraph Checkpointer 表由官方 SDK 管理
 

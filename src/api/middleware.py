@@ -1,6 +1,6 @@
 """API 中间件 (纯 ASGI middleware, 不使用 BaseHTTPMiddleware).
 
-安全合规硬约束:
+安全约束:
 - JWT 验证与 user_id 获取必须在 API 入口中间件完成
 - self_host=True (自托管): token 不存在或调用失败时降级 IP-based UserId
 - self_host=False (云托管): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
@@ -124,7 +124,7 @@ class RequestIDMiddleware:
 class JWTAuthMiddleware:
     """JWT 身份解析中间件 (纯 ASGI middleware).
 
-    安全合规硬约束:
+    安全约束:
     - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管模式)
     - self_host=False (云托管模式): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
     - token 存在时: 同步调用 GET /api/user 获取 user_id, 携带原 Authorization 头

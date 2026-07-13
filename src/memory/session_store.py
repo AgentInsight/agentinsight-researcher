@@ -1,6 +1,6 @@
 """会话持久化存储 (以 UserId 为单位的会话管理).
 
-硬约束:
+设计约束:
 - 业务表含 agent_id + user_id 双列复合索引
 - 复用 db_initializer.get_pool() 的 asyncpg 连接池单例 (避免每次请求新建短连接)
 - 所有查询显式 WHERE agent_id = ... AND user_id = ... (禁止无过滤全表扫描)

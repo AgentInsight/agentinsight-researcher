@@ -44,7 +44,7 @@
     <Content Include="README.md" />
     <Content Include="SECURITY.md" />
   </ItemGroup>
-  <!-- 示例代码 (AGENTS.md 第 2 章示例, examples/ 全量 Python 文件) -->
+  <!-- 示例代码 (examples/ 全量 Python 文件) -->
   <ItemGroup>
     <Content Include="examples\**\*.py" />
     <Content Include="examples\README.md" />
@@ -56,9 +56,11 @@
     <Content Include="docker-compose.yml" />
     <Content Include="docker-build.sh" />
   </ItemGroup>
-  <!-- 源代码: src/ 全量 Python 文件 (AGENTS.md 第 3 章目录结构) -->
+  <!-- 源代码: src/ 全量 Python 文件 + 配置文件 (Jinja2 模板 + YAML 配置) -->
   <ItemGroup>
     <Content Include="src\**\*.py" />
+    <Content Include="src\config\researcher\**\*.j2" />
+    <Content Include="src\config\researcher\**\*.yaml" />
   </ItemGroup>
   <!-- 脚本: 在线构建/数据库初始化/SearXNG 与 uv 离线包预备 (QA/离线脚本由 .gitignore 排除) -->
   <ItemGroup>
@@ -75,23 +77,25 @@
     <Content Include="scripts\prepare-uv-packages.ps1" />
     <Content Include="scripts\prepare-uv-packages.sh" />
   </ItemGroup>
-  <!-- SearXNG 配置 (config/searxng/, AGENTS.md 第 12 章 SearXNG 容器) -->
+  <!-- SearXNG 配置 (config/searxng/) -->
   <ItemGroup>
     <Content Include="config\searxng\settings.yml" />
     <Content Include="config\searxng\limiter.toml" />
     <Content Include="config\searxng\engines\*.py" />
   </ItemGroup>
-  <!-- 前端测试页面 (AGENTS.md 第 14 章) -->
+  <!-- 前端测试页面 (static/index.html) -->
   <ItemGroup>
     <Content Include="static\index.html" />
   </ItemGroup>
-  <!-- 测试: 全量 Python 文件 (AGENTS.md 第 13 章测试分层) -->
+  <!-- 测试: 全量 Python 文件 (分层: unit/functional/regression/api/e2e/exploratory/performance) -->
   <ItemGroup>
     <Content Include="tests\**\*.py" />
   </ItemGroup>
-  <!-- 评测: 全量 Python 文件 (AGENTS.md 第 10 章评测门禁) -->
+  <!-- 评测: 全量 Python 文件 + 数据集 (RAGAS + DeepEval 门禁) -->
   <ItemGroup>
     <Content Include="evals\**\*.py" />
+    <Content Include="evals\**\*.json" />
+    <Content Include="evals\**\*.csv" />
   </ItemGroup>
   <!-- 文档: 全量 Markdown 文件 (本地存档, .gitignore 排除不入仓) -->
   <ItemGroup>

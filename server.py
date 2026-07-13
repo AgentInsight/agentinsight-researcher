@@ -179,7 +179,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="agentinsight-researcher",
         description="中文优先的研究分析智能体",
-        version="1.0.0",
+        version="1.1.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.env == "dev" else None,
         redoc_url=None,
@@ -210,7 +210,7 @@ def create_app() -> FastAPI:
     async def health() -> JSONResponse:
         return JSONResponse(
             status_code=200,
-            content={"status": "ok", "service": "agentinsight-researcher", "version": "1.0.0"},
+            content={"status": "ok", "service": "agentinsight-researcher", "version": "1.1.0"},
         )
 
     # OpenAI 兼容端点

@@ -124,17 +124,17 @@ def test_agent_discovery() -> None:
 
 
 # ============================================================================
-# JWT Token 身份解析安全测试 (安全硬约束)
+# JWT Token 身份解析安全测试 (安全约束)
 # - Bearer JWT Token 有效时调用 GET /api/user 获取 user_id
 # - Token 不存在时降级 (self_host=True → IP-based UserId)
 # - Token 调用失败时降级并告警
-# - 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全硬约束)
+# - 禁止将原始 JWT token 写入日志或持久化存储 (PII 安全约束)
 # ============================================================================
 
 
 @pytest.mark.api
 def test_jwt_token_not_in_response_headers() -> None:
-    """验证 JWT Token 不出现在任何响应头中 (PII 安全硬约束).
+    """验证 JWT Token 不出现在任何响应头中 (PII 安全约束).
 
     禁止将原始 JWT token 写入日志或持久化存储;
     API 响应禁止返回密码/密钥原文.
@@ -159,7 +159,7 @@ def test_jwt_token_not_in_response_headers() -> None:
 
 @pytest.mark.api
 def test_jwt_token_not_in_response_body_with_org_id() -> None:
-    """验证携带 org_id 时 JWT Token 不出现在响应 body 中 (PII 安全硬约束).
+    """验证携带 org_id 时 JWT Token 不出现在响应 body 中 (PII 安全约束).
 
     SELF_HOST=False 时 org_id 触发点数校验, 需 token.
     禁止将原始 JWT token 写入持久化存储.

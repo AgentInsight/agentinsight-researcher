@@ -59,9 +59,9 @@ docker compose -p agentinsight ps  # 等待全部 (healthy)
 
 ## 开发规范
 
-### AGENTS.md 是唯一权威
+### 项目开发规范
 
-本项目所有开发规范集中定义在 [AGENTS.md](AGENTS.md)(14 章),贡献前**必须完整阅读**。以下为核心要点:
+本项目所有开发规范集中定义在 [AGENTS.md](AGENTS.md),贡献前**必须完整阅读**。以下为核心要点:
 
 #### 三级行为边界
 
@@ -69,7 +69,7 @@ docker compose -p agentinsight ps  # 等待全部 (healthy)
 |------|---------|
 | ✅ **Always** | 读/写 docs·tests·evals;跑 ruff+mypy+pytest;修 P2 及以下 bug;续接被截断输出 |
 | ⚠️ **Ask first** | LangGraph 图结构变更;RAG 核心算法切换;密钥轮换;外部系统对接;连续 3 次修复失败 |
-| ❌ **Never** | 安全合规红线(第 11 章);不推荐清单(第 4 章);`eval`/`exec` 求值用户输入;硬编码密钥 |
+| ❌ **Never** | 安全合规红线;不推荐清单;`eval`/`exec` 求值用户输入;硬编码密钥 |
 
 #### 技术栈约束(优先选择)
 
@@ -79,7 +79,7 @@ docker compose -p agentinsight ps  # 等待全部 (healthy)
 - **关系库**:PostgreSQL ≥16(不推荐 MySQL)
 - **可观测性**:AgentInsight SDK(不推荐 LangSmith/Langfuse/OTel 原生 API)
 
-> 完整「不推荐清单」见 [AGENTS.md 第 4 章](AGENTS.md#4-三级行为边界与不推荐清单)。如需选用不推荐方案,应说明理由并经用户确认。
+> 完整「不推荐清单」见 [AGENTS.md](AGENTS.md)。如需选用不推荐方案,应说明理由并经用户确认。
 
 ### 代码风格
 
@@ -157,7 +157,7 @@ main              # 生产分支,保护分支,只接受 PR
 
 ## 测试要求
 
-### 测试分层(AGENTS.md 第 13 章)
+### 测试分层
 
 | 类型 | 目录 | 执行环境 | 触发时机 |
 |------|------|---------|---------|
@@ -191,7 +191,7 @@ pytest tests/ -q
 pytest tests/ --cov=src --cov-report=html
 ```
 
-### 评测门禁(AGENTS.md 第 10 章)
+### 评测门禁
 
 CI 强制评测门禁,不达标不推荐合并 main:
 
@@ -260,7 +260,7 @@ PR 创建后,请确认:
 - [ ] 新功能有对应单元测试
 - [ ] 文档已更新(如涉及)
 - [ ] 提交信息符合 Conventional Commits
-- [ ] 无硬编码密钥/密码(AGENTS.md 第 11 章)
+- [ ] 无硬编码密钥/密码
 - [ ] 无 `eval`/`exec` 求值用户输入
 - [ ] 无 `.env` / `.env.qa` 等含密钥文件入仓
 
@@ -275,9 +275,9 @@ PR 创建后自动触发 CI:
 
 ---
 
-## 安全合规红线(AGENTS.md 第 11 章)
+## 安全合规红线
 
-以下为**真正的硬约束**,涉及法律与合规底线,任何偏差需经安全评审并经用户显式确认:
+以下为**真正的安全约束**,涉及法律与合规底线,任何偏差需经安全评审并经用户显式确认:
 
 - 🔑 **密钥**:仅环境变量注入,禁止入仓/硬编码/日志;API Key SHA256+BCrypt 双哈希;发现硬编码密钥即 P0 暂停
 - 🔒 **PII**:用户会话内容加密存储+日志脱敏;API 响应禁止返回密码/密钥原文;最小化收集
@@ -286,7 +286,7 @@ PR 创建后自动触发 CI:
 
 ---
 
-## 目录边界(AGENTS.md 第 3 章)
+## 目录边界
 
 ```
 src/
@@ -404,9 +404,9 @@ docker compose -p agentinsight ps  # Wait for all (healthy)
 
 ## Development Conventions
 
-### AGENTS.md is the Sole Authority
+### Project Development Conventions
 
-All development conventions for this project are defined centrally in [AGENTS.md](AGENTS.md) (14 chapters), which **must be read in full** before contributing. Key points:
+All development conventions for this project are defined centrally in [AGENTS.md](AGENTS.md), which **must be read in full** before contributing. Key points:
 
 #### Three-Tier Behavior Boundary
 
@@ -414,7 +414,7 @@ All development conventions for this project are defined centrally in [AGENTS.md
 |-------|-------------------|
 | ✅ **Always** | Read/write docs·tests·evals; run ruff+mypy+pytest; fix P2 and below bugs; continue truncated output |
 | ⚠️ **Ask first** | LangGraph structure changes; RAG core algorithm switch; key rotation; external system integration; 3 consecutive fix failures |
-| ❌ **Never** | Security compliance red lines (Chapter 11); not recommended list (Chapter 4); `eval`/`exec` for user input; hardcoded keys |
+| ❌ **Never** | Security compliance red lines; not recommended list; `eval`/`exec` for user input; hardcoded keys |
 
 #### Tech Stack Constraints (Preferred Choices)
 
@@ -424,7 +424,7 @@ All development conventions for this project are defined centrally in [AGENTS.md
 - **Relational Database**: PostgreSQL ≥16 (MySQL not recommended)
 - **Observability**: AgentInsight SDK (LangSmith/Langfuse/OTel native API not recommended)
 
-> For the complete "not recommended list", see [AGENTS.md Chapter 4](AGENTS.md#4-三级行为边界与不推荐清单). To use a not-recommended option, you should explain the reason and get user confirmation.
+> For the complete "not recommended list", see [AGENTS.md](AGENTS.md). To use a not-recommended option, you should explain the reason and get user confirmation.
 
 ### Code Style
 
@@ -502,7 +502,7 @@ main              # Production branch, protected, accepts PRs only
 
 ## Testing Requirements
 
-### Test Tiers (AGENTS.md Chapter 13)
+### Test Tiers
 
 | Type | Directory | Execution Environment | Trigger |
 |------|-----------|----------------------|---------|
@@ -536,7 +536,7 @@ pytest tests/ -q
 pytest tests/ --cov=src --cov-report=html
 ```
 
-### Evaluation Gates (AGENTS.md Chapter 10)
+### Evaluation Gates
 
 CI mandatory evaluation gates, failing gates cannot merge to main:
 
@@ -605,7 +605,7 @@ After creating the PR, please confirm:
 - [ ] New features have corresponding unit tests
 - [ ] Documentation updated (if applicable)
 - [ ] Commit messages follow Conventional Commits
-- [ ] No hardcoded keys/passwords (AGENTS.md Chapter 11)
+- [ ] No hardcoded keys/passwords
 - [ ] No `eval`/`exec` for user input evaluation
 - [ ] No `.env` / `.env.qa` or other files containing keys committed to repo
 
@@ -620,9 +620,9 @@ CI is automatically triggered after PR creation:
 
 ---
 
-## Security Compliance Red Lines (AGENTS.md Chapter 11)
+## Security Compliance Red Lines
 
-The following are **true hard constraints** involving legal and compliance bottom lines. Any deviation requires security review and explicit user confirmation:
+The following are **true security constraints** involving legal and compliance bottom lines. Any deviation requires security review and explicit user confirmation:
 
 - 🔑 **Keys**: Environment variable injection only, committing to repo/hardcoding/logging is prohibited; API Key SHA256+BCrypt double hashing; finding hardcoded keys triggers P0 pause
 - 🔒 **PII**: User session content encrypted storage + log desensitization; API responses must not return password/key plaintext; minimized collection
@@ -631,7 +631,7 @@ The following are **true hard constraints** involving legal and compliance botto
 
 ---
 
-## Directory Boundaries (AGENTS.md Chapter 3)
+## Directory Boundaries
 
 ```
 src/

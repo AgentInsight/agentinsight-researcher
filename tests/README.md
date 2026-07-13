@@ -345,7 +345,7 @@ MCP 工具调用 (`src/skills/researcher/mcp_coordinator.py`) 测试分布在两
 ## 6. 测试约定
 
 - **数据隔离**: Qdrant `namespace=test_*` + `user_id=test_*` + `session_id=test_*`, 测试结束清理
-  (PII 安全硬约束).
+  (PII 安全约束).
 - **目标地址**: 测试目标地址从环境变量 `AGENT_URL` 注入 (默认 `http://127.0.0.1:8066`),
   禁止硬编码.
 - **独立性**: 测试用例独立可重复运行, 不依赖执行顺序; 用例间通过 fixture 清理状态.

@@ -9,7 +9,7 @@ body:
         感谢报告 Bug! 请尽量填写完整信息以便我们快速定位。
 
         ⚠️ **安全提醒**: 禁止在 Issue 中包含 API Key、Token、密码、JWT、用户 PII 等敏感信息
-        (详见 `AGENTS.md` 第 11 章安全合规红线)。如发现安全漏洞, 请通过
+        (详见安全合规红线)。如发现安全漏洞, 请通过
         [Security Policy](https://github.com/AgentInsight/agentinsight-researcher/security/policy)
         私下报告, 勿公开 Issue。
 

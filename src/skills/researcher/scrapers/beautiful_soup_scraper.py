@@ -23,16 +23,6 @@ class BeautifulSoupScraper(BaseScraper):
         try:
             from bs4 import BeautifulSoup
 
-            # DEPRECATED: _sync_scrape 未被调用 (下方仅调用 _async_scrape), 保留仅供历史参考.
-            # 标记 deprecated, 后续版本可移除.
-            def _sync_scrape() -> dict[str, Any]:
-                if self.session is None:
-                    return {"url": self.url, "content": "", "title": "", "image_urls": []}
-
-                # session 是 httpx.AsyncClient, 这里改用同步 requests
-                # 实际实现: 用 asyncio 内的同步调用
-                return {"url": self.url, "content": "", "title": "", "image_urls": []}
-
             # 异步抓取
             async def _async_scrape() -> dict[str, Any]:
                 if self.session is None:

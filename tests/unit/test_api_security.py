@@ -1,6 +1,6 @@
 """单元测试: API 安全 (Bearer JWT 处理 + IP-based UserId 降级 + 数据隔离键).
 
-安全硬约束:
+安全约束:
 - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管)
 - self_host=False (云托管): 强制校验 JWT, 不存在/失败时返回 401
 - JWT 验证在 API 入口中间件完成, 禁止业务节点重复解析

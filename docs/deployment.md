@@ -139,7 +139,7 @@ docker compose -p agentinsight ps
 
 ```bash
 curl http://localhost:8066/health
-# 返回 {"status":"ok","service":"agentinsight-researcher","version":"1.0.0"}
+# 返回 {"status":"ok","service":"agentinsight-researcher","version":"1.1.0"}
 ```
 
 ---
@@ -217,7 +217,7 @@ docker compose -p agentinsight ps
 ```bash
 # Agent 健康检查
 curl http://localhost:8066/health
-# {"status":"ok","service":"agentinsight-researcher","version":"1.0.0"}
+# {"status":"ok","service":"agentinsight-researcher","version":"1.1.0"}
 
 # Agent Discovery
 curl http://localhost:8066/.well-known/agent-discovery.json
@@ -485,7 +485,7 @@ Open `http://localhost:8066` in your browser to experience research report gener
 
 ```bash
 curl http://localhost:8066/health
-# Returns {"status":"ok","service":"agentinsight-researcher","version":"1.0.0"}
+# Returns {"status":"ok","service":"agentinsight-researcher","version":"1.1.0"}
 ```
 
 ---
@@ -556,7 +556,7 @@ docker compose -p agentinsight ps
 ```bash
 # Agent health check
 curl http://localhost:8066/health
-# {"status":"ok","service":"agentinsight-researcher","version":"1.0.0"}
+# {"status":"ok","service":"agentinsight-researcher","version":"1.1.0"}
 
 # Agent Discovery
 curl http://localhost:8066/.well-known/agent-discovery.json

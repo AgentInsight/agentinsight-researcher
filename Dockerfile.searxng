@@ -22,7 +22,7 @@ COPY packages/searxng-wheels/ /tmp/searxng-wheels/
 COPY scripts/patch-searxng-engines.py /tmp/patch-searxng-engines.py
 
 # 安装 curl_cffi 到 SearXNG venv
-# 离线模式: --no-index --find-links 从本地 wheel 安装 (离线硬约束)
+# 离线模式: --no-index --find-links 从本地 wheel 安装
 # 联网模式: 联网 pip install (ensurepip 确保 pip 可用, 生产联网模式允许联网)
 # 关键: SearXNG venv 默认不含 pip, 必须先 ensurepip 安装 pip, 否则 pip install 静默失败
 # 安装失败不阻断构建 (|| true), stealth 引擎将降级为 httpx (可能触发 CAPTCHA 但引擎仍可加载)

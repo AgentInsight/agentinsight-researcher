@@ -1,6 +1,6 @@
 """Qdrant 客户端封装.
 
-Qdrant 集合硬约束:
+Qdrant 集合约束:
 - 单一集合 agents, distance=Cosine, vector_size=768 (bge-base-zh-v1.5 固定)
 - payload namespace 隔离:
   - 共享知识库: namespace = agent_id (不含 user_id, 所有用户共享)

@@ -1,7 +1,7 @@
 """回归测试: basic_report 完整研究流程.
 
 - 回归测试在 docker compose up -d 且全部容器 service_healthy 后执行
-- 回归测试为合并 main 前门禁, 不推荐跳过
+- 回归测试为合并 main 前门禁, 不应跳过
 - 测试目标地址从环境变量 AGENT_URL 注入
 - 每次用唯一 session_id=test_regression_* (测试数据隔离)
 - 超时设置: 回归测试 300s

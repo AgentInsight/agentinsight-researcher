@@ -10,7 +10,7 @@ body:
 
         📖 提交前请先查阅 `README.md` 与 `AGENTS.md`, 确认:
         - 该功能是否已被现有能力覆盖 (对话/检索/工具调用三类智能体能力边界);
-        - 是否与项目技术栈选型冲突 (见 `AGENTS.md` 第 1 章, 不推荐方案需说明优势理由);
+        - 是否与项目技术栈选型冲突 (不推荐方案需说明优势理由);
         - 是否涉及"Ask first"级变更 (LangGraph 图结构/State schema/RAG 核心算法/外部系统对接等, 见第 4 章)。
 
         ⚠️ **安全提醒**: 禁止在 Issue 中包含 API Key、Token、密码等敏感信息。
@@ -40,7 +40,7 @@ body:
       placeholder: |
         建议在 `src/...` 模块新增...
         调用链路: 请求 -> ... -> 响应
-        涉及 `AGENTS.md` 第 X 章 ... 约定。
+        涉及项目约定 ...。
     validations:
       required: true
   - type: textarea
@@ -65,7 +65,7 @@ body:
     id: scope
     attributes:
       label: 影响范围
-      description: 该功能主要影响的层级 (见 AGENTS.md 第 3 章目录结构)
+      description: 该功能主要影响的层级 (见目录结构)
       options:
         - graph/ (LangGraph 图定义)
         - agents/ (Agent 实现)
@@ -91,5 +91,5 @@ body:
           required: true
         - label: 我已搜索现有 Issue/Discussions, 确认无重复建议
           required: true
-        - label: 我已确认该建议不与 `AGENTS.md` 第 1 章技术栈选型冲突 (如冲突已在"建议的方案"中说明优势理由)
+        - label: 我已确认该建议不与项目技术栈选型冲突 (如冲突已在“建议的方案”中说明优势理由)
           required: true

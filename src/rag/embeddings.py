@@ -1,6 +1,6 @@
 """Embeddings 封装.
 
-Embeddings 层硬约束:
+Embeddings 层约束:
 - Embeddings: bge-base-zh-v1.5 (中文最强开源嵌入, 本地零成本)
 - Embedding 调用统一走 rag/embeddings.py, 禁止业务代码直连 API
 - Qdrant 单集合 agents, payload namespace 隔离:

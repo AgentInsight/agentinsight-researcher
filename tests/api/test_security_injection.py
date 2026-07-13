@@ -1,6 +1,6 @@
 """API 测试: Prompt 注入 / PII 保护 / 密钥泄漏 / 工具权限安全.
 
-安全硬约束:
+安全约束:
 - 所有外部输入经 Pydantic 校验; 工具调用权限隔离 (read/write/execute/network 显式授权)
 - 禁止 eval/exec 求值用户输入
 - 密钥仅环境变量注入, 禁止入仓/硬编码/日志; API 响应禁止返回密码/密钥原文
@@ -478,7 +478,7 @@ def test_tool_call_read_only_isolation() -> None:
 def test_eval_exec_blocked() -> None:
     """验证 eval/exec 执行用户输入被阻断.
 
-    禁止 eval/exec 求值用户输入 (注入风险, 属硬约束).
+    禁止 eval/exec 求值用户输入 (注入风险, 属安全约束).
     验证各种 eval/exec 注入模式都不会被执行.
     """
     injection_payloads = [
@@ -608,15 +608,15 @@ def test_mcp_test_endpoint_no_secret_leak() -> None:
 
 
 # ============================================================================
-# P2: eval/exec 直接调用拒绝 (安全硬约束)
+# P2: eval/exec 直接调用拒绝 (安全约束)
 # ============================================================================
 
 
 @pytest.mark.api
 def test_eval_direct_call_rejected() -> None:
-    """验证 eval 直接调用被拒绝 (安全硬约束).
+    """验证 eval 直接调用被拒绝 (安全约束).
 
-    禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束).
+    禁止 eval/exec 求值用户输入 (注入风险, 属安全约束).
     验证多种 eval 注入模式均被阻断, AI 不会执行也不会泄漏执行结果.
     """
     eval_payloads = [
@@ -663,9 +663,9 @@ def test_eval_direct_call_rejected() -> None:
 
 @pytest.mark.api
 def test_exec_direct_call_rejected() -> None:
-    """验证 exec 直接调用被拒绝 (安全硬约束).
+    """验证 exec 直接调用被拒绝 (安全约束).
 
-    禁止 eval/exec 求值用户输入 (注入风险, 属安全硬约束).
+    禁止 eval/exec 求值用户输入 (注入风险, 属安全约束).
     验证多种 exec 注入模式均被阻断, AI 不会执行也不会泄漏执行结果.
     """
     exec_payloads = [
@@ -712,13 +712,13 @@ def test_exec_direct_call_rejected() -> None:
 
 
 # ============================================================================
-# P2: Pydantic 校验外部输入边界 (安全硬约束)
+# P2: Pydantic 校验外部输入边界 (安全约束)
 # ============================================================================
 
 
 @pytest.mark.api
 def test_pydantic_validation_external_input_boundary() -> None:
-    """验证 Pydantic 校验外部输入边界 (安全硬约束).
+    """验证 Pydantic 校验外部输入边界 (安全约束).
 
     所有外部输入经 Pydantic 校验.
     验证非法请求体被 Pydantic 拒绝 (422/400), 不进入业务逻辑.
@@ -778,13 +778,13 @@ def test_pydantic_validation_external_input_boundary() -> None:
 
 
 # ============================================================================
-# P2: CORS 非白名单 Origin 拒绝 (安全硬约束)
+# P2: CORS 非白名单 Origin 拒绝 (安全约束)
 # ============================================================================
 
 
 @pytest.mark.api
 def test_cors_non_whitelist_origin_rejected() -> None:
-    """验证 CORS 非白名单 Origin 不返回回显 Origin (安全硬约束).
+    """验证 CORS 非白名单 Origin 不返回回显 Origin (安全约束).
 
     CORS * 限制已移除, 推荐配置具体域名白名单.
     - 当 cors_allow_origins=具体域名列表时: 非白名单 Origin 不应获得 Access-Control-Allow-Origin
@@ -809,7 +809,7 @@ def test_cors_non_whitelist_origin_rejected() -> None:
         f"非白名单 Origin 不应被回显: allow_origin={allow_origin}, origin={malicious_origin}"
     )
     # 如果配置为具体域名列表, 非白名单不应获得 *
-    # 如果配置为 * (QA 环境), 则允许 * (* 不推荐但非硬约束)
+    # 如果配置为 * (QA 环境), 则允许 * (* 不推荐但非强制约束)
     import os
 
     cors_config = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:8066")
@@ -820,7 +820,7 @@ def test_cors_non_whitelist_origin_rejected() -> None:
 
 
 # ============================================================================
-# P2: 工具调用权限隔离补充 (安全硬约束)
+# P2: 工具调用权限隔离补充 (安全约束)
 # - 工具调用权限隔离 (read/write/execute/network 显式授权)
 # - 敏感工具 (写文件/执行命令) 应显式声明权限, 由中间件校验
 # ============================================================================
@@ -936,7 +936,7 @@ def test_tool_permission_write_isolation() -> None:
 
 
 # ============================================================================
-# P2: LLM 输出结构化校验补充 (安全硬约束)
+# P2: LLM 输出结构化校验补充 (安全约束)
 # - LLM 输出经结构化校验后再入工具
 # ============================================================================
 
@@ -996,13 +996,13 @@ def test_llm_output_no_tool_confusion_attack() -> None:
 
 
 # ============================================================================
-# P2: eval/exec 流式响应阻断补充 (安全硬约束)
+# P2: eval/exec 流式响应阻断补充 (安全约束)
 # ============================================================================
 
 
 @pytest.mark.api
 def test_stream_eval_injection_blocked() -> None:
-    """验证流式响应中 eval 注入被阻断 (安全硬约束).
+    """验证流式响应中 eval 注入被阻断 (安全约束).
 
     禁止 eval/exec 求值用户输入.
     流式响应同样需要阻断代码注入.
@@ -1027,7 +1027,7 @@ def test_stream_eval_injection_blocked() -> None:
 
 @pytest.mark.api
 def test_stream_exec_injection_blocked() -> None:
-    """验证流式响应中 exec 注入被阻断 (安全硬约束).
+    """验证流式响应中 exec 注入被阻断 (安全约束).
 
     禁止 eval/exec 求值用户输入.
     """
@@ -1049,7 +1049,7 @@ def test_stream_exec_injection_blocked() -> None:
 
 
 # ============================================================================
-# P2: Pydantic 校验外部输入边界补充 (安全硬约束)
+# P2: Pydantic 校验外部输入边界补充 (安全约束)
 # ============================================================================
 
 

@@ -353,7 +353,7 @@ async def test_mcp_config_by_id(config_id: int) -> dict[str, Any]:
 async def list_system_mcp_configs() -> list[dict[str, Any]]:
     """列出所有系统公用 MCP 配置 (用户可查看但不可编辑/删除).
 
-    系统 MCP 来源: https://github.com/modelcontextprotocol/servers 官方参考实现.
+    系统 MCP 来源: MCP 官方 servers 仓库 (https://github.com/modelcontextprotocol/servers).
     用户可通过 POST /v1/mcp/system/{config_id}/clone 克隆到自己的列表.
     """
     agent_id = get_request_agent_id() or "agentinsight-researcher"

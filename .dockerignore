@@ -1,10 +1,10 @@
-# 离线部署包目录说明 (AGENTS.md 第 12 章)
+# 离线部署包目录说明
 #   packages/
 #   ├── wheels/          # 预下载 Python wheel 包 (构建时 COPY 进镜像)
 #   ├── debs/            # 预下载系统 .deb 包 (构建时 COPY 进镜像)
 #   ├── models/          # 预下载 BGE 模型权重 (部署时 docker cp 到 volume, 不进镜像)
 #   └── images/          # 预下载 Docker 镜像 tarball (部署时 docker load, 不进镜像)
-# 注: 数据库初始化脚本 scripts/init.sql 由 Agent 启动时读取执行 (AGENTS.md 第 6 章)
+# 注: 数据库初始化脚本 scripts/init.sql 由 Agent 启动时读取执行
 
 # 构建上下文排除 (减小镜像构建上下文)
 .venv/
@@ -28,7 +28,7 @@ evals/
 packages/images/
 packages/models/
 
-# QA/离线模式构建文件 (联网模式构建时排除, AGENTS.md 第 12 章三套构建模式)
+# QA/离线模式构建文件 (联网模式构建时排除)
 # 注意: 文件名用连字符 + .yaml/.sh/.bat, 非 .yml/.ps1
 docker-compose-offline.yaml
 docker-compose-offline-self.yaml
