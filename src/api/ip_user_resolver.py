@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,15 @@ def get_client_ip(request) -> str:
     return "0.0.0.0"
 
 
-def _get_beijing_date() -> str:
-    """获取北京时间 (UTC+8) 当日日期字符串 (YYYY-MM-DD).
+def _get_beijing_date() -> date:
+    """获取北京时间 (UTC+8) 当日日期对象.
 
     与用户感知的"自然日"对齐.
+    返回 datetime.date 对象 (非字符串), 因为 asyncpg 的 DATE 列
+    需要 date 对象, 字符串会抛 AttributeError: 'str' object has no attribute 'toordinal'.
     """
     now_bj = datetime.now(UTC) + timedelta(hours=8)
-    return now_bj.strftime("%Y-%m-%d")
+    return now_bj.date()
 
 
 async def _get_daily_limit_from_db(user_id: str) -> int:

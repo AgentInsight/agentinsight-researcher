@@ -145,9 +145,12 @@ def test_get_client_ip_xff_strips_whitespace() -> None:
 
 
 def test_get_beijing_date_format() -> None:
-    """返回格式 YYYY-MM-DD."""
-    date_str = _get_beijing_date()
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str)
+    """返回 date 对象, 格式 YYYY-MM-DD."""
+    from datetime import date as date_type
+
+    result = _get_beijing_date()
+    assert isinstance(result, date_type)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", result.isoformat())
 
 
 def test_get_beijing_date_uses_utc_plus_8() -> None:
@@ -156,29 +159,35 @@ def test_get_beijing_date_uses_utc_plus_8() -> None:
     mock datetime 为 UTC 2026-07-10 20:00:00 → 北京时间 2026-07-11 04:00:00.
     应返回北京日期 2026-07-11, 非 UTC 日期 2026-07-10.
     """
+    from datetime import date as date_type
+
     fixed_utc = real_datetime(2026, 7, 10, 20, 0, 0, tzinfo=UTC)
     with patch.object(ip_user_resolver, "datetime") as mock_dt:
         mock_dt.now.return_value = fixed_utc
-        date_str = _get_beijing_date()
-    assert date_str == "2026-07-11"  # 北京日期
+        result = _get_beijing_date()
+    assert result == date_type(2026, 7, 11)  # 北京日期
 
 
 def test_get_beijing_date_utc_midnight_is_beijing_morning() -> None:
     """UTC 00:00:00 → 北京时间 08:00:00 (同一天)."""
+    from datetime import date as date_type
+
     fixed_utc = real_datetime(2026, 7, 15, 0, 0, 0, tzinfo=UTC)
     with patch.object(ip_user_resolver, "datetime") as mock_dt:
         mock_dt.now.return_value = fixed_utc
-        date_str = _get_beijing_date()
-    assert date_str == "2026-07-15"  # UTC 0点 = 北京 8点, 同一天
+        result = _get_beijing_date()
+    assert result == date_type(2026, 7, 15)  # UTC 0点 = 北京 8点, 同一天
 
 
 def test_get_beijing_date_utc_16_is_beijing_next_day() -> None:
     """UTC 16:00:00 → 北京时间次日 00:00:00 (跨天)."""
+    from datetime import date as date_type
+
     fixed_utc = real_datetime(2026, 7, 15, 16, 0, 0, tzinfo=UTC)
     with patch.object(ip_user_resolver, "datetime") as mock_dt:
         mock_dt.now.return_value = fixed_utc
-        date_str = _get_beijing_date()
-    assert date_str == "2026-07-16"  # UTC 16点 = 北京次日 0点
+        result = _get_beijing_date()
+    assert result == date_type(2026, 7, 16)  # UTC 16点 = 北京次日 0点
 
 
 # ========== 数据库 mock 辅助 ==========
