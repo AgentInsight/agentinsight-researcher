@@ -277,7 +277,7 @@ def test_create_session_with_explicit_id(
     assert data["session_id"] == "custom-id"
     assert data["message_count"] == 0
     mock_store.create_session.assert_awaited_once_with(
-        "custom-id", "test-agent", "test-user", title="标题"
+        "custom-id", "test-agent", "test-user", title="标题", client_ip=""
     )
 
 

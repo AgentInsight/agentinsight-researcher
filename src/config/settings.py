@@ -77,7 +77,9 @@ class Settings(BaseSettings):
     # SVG 矢量配图 (DeepSeek V4 Flash 经 /chat/completions 生成 SVG 代码)
     # 关闭思考模式 (extra_body thinking=disabled), SVG 生成是创意输出任务不需要推理
     image_output_format: str = "svg"  # 图像输出格式: svg | url | b64
-    image_svg_max_tokens: int = 16384  # SVG 生成 max_tokens (DeepSeek API 上限远超 8192, 16K 确保复杂 SVG 输出)
+    image_svg_max_tokens: int = (
+        16384  # SVG 生成 max_tokens (DeepSeek API 上限远超 8192, 16K 确保复杂 SVG 输出)
+    )
     image_svg_temperature: float = 0.7  # SVG 生成温度 (0.7 平衡创意与稳定)
 
     # ========== Qdrant ==========
@@ -165,11 +167,11 @@ class Settings(BaseSettings):
     # 无 JWT Token 时, 按 IP 生成确定性 UserId (SHA256 哈希, 不存储原始 IP)
     user_info_api_url: str = "https://agentinsight.goldebridge.com/api/user"
     user_info_api_timeout: int = 5
-    # 每日报告生成限额 (按 IP 限流, 默认 3 次/日, 仅报告成功才计数)
+    # 每日报告生成限额 (按 IP 限流, 默认 5 次/日, 仅报告成功才计数)
     # 0 = 不限制; 环境变量 IP_DAILY_REPORT_LIMIT 控制
     # 注意: 此配置已迁移到数据库 report_limits 表 (user_id IS NULL 的系统默认行)
     # 此环境变量仅作为数据库不可用时的降级 fallback
-    ip_daily_report_limit: int = 3
+    ip_daily_report_limit: int = 5
 
     # ========== 自托管模式 (SELF_HOST) ==========
     # True (默认): 自托管模式, JWT Token 可选, 不存在时走 IP-based 用户身份解析,
@@ -244,7 +246,9 @@ class Settings(BaseSettings):
     # 远程 TEI (bge-base-zh-v1.5, 768维) 仅用于私有数据 Qdrant 索引/检索
     # bge-small-zh-v1.5 ONNX INT8 模型, 输出 512 维向量
     fastembed_model_name: str = "BAAI/bge-small-zh-v1.5"
-    fastembed_model_path: str = "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    fastembed_model_path: str = (
+        "./models/bge-small-zh-v1.5-onnx"  # ONNX 模型本地路径 (环境变量: FASTEMBED_MODEL_PATH)
+    )
     fastembed_dimension: int = 512  # bge-small-zh-v1.5 固定维度
     fastembed_max_length: int = 512  # 最大序列长度
     # ONNX Runtime 并行执行 (推理加速 2-4x)
@@ -394,7 +398,9 @@ class Settings(BaseSettings):
     )  # 复杂追问关键词 (命中则走 SMART)
 
     # QueryClassifier 阈值
-    query_classify_llm_max_tokens: int = 500  # LLM 分类 max_tokens (推理模型需 ≥500: 推理 400+分类 100)
+    query_classify_llm_max_tokens: int = (
+        500  # LLM 分类 max_tokens (推理模型需 ≥500: 推理 400+分类 100)
+    )
     query_classify_llm_query_truncate: int = 1000  # LLM 分类 query 截断长度
     query_classify_single_word_max_chars: int = 6  # 单单词长度上限
     query_classify_trace_input_truncate: int = 200  # trace span input 截断长度

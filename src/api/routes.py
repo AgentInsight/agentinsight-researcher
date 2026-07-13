@@ -320,18 +320,21 @@ async def _persist_user_message(
     """保存用户消息到 chat_messages, 并确保 research_sessions 记录存在.
 
     在 chat_completions 端点处理请求前调用:
-    - ensure_session: 不存在则创建 research_sessions (含 query + title)
+    - ensure_session: 不存在则创建 research_sessions (含 query + title + client_ip)
     - save_message: 保存 user 消息到 chat_messages
 
     失败仅告警, 不阻断主流程 (消息持久化为辅助功能).
     """
     try:
+        from src.api.middleware import get_request_client_ip
         from src.memory.session_store import get_session_store
 
         store = get_session_store()
+        # 获取客户端 IP (审计追溯用, 从 contextvars 恢复)
+        client_ip = get_request_client_ip()
         # 确保会话记录存在 (首次对话时创建, 已存在则更新 query + updated_at)
         title = query[:100] if query else ""
-        await store.ensure_session(session_id, agent_id, user_id, query=query)
+        await store.ensure_session(session_id, agent_id, user_id, query=query, client_ip=client_ip)
         # 若标题为空, 更新为 query 前 100 字符
         if title:
             existing_title = await store.get_session_title(session_id, agent_id, user_id)
@@ -706,9 +709,7 @@ async def chat_completions(
     if settings.self_host and user_id.startswith("ip_"):
         from src.api.ip_user_resolver import check_daily_report_limit
 
-        allowed, current_count, effective_limit = await check_daily_report_limit(
-            user_id, agent_id
-        )
+        allowed, current_count, effective_limit = await check_daily_report_limit(user_id, agent_id)
         if not allowed:
             limit_msg = (
                 f"您今日的报告生成次数已达上限 ({current_count}/{effective_limit})。"

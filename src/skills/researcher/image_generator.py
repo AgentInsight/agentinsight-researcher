@@ -119,8 +119,8 @@ def _enhance_prompt(
     }
 
 
-# SVG 矢量配图生成 prompt 模板
-_SVG_IMAGE_PROMPT_TEMPLATE = """请生成一张表示「{topic}」概念的 SVG 矢量配图.
+# SVG 矢量配图生成 prompt 模板 (中文版)
+_SVG_IMAGE_PROMPT_TEMPLATE_ZH = """请生成一张表示「{topic}」概念的 SVG 矢量配图.
 
 ## 要求
 
@@ -136,7 +136,7 @@ _SVG_IMAGE_PROMPT_TEMPLATE = """请生成一张表示「{topic}」概念的 SVG 
 - 禁止使用 emoji 字符 (如 📜📈🔬📚🎯🚀 等), cairosvg 无法渲染 emoji 会显示乱码
 - 禁止使用 HTML 实体 (如 &amp; &lt; &gt;), 直接使用原始字符
 - 禁止使用 HTML 注释 (如 <!-- 注释 -->), 注释会影响 Markdown 渲染器解析
-- 文字使用纯中文/英文, 不加装饰符号
+- 文字使用纯中文, 不加装饰符号
 - font-family 使用 "Noto Sans CJK SC", "Arial", sans-serif
 - SVG 元素之间禁止有空行, 所有元素紧凑排列 (空行会触发 CommonMark HTML 块中断)
 
@@ -151,6 +151,46 @@ SVG 内部元素之间不要留空行, 保持紧凑格式.
 
 {prompt}
 """
+
+# SVG 矢量配图生成 prompt 模板 (英文版)
+_SVG_IMAGE_PROMPT_TEMPLATE_EN = """Generate an SVG vector illustration representing the concept of "{topic}".
+
+## Requirements
+
+- Size: {width}x{height}
+- Style: {style_hint}
+- Color palette: {color_palette}
+- Suitable as a research report illustration (professional, clean, modern)
+- Must include xmlns attribute and viewBox attribute
+- English labels (if text is needed)
+
+## Important Constraints (MUST follow)
+
+- NO emoji characters (e.g., 📜📈🔬📚🎯🚀 etc.), cairosvg cannot render emoji and will show garbled text
+- NO HTML entities (e.g., &amp; &lt; &gt;), use raw characters directly
+- NO HTML comments (e.g., <!-- comment -->), comments affect Markdown renderer parsing
+- Text must use plain English, no decorative symbols
+- font-family: "Arial", "Noto Sans CJK SC", sans-serif
+- NO blank lines between SVG elements, all elements compactly arranged (blank lines trigger CommonMark HTML block interruption)
+
+## Output Format
+
+Return ONLY pure SVG code, no markdown code blocks, no explanations.
+SVG must start with <svg xmlns and end with </svg>.
+Keep SVG code concise (within 5000 characters).
+NO blank lines between internal SVG elements, keep compact format.
+
+## Topic Description
+
+{prompt}
+"""
+
+
+def _get_svg_prompt_template(language: str = "zh") -> str:
+    """根据语言选择 SVG prompt 模板 (zh=中文, 其他=英文)."""
+    if language == "en":
+        return _SVG_IMAGE_PROMPT_TEMPLATE_EN
+    return _SVG_IMAGE_PROMPT_TEMPLATE_ZH
 
 
 # SVG 主题到风格的路由 (复用 _TOPIC_STYLE_KEYWORDS 的关键词匹配)
@@ -221,6 +261,7 @@ class ImageGenerator:
         user_id: str | None = None,
         session_id: str | None = None,
         topic: str = "",
+        language: str = "zh",
     ) -> dict[str, Any]:
         """生成图像 (报告配图).
 
@@ -233,6 +274,7 @@ class ImageGenerator:
         Args:
             prompt: 原始提示词 (会被 _enhance_prompt 增强).
             topic: 报告主题 (用于风格路由, 空字符串走 default 风格).
+            language: 报告语言代码 (zh|en), 控制 SVG prompt 模板和图片内文字语言.
         """
         output_format = self.settings.image_output_format.lower()
 
@@ -243,6 +285,7 @@ class ImageGenerator:
                 size=size,
                 user_id=user_id,
                 session_id=session_id,
+                language=language,
             )
 
         # 位图模式 (保留原逻辑, 供未来支持 DALL-E/CogView 等)
@@ -252,6 +295,7 @@ class ImageGenerator:
             size=size,
             user_id=user_id,
             session_id=session_id,
+            language=language,
         )
 
     async def _generate_bitmap_image(
@@ -262,6 +306,7 @@ class ImageGenerator:
         size: str = "1024x1024",
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> dict[str, Any]:
         """位图生成 (原 generate_image 逻辑, 保留供未来使用).
 
@@ -400,6 +445,7 @@ class ImageGenerator:
         size: str = "1024x1024",
         user_id: str | None = None,
         session_id: str | None = None,
+        language: str = "zh",
     ) -> dict[str, Any]:
         """通过 /chat/completions 生成 SVG 矢量配图.
 
@@ -426,8 +472,8 @@ class ImageGenerator:
         width, height = _parse_size(size)
         style = _select_svg_style(topic)
 
-        # 构建 prompt
-        svg_prompt = _SVG_IMAGE_PROMPT_TEMPLATE.format(
+        # 构建 prompt (根据 language 选择中/英文模板)
+        svg_prompt = _get_svg_prompt_template(language).format(
             topic=topic or prompt[:50],
             width=width,
             height=height,
@@ -472,8 +518,14 @@ class ImageGenerator:
                 # 必须用 getattr 访问属性, 不能用 .get() (CompletionTokensDetailsWrapper 无 .get 方法)
                 usage = getattr(response, "usage", None)
                 completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-                completion_tokens_details = getattr(usage, "completion_tokens_details", None) if usage else None
-                reasoning_tokens = getattr(completion_tokens_details, "reasoning_tokens", 0) if completion_tokens_details else 0
+                completion_tokens_details = (
+                    getattr(usage, "completion_tokens_details", None) if usage else None
+                )
+                reasoning_tokens = (
+                    getattr(completion_tokens_details, "reasoning_tokens", 0)
+                    if completion_tokens_details
+                    else 0
+                )
 
                 # 提取 SVG 代码
                 svg_code = self._extract_svg(content)

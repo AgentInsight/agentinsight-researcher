@@ -3,7 +3,7 @@
 无 JWT Token 时, 按 IP 生成唯一且不变的 UserId.
 - 1 个 IP 对应 1 个 UserId (确定性: SHA256 哈希, 不存储原始 IP)
 - 每日报告生成限额从数据库 report_limits 表读取 (已从环境变量迁移)
-  - UserId 为 NULL 的行表示系统默认限额 (默认 3)
+  - UserId 为 NULL 的行表示系统默认限额 (默认 5)
   - 取限额时取 UserId 专属限额与系统默认限额中较高的那个 (max)
 - 每日报告生成使用次数从数据库 daily_report_usage 表读取 (已从 Redis 迁移)
   - 按 UserId + 日期 记录当日报告生成次数
@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 logger = logging.getLogger(__name__)
 
 # 环境变量降级 fallback (数据库不可用时使用)
-_DEFAULT_DAILY_LIMIT = 3
+_DEFAULT_DAILY_LIMIT = 5
 
 
 def generate_user_id_from_ip(ip: str) -> str:

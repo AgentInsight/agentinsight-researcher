@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     status VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/running/completed/failed
     total_cost_usd NUMERIC(12,6) DEFAULT 0,
     total_tokens BIGINT DEFAULT 0,
+    client_ip VARCHAR(64),                     -- 客户端 IP 地址 (审计追溯用, PII)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
@@ -412,6 +413,8 @@ ALTER TABLE IF EXISTS research_sessions ALTER COLUMN query DROP NOT NULL;
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_type DROP NOT NULL;
 -- 旧表兜底: 放宽 report_format 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_format DROP NOT NULL;
+-- 旧表兜底: 新增 client_ip 字段 (新表 CREATE TABLE 已含, 审计追溯用)
+ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS client_ip VARCHAR(64);
 
 -- 清理 research_sessions 历史重复数据 (保留每个 session 三元组的最小 id, 防止唯一索引创建失败)
 -- 与 mcp_configs 的清理模式对齐 (P0 修复: 原脚本缺少此前置清理)
@@ -431,7 +434,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
 CREATE TABLE IF NOT EXISTS report_limits (
     id BIGSERIAL PRIMARY KEY,
     user_id VARCHAR(64) UNIQUE,                -- NULL = 系统默认限额; 非 NULL = 用户专属限额
-    daily_limit INTEGER NOT NULL DEFAULT 3,    -- 每日报告生成限额 (0 = 不限制)
+    daily_limit INTEGER NOT NULL DEFAULT 5,    -- 每日报告生成限额 (0 = 不限制)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -443,10 +446,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_report_limits_user
 CREATE OR REPLACE TRIGGER trg_report_limits_updated_at
     BEFORE UPDATE ON report_limits
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
--- 预置系统默认限额 (user_id IS NULL, daily_limit = 3)
+-- 预置系统默认限额 (user_id IS NULL, daily_limit = 5)
 -- ON CONFLICT 保证幂等: 已存在则不覆盖 (管理员可手动调整后不被重置)
 INSERT INTO report_limits (user_id, daily_limit)
-VALUES (NULL, 3)
+VALUES (NULL, 5)
 ON CONFLICT (user_id) DO NOTHING;
 
 -- ========== 业务表: 每日报告生成使用次数 (从 Redis 迁移到数据库) ==========

@@ -1,7 +1,7 @@
 """单元测试: 每日报告限额检查 (IP-based 用户限流).
 
 验证 src/api/routes.py 第 559-625 行限额检查逻辑 + src/api/ip_user_resolver.py:
-1. IP-based 用户超限 - 非流式 → 429 + 错误信息含 "已达上限" 和 "3/3"
+1. IP-based 用户超限 - 非流式 → 429 + 错误信息含 "已达上限" 和 "5/5"
 2. IP-based 用户未超限 - 非流式 → 不返回 429 (走正常研究流水线)
 3. IP-based 用户超限 - 流式 → SSE 含 "已达上限", finish_reason="stop"
 4. JWT Token 用户不受限额 (user_id 不以 "ip_" 开头)
@@ -35,11 +35,11 @@ pytestmark = pytest.mark.unit
 
 
 def _make_settings(**kwargs: Any) -> Settings:
-    """构造自定义 Settings (默认 self_host=True, ip_daily_report_limit=3)."""
+    """构造自定义 Settings (默认 self_host=True, ip_daily_report_limit=5)."""
     defaults: dict[str, Any] = {
         "_env_file": None,
         "self_host": True,
-        "ip_daily_report_limit": 3,
+        "ip_daily_report_limit": 5,
         "agent_name": "agentinsight-researcher",
     }
     defaults.update(kwargs)
@@ -75,9 +75,13 @@ def _patch_limit_check(
     monkeypatch: pytest.MonkeyPatch,
     allowed: bool,
     count: int,
+    limit: int = 5,
 ) -> AsyncMock:
-    """Mock check_daily_report_limit 返回指定结果."""
-    mock = AsyncMock(return_value=(allowed, count))
+    """Mock check_daily_report_limit 返回指定结果.
+
+    返回三元组 (allowed, current_count, effective_limit), 与实际函数签名一致.
+    """
+    mock = AsyncMock(return_value=(allowed, count, limit))
     monkeypatch.setattr("src.api.ip_user_resolver.check_daily_report_limit", mock)
     return mock
 
@@ -100,11 +104,11 @@ _REQUEST_BODY: dict[str, Any] = {
 
 
 def test_ip_user_exceeded_non_stream(monkeypatch: pytest.MonkeyPatch) -> None:
-    """IP-based 用户超限 → 429 + 错误信息含 "已达上限" 和 "3/3"."""
-    settings = _make_settings(self_host=True, ip_daily_report_limit=3)
+    """IP-based 用户超限 → 429 + 错误信息含 "已达上限" 和 "5/5"."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
     monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
     _patch_pipeline(monkeypatch)
-    _patch_limit_check(monkeypatch, allowed=False, count=3)
+    _patch_limit_check(monkeypatch, allowed=False, count=5)
 
     client = TestClient(app)
     response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
@@ -113,7 +117,7 @@ def test_ip_user_exceeded_non_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     data = response.json()
     msg = data["error"]["message"]
     assert "已达上限" in msg
-    assert "3/3" in msg
+    assert "5/5" in msg
     assert data["error"]["type"] == "rate_limit_exceeded"
     assert data["error"]["code"] == "daily_report_limit"
 
@@ -123,7 +127,7 @@ def test_ip_user_exceeded_non_stream(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_ip_user_not_exceeded_non_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     """IP-based 用户未超限 → 不返回 429 (走正常研究流水线)."""
-    settings = _make_settings(self_host=True, ip_daily_report_limit=3)
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
     monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
     _patch_pipeline(monkeypatch)
     _patch_limit_check(monkeypatch, allowed=True, count=1)
@@ -143,10 +147,10 @@ def test_ip_user_not_exceeded_non_stream(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_ip_user_exceeded_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     """IP-based 用户超限 - 流式 → SSE 含 "已达上限", finish_reason="stop"."""
-    settings = _make_settings(self_host=True, ip_daily_report_limit=3)
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
     monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
     _patch_pipeline(monkeypatch)
-    _patch_limit_check(monkeypatch, allowed=False, count=3)
+    _patch_limit_check(monkeypatch, allowed=False, count=5)
 
     body = {**_REQUEST_BODY, "stream": True}
     client = TestClient(app)
@@ -166,7 +170,7 @@ def test_ip_user_exceeded_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     # 首块含限额提示内容
     first_content = chunks[0]["choices"][0]["delta"].get("content", "")
     assert "已达上限" in first_content
-    assert "3/3" in first_content
+    assert "5/5" in first_content
     # 末块 finish_reason="stop"
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
@@ -180,10 +184,10 @@ def test_jwt_user_not_limited(monkeypatch: pytest.MonkeyPatch) -> None:
     携带有效 Bearer Token 时, user_id 由 user_info API 解析,
     不以 "ip_" 前缀标识, 限额检查条件 user_id.startswith("ip_") 不满足.
     """
-    settings = _make_settings(self_host=True, ip_daily_report_limit=3)
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
     monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
     _patch_pipeline(monkeypatch)
-    mock_check = _patch_limit_check(monkeypatch, allowed=False, count=3)
+    mock_check = _patch_limit_check(monkeypatch, allowed=False, count=5)
     _patch_increment(monkeypatch)
 
     # Mock 中间件 _resolve_user_id 返回真实 user_id (非 ip_ 前缀)
@@ -216,7 +220,7 @@ def test_self_host_false_no_token_returns_401(monkeypatch: pytest.MonkeyPatch) -
     self_host=False (云托管) 强制校验 JWT Token,
     不存在时返回 401, 请求不会到达限额检查逻辑.
     """
-    settings = _make_settings(self_host=False, ip_daily_report_limit=3)
+    settings = _make_settings(self_host=False, ip_daily_report_limit=5)
 
     # Mock httpx.AsyncClient 避免创建真实 HTTP 客户端 (中间件 __init__ 内调用)
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: MagicMock())
@@ -238,11 +242,12 @@ def test_self_host_false_no_token_returns_401(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_limit_zero_no_restriction(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ip_daily_report_limit=0 → 不检查限额 (条件 ip_daily_report_limit > 0 不满足)."""
+    """ip_daily_report_limit=0 → 不限制 (数据库读取后 limit<=0 直接放行)."""
     settings = _make_settings(self_host=True, ip_daily_report_limit=0)
     monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
     _patch_pipeline(monkeypatch)
-    mock_check = _patch_limit_check(monkeypatch, allowed=False, count=0)
+    # mock 返回 allowed=True, count=0, limit=0 (表示不限制)
+    _patch_limit_check(monkeypatch, allowed=True, count=0, limit=0)
     _patch_increment(monkeypatch)
 
     client = TestClient(app)
@@ -251,5 +256,3 @@ def test_limit_zero_no_restriction(monkeypatch: pytest.MonkeyPatch) -> None:
     # 不应返回 429 (limit=0 表示不限制)
     assert response.status_code != 429
     assert response.status_code == 200
-    # check_daily_report_limit 不应被调用 (条件 ip_daily_report_limit > 0 不满足)
-    mock_check.assert_not_called()

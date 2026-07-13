@@ -216,8 +216,8 @@ class ReportGenerator:
             if len(combined_context) > max_context_chars:
                 combined_context = combined_context[:max_context_chars]
 
-            # 构建来源引用列表 (APA 格式)
-            references = self._build_references(sources)
+            # 构建来源引用列表 (APA 格式, 多语言占位文本)
+            references = self._build_references(sources, language=language)
 
             # agent_role 作为角色 persona (来自 LLM 动态生成或调用方注入)
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
@@ -225,7 +225,7 @@ class ReportGenerator:
             word_limit = total_words or self.settings.total_words
             current_date = datetime.now().strftime("%Y年%m月%d日")
 
-            structure_hint = self._basic_report_structure()
+            structure_hint = self._basic_report_structure(language=language)
 
             # prompt 经 PromptFamily 策略注入
             # 注入 report_style 风格预设
@@ -302,11 +302,11 @@ class ReportGenerator:
             image_svg: str | None = None
             if self.settings.image_generation_enabled:
                 image_url, image_b64, image_svg = await self._generate_report_image(
-                    query, user_id, session_id
+                    query, user_id, session_id, language=language
                 )
                 if image_url or image_b64 or image_svg:
                     report_md = self._insert_image_into_report(
-                        report_md, image_url, image_b64, image_svg=image_svg
+                        report_md, image_url, image_b64, image_svg=image_svg, language=language
                     )
 
             span.update(
@@ -392,7 +392,7 @@ class ReportGenerator:
             if len(combined_context) > max_context_chars:
                 combined_context = combined_context[:max_context_chars]
 
-            references = self._build_references(sources)
+            references = self._build_references(sources, language=language)
             role_persona = agent_role or _DEFAULT_AGENT_ROLE
 
             # 步骤 2+3: 子主题生成与引言并行 (两者均只依赖 query/contexts/
@@ -558,11 +558,11 @@ class ReportGenerator:
             image_svg: str | None = None
             if self.settings.image_generation_enabled:
                 image_url, image_b64, image_svg = await self._generate_report_image(
-                    query, user_id, session_id
+                    query, user_id, session_id, language=language
                 )
                 if image_url or image_b64 or image_svg:
                     full_report = self._insert_image_into_report(
-                        full_report, image_url, image_b64, image_svg=image_svg
+                        full_report, image_url, image_b64, image_svg=image_svg, language=language
                     )
 
             span.update(
@@ -1247,26 +1247,36 @@ class ReportGenerator:
         query: str,
         user_id: str | None,
         session_id: str | None,
+        *,
+        language: str = "zh",
     ) -> tuple[str | None, str | None, str | None]:
         """生成报告配图.
 
         图像生成失败时降级 (报告不带图, 记录 warning), 不阻断主流程.
         返回 (image_url, image_b64, image_svg), 失败均为 None.
+        language 参数控制配图 prompt 和图片内文字语言 (zh=中文, en=英文).
         """
         try:
             if self._image_generator is None:
                 self._image_generator = ImageGenerator(self.settings)
 
-            # 配图提示词: 基于报告主题生成, 风格专业简洁
-            image_prompt = (
-                f"为「{query}」研究报告生成一张概念配图, 风格专业、简洁, 适合商业研究报告"
-            )
+            # 配图提示词: 基于报告主题生成, 风格专业简洁 (根据语言切换)
+            if language == "en":
+                image_prompt = (
+                    f'Generate a concept illustration for the research report on "{query}", '
+                    f"professional and clean style, suitable for business research reports"
+                )
+            else:
+                image_prompt = (
+                    f"为「{query}」研究报告生成一张概念配图, 风格专业、简洁, 适合商业研究报告"
+                )
             result = await self._image_generator.generate_image(
                 image_prompt,
                 size=self.settings.image_size,
                 user_id=user_id,
                 session_id=session_id,
                 topic=query,  # 传入主题用于风格路由
+                language=language,
             )
             return result.get("url"), result.get("b64"), result.get("svg")
         except Exception as e:  # noqa: BLE001
@@ -1285,18 +1295,22 @@ class ReportGenerator:
         image_b64: str | None,
         *,
         image_svg: str | None = None,
+        language: str = "zh",
     ) -> str:
         """在报告 Markdown 中插入配图.
 
         策略: 在第一个 H1 标题后插入 (标题下方, 正文上方).
         支持三种格式:
         - image_svg: 嵌入 HTML <div> + 内联 <svg> (MD 渲染器原生支持内联 HTML)
-        - image_url: ![报告配图](url)
-        - image_b64: ![报告配图](data:image/png;base64,...)
+        - image_url: ![报告配图/Report Image](url)
+        - image_b64: ![报告配图/Report Image](data:image/png;base64,...)
 
+        language 参数控制图片 alt 文本语言 (zh=报告配图, en=Report Image).
         SVG 预处理: 移除内部空行和 HTML 注释, 避免 CommonMark 渲染器
         (mistune/marked) 在空行处中断 HTML 块导致子元素被 <p> 包装.
         """
+        # 图片 alt 文本多语言
+        alt_text = "Report Image" if language == "en" else "报告配图"
         if image_svg:
             # SVG 预处理: 移除 HTML 注释和连续空行, 避免触发 CommonMark HTML 块中断
             # mistune/marked 在 HTML 块内遇到空行时会结束 HTML 块, 导致 SVG 子元素被 <p> 包装
@@ -1304,18 +1318,20 @@ class ReportGenerator:
             # 移除连续空行 (多个空行压缩为单个换行)
             cleaned_svg = re.sub(r"\n\s*\n", "\n", cleaned_svg)
             # 移除每行前导空白 (SVG 元素紧凑排列, 避免 mistune 将缩进行视为代码块)
-            cleaned_svg = "\n".join(line.strip() for line in cleaned_svg.split("\n") if line.strip())
+            cleaned_svg = "\n".join(
+                line.strip() for line in cleaned_svg.split("\n") if line.strip()
+            )
 
             # SVG 模式: 嵌入 HTML <div> + 内联 <svg>
             # 不用 ```svg 代码块 (大多数 MD 渲染器不渲染, 只显示源代码)
             # 用内联 HTML, MD 渲染器 (GitHub/VSCode/Typora/mistune) 原生支持
             image_md = (
-                f'\n\n<div class="report-image">\n{cleaned_svg}\n</div>\n\n'
+                f'\n\n<div class="report-image" aria-label="{alt_text}">\n{cleaned_svg}\n</div>\n\n'
             )
         elif image_url:
-            image_md = f"\n\n![报告配图]({image_url})\n\n"
+            image_md = f"\n\n![{alt_text}]({image_url})\n\n"
         elif image_b64:
-            image_md = f"\n\n![报告配图](data:image/png;base64,{image_b64})\n\n"
+            image_md = f"\n\n![{alt_text}](data:image/png;base64,{image_b64})\n\n"
         else:
             return report_md
 
@@ -1329,8 +1345,29 @@ class ReportGenerator:
         return image_md + "\n" + report_md
 
     @staticmethod
-    def _basic_report_structure() -> str:
-        """基础报告结构 (不再有行业预设维度, 由 LLM 自主决定)."""
+    def _basic_report_structure(language: str = "zh") -> str:
+        """基础报告结构 (不再有行业预设维度, 由 LLM 自主决定).
+
+        language 参数控制结构提示的章节标题语言 (zh=中文, 其他=英文),
+        避免 structure_hint 注入 prompt 后 LLM 生成与目标语言不一致的标题.
+        """
+        if language == "en":
+            return """# {Title}
+
+## Abstract
+(Briefly describe the research topic and core findings)
+
+## Key Dimensions
+(LLM autonomously extracts research dimensions based on context)
+
+## Analysis and Insights
+(In-depth analysis based on context)
+
+## Conclusion and Outlook
+(Summary and future trends)
+
+## References
+(APA format citation list)"""
         return """# {标题}
 
 ## 摘要
@@ -1349,11 +1386,38 @@ class ReportGenerator:
 (APA 格式引用列表)"""
 
     @staticmethod
-    def _detailed_report_structure() -> str:
+    def _detailed_report_structure(language: str = "zh") -> str:
         """详细报告静态结构提示 (改用子主题嵌套动态生成, 此结构仅作参考).
 
         保留用于文档参考与潜在降级场景; _generate_detailed_report 不再使用此静态结构.
+        language 参数控制结构提示的章节标题语言 (zh=中文, 其他=英文).
         """
+        if language == "en":
+            return """# {Title}
+
+## Abstract
+(Detail research background, purpose, methodology, and core findings)
+
+## Industry Background
+(Industry status, development history)
+
+## In-depth Analysis
+(LLM autonomously extracts research dimensions, detailed analysis by subsection)
+
+## Competitive Landscape
+(Key players, market share, competitive advantages)
+
+## Trends and Outlook
+(Short-term/medium-term/long-term trends)
+
+## Risks and Challenges
+(Major risk factors)
+
+## Conclusion
+(Core conclusions and recommendations)
+
+## References
+(APA format citation list)"""
         return """# {标题}
 
 ## 摘要
@@ -1483,15 +1547,16 @@ class ReportGenerator:
         return md
 
     @staticmethod
-    def _build_references(sources: list[dict[str, Any]]) -> str:
+    def _build_references(sources: list[dict[str, Any]], language: str = "zh") -> str:
         """构建默认参考文献列表 (向后兼容, 等同 _format_citation_list(APA))."""
-        return ReportGenerator._format_citation_list(sources, style="APA")
+        return ReportGenerator._format_citation_list(sources, style="APA", language=language)
 
     @staticmethod
     def _format_citation_list(
         sources: list[dict[str, Any]],
         *,
         style: str = "APA",
+        language: str = "zh",
     ) -> str:
         """按引用风格构建参考文献列表 (APA/MLA/Chicago/GB7714 可配置).
 
@@ -1500,16 +1565,20 @@ class ReportGenerator:
         Args:
             sources: 来源列表, 含 title/url/snippet 等字段.
             style: 引用风格 (APA/MLA/Chicago/GB7714), 默认 APA.
+            language: 语言代码 (zh|en), 控制无来源/未知标题等占位文本语言.
 
         Returns:
             格式化后的参考文献字符串.
         """
+        # 多语言占位文本
+        no_sources_text = "(No sources available)" if language == "en" else "(无可用来源)"
+        unknown_title = "Untitled" if language == "en" else "未知标题"
         if not sources:
-            return "(无可用来源)"
+            return no_sources_text
 
         refs: list[str] = []
         for i, src in enumerate(sources[:20], 1):  # 最多 20 条
-            title = src.get("title", "未知标题")
+            title = src.get("title", unknown_title)
             url = src.get("url", "")
             # 模拟作者/年份 (来源通常无作者字段, 用 hostname 占位)
             author = "Unknown"
@@ -1545,9 +1614,7 @@ class ReportGenerator:
             refs.append(ref)
         return "\n\n".join(refs)
 
-    def _format_sources(
-        self, sources: list[dict[str, Any]], language: str | None = None
-    ) -> str:
+    def _format_sources(self, sources: list[dict[str, Any]], language: str | None = None) -> str:
         """格式化引用来源列表 (支持 APA/MLA/Chicago/GB7714 风格).
 
         通过 settings.report_format_style 配置风格, 默认 APA.
@@ -1577,8 +1644,10 @@ class ReportGenerator:
         lang = language or getattr(settings, "report_language", "zh") or "zh"
         section_title = "## 参考来源" if lang == "zh" else "## References"
         lines = [f"\n\n{section_title}\n\n"]
+        # 多语言占位文本
+        unknown_title = "Untitled" if lang == "en" else "未知标题"
         for i, src in enumerate(sources, 1):
-            title = src.get("title", "未知标题")
+            title = src.get("title", unknown_title)
             url = src.get("url", src.get("href", ""))
             # 在每条来源后追加风格标识 (便于客户端识别引用风格)
             lines.append(f"{i}. {title}. {url}  _[{style}]_")

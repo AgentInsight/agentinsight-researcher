@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # research_sessions 查询字段列表 (显式列出, 避免 SELECT * 在表结构变更时的隐患)
 _SESSION_COLUMNS = (
     "session_id, agent_id, user_id, query, title, report_type, "
-    "report_format, agent_role, agent_role_server, status, "
+    "report_format, agent_role, agent_role_server, status, client_ip, "
     "created_at, updated_at, expires_at"
 )
 
@@ -57,6 +57,7 @@ class SessionStore:
         user_id: str,
         title: str = "",
         query: str | None = None,
+        client_ip: str = "",
     ) -> None:
         """创建会话记录 (幂等, 已存在则跳过).
 
@@ -69,14 +70,15 @@ class SessionStore:
             user_id: 用户 ID
             title: 会话标题 (用于会话列表显示)
             query: 首次查询内容 (可选, 首次对话时传入)
+            client_ip: 客户端 IP 地址 (审计追溯用, PII, 可选)
         """
         pool = await get_pool(self._settings)
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO research_sessions
-                    (session_id, agent_id, user_id, query, title, status)
-                VALUES ($1, $2, $3, $4, $5, 'active')
+                    (session_id, agent_id, user_id, query, title, status, client_ip)
+                VALUES ($1, $2, $3, $4, $5, 'active', $6)
                 ON CONFLICT (session_id, agent_id, user_id) DO NOTHING
                 """,
                 session_id,
@@ -84,6 +86,7 @@ class SessionStore:
                 user_id,
                 query,
                 title or "",
+                client_ip or "",
             )
             logger.info(
                 "会话已创建: session_id=%s, agent_id=%s, user_id=%s",
@@ -98,11 +101,12 @@ class SessionStore:
         agent_id: str,
         user_id: str,
         query: str | None = None,
+        client_ip: str = "",
     ) -> None:
         """确保会话记录存在 (不存在则创建, 存在则更新 query 和 updated_at).
 
         在 chat_completions 端点首次对话时调用:
-        - 会话不存在 → 创建 (含 query)
+        - 会话不存在 → 创建 (含 query + client_ip)
         - 会话已存在 → 更新 query (如果提供了) 并触发 updated_at (由触发器自动维护)
 
         Args:
@@ -110,6 +114,7 @@ class SessionStore:
             agent_id: Agent 名称
             user_id: 用户 ID
             query: 首次查询内容 (可选)
+            client_ip: 客户端 IP 地址 (审计追溯用, PII, 可选)
         """
         pool = await get_pool(self._settings)
         async with pool.acquire() as conn:
@@ -117,8 +122,8 @@ class SessionStore:
             await conn.execute(
                 """
                 INSERT INTO research_sessions
-                    (session_id, agent_id, user_id, query, title, status)
-                VALUES ($1, $2, $3, $4, $5, 'active')
+                    (session_id, agent_id, user_id, query, title, status, client_ip)
+                VALUES ($1, $2, $3, $4, $5, 'active', $6)
                 ON CONFLICT (session_id, agent_id, user_id) DO UPDATE SET
                     query = COALESCE(EXCLUDED.query, research_sessions.query),
                     updated_at = NOW()
@@ -128,6 +133,7 @@ class SessionStore:
                 user_id,
                 query,
                 (query[:100] if query else "") or "",
+                client_ip or "",
             )
 
     async def update_session_title(

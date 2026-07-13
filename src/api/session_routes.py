@@ -150,8 +150,13 @@ async def create_session(request: CreateSessionRequest) -> dict[str, Any]:
     session_id = request.session_id or generate_session_id()
     title = request.title or ""
 
+    # 获取客户端 IP (审计追溯用, 从 contextvars 恢复)
+    from src.api.middleware import get_request_client_ip
+
+    client_ip = get_request_client_ip()
+
     store = get_session_store()
-    await store.create_session(session_id, agent_id, user_id, title=title)
+    await store.create_session(session_id, agent_id, user_id, title=title, client_ip=client_ip)
 
     # 返回创建的会话信息
     session = await store.get_session(session_id, agent_id, user_id)
