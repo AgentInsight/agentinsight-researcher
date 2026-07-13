@@ -430,7 +430,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
 
 -- ========== 业务表: 每日报告生成限额 (从环境变量迁移到数据库) ==========
 -- UserId 为 NULL 时表示系统默认每日报告生成限额
--- 取限额时取 UserId 专属限额与系统默认限额中较高的那个 (max)
+-- 用户有限额时用用户的, 没有则用系统的 (非取较高者)
 CREATE TABLE IF NOT EXISTS report_limits (
     id BIGSERIAL PRIMARY KEY,
     user_id VARCHAR(64) UNIQUE,                -- NULL = 系统默认限额; 非 NULL = 用户专属限额

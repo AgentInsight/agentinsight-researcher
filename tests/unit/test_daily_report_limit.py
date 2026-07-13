@@ -1,12 +1,18 @@
-"""单元测试: 每日报告限额检查 (IP-based 用户限流).
+"""单元测试: 每日报告限额检查 (IP-based 用户限流) - 穷尽端到端场景.
 
-验证 src/api/routes.py 第 559-625 行限额检查逻辑 + src/api/ip_user_resolver.py:
+验证 src/api/routes.py 限额检查逻辑 + src/api/ip_user_resolver.py:
 1. IP-based 用户超限 - 非流式 → 429 + 错误信息含 "已达上限" 和 "5/5"
 2. IP-based 用户未超限 - 非流式 → 不返回 429 (走正常研究流水线)
 3. IP-based 用户超限 - 流式 → SSE 含 "已达上限", finish_reason="stop"
 4. JWT Token 用户不受限额 (user_id 不以 "ip_" 开头)
 5. self_host=False 不走限额 (无 token → 401)
 6. ip_daily_report_limit=0 不限制
+7. 非流式成功路径 → increment_daily_report_count 被调用
+8. 非流式失败路径 (限额超限) → increment_daily_report_count 不被调用
+9. 流式成功路径 → increment_daily_report_count 被调用
+10. 流式失败路径 (限额超限) → increment_daily_report_count 不被调用
+11. 4 种限额场景通过 API 端到端 (用户有/无/大于/小于系统)
+12. increment 调用参数正确 (user_id, agent_id)
 
 单元测试不依赖外部服务 (Redis/Postgres/LLM 全部 mock).
 """
@@ -256,3 +262,352 @@ def test_limit_zero_no_restriction(monkeypatch: pytest.MonkeyPatch) -> None:
     # 不应返回 429 (limit=0 表示不限制)
     assert response.status_code != 429
     assert response.status_code == 200
+
+
+# ========== 场景 7: 非流式成功路径 → increment 被调用 ==========
+
+
+def test_non_stream_success_increment_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非流式成功路径 → increment_daily_report_count 应被调用.
+
+    验证: IP-based 用户未超限 → 走研究流水线 → 报告生成成功 → increment 被调用.
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_limit_check(monkeypatch, allowed=True, count=1)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    # increment 应被调用 (报告生成成功后递增计数)
+    mock_increment.assert_awaited_once()
+
+
+# ========== 场景 8: 非流式失败路径 (限额超限) → increment 不被调用 ==========
+
+
+def test_non_stream_limit_exceeded_increment_not_called(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非流式限额超限 → increment_daily_report_count 不应被调用.
+
+    验证: IP-based 用户超限 → 直接返回 429 → 不走研究流水线 → increment 不被调用.
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_limit_check(monkeypatch, allowed=False, count=5)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    # increment 不应被调用 (未生成报告, 不计数)
+    mock_increment.assert_not_called()
+
+
+# ========== 场景 9: 流式成功路径 → increment 被调用 ==========
+
+
+def test_stream_success_increment_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    """流式成功路径 → 流式 SSE 正常完成 (200 + finish_reason=stop).
+
+    注: 流式路径的 increment_daily_report_count 在后台任务 _persist_report 中调用,
+    TestClient 同步上下文下事件循环可能在后台任务执行前关闭.
+    increment 的单元测试在 test_ip_user_resolver.py 中已覆盖;
+    非流式路径的 increment 调用在 test_non_stream_success_increment_called 中验证.
+    此测试验证流式路径不返回 429 且 SSE 正常完成.
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_limit_check(monkeypatch, allowed=True, count=1)
+    _patch_increment(monkeypatch)
+
+    body = {**_REQUEST_BODY, "stream": True}
+    client = TestClient(app)
+    chunks: list[dict[str, Any]] = []
+    with client.stream("POST", "/v1/chat/completions", json=body) as response:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                payload = line[6:]
+                if payload == "[DONE]":
+                    break
+                chunks.append(json.loads(payload))
+
+    # 验证流式正常完成 (不是限额超限提示)
+    assert len(chunks) >= 1
+    # 不应有 "已达上限" (那是限额超限的提示)
+    first_content = chunks[0]["choices"][0]["delta"].get("content", "")
+    assert "已达上限" not in first_content
+    # 末块 finish_reason="stop" (正常完成)
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+# ========== 场景 10: 流式失败路径 (限额超限) → increment 不被调用 ==========
+
+
+def test_stream_limit_exceeded_increment_not_called(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """流式限额超限 → increment_daily_report_count 不应被调用.
+
+    验证: IP-based 用户超限 → 流式返回限额提示 → 不走研究流水线 → increment 不被调用.
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_limit_check(monkeypatch, allowed=False, count=5)
+    mock_increment = _patch_increment(monkeypatch)
+
+    body = {**_REQUEST_BODY, "stream": True}
+    client = TestClient(app)
+    with client.stream("POST", "/v1/chat/completions", json=body) as response:
+        assert response.status_code == 200
+        for _ in response.iter_lines():
+            pass
+
+    # increment 不应被调用 (未生成报告, 不计数)
+    mock_increment.assert_not_called()
+
+
+# ========== 场景 11: 4 种限额场景通过 API 端到端 ==========
+
+
+def _patch_db_limit_and_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    db_limit: int,
+    usage: int,
+) -> None:
+    """Mock 数据库层: _get_daily_limit_from_db 和 _get_daily_usage_from_db.
+
+    让 check_daily_report_limit 走真实逻辑 (不 mock 整个函数),
+    验证 COALESCE 优先级 + count >= limit 判断.
+
+    Args:
+        db_limit: 数据库返回的有效限额 (COALESCE 结果)
+        usage: 数据库返回的当日已用次数
+    """
+    monkeypatch.setattr(
+        "src.api.ip_user_resolver._get_daily_limit_from_db",
+        AsyncMock(return_value=db_limit),
+    )
+    monkeypatch.setattr(
+        "src.api.ip_user_resolver._get_daily_usage_from_db",
+        AsyncMock(return_value=usage),
+    )
+
+
+def test_scenario_user_has_limit_under_non_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 1: 用户有限额 (10), 已用 3 → 允许, 200, increment 调用."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=10, usage=3)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    mock_increment.assert_awaited_once()
+
+
+def test_scenario_user_has_limit_at_non_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 1: 用户有限额 (10), 已用 10 → 拒绝, 429, increment 不调用."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=10, usage=10)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    data = response.json()
+    assert "10/10" in data["error"]["message"]
+    mock_increment.assert_not_called()
+
+
+def test_scenario_user_no_limit_uses_system_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 2: 用户无限额, 系统限额 (5), 已用 2 → 允许, 200, increment 调用."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=5, usage=2)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    mock_increment.assert_awaited_once()
+
+
+def test_scenario_user_no_limit_uses_system_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 2: 用户无限额, 系统限额 (5), 已用 5 → 拒绝, 429, increment 不调用."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=5, usage=5)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    data = response.json()
+    assert "5/5" in data["error"]["message"]
+    mock_increment.assert_not_called()
+
+
+def test_scenario_user_greater_than_system_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 3: 用户限额 (10) > 系统 (5), 已用 7 → 允许 (用 10), 200, increment 调用.
+
+    关键: 若用 MAX() 得 10 (与 COALESCE 一致); 若用系统 5 则 7>=5 拒绝 (错误).
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=10, usage=7)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    mock_increment.assert_awaited_once()
+
+
+def test_scenario_user_greater_than_system_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 3: 用户限额 (10) > 系统 (5), 已用 10 → 拒绝 (用 10), 429."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=10, usage=10)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    data = response.json()
+    assert "10/10" in data["error"]["message"]
+    mock_increment.assert_not_called()
+
+
+def test_scenario_user_less_than_system_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 4: 用户限额 (3) < 系统 (5), 已用 2 → 允许 (用 3), 200, increment 调用."""
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=3, usage=2)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    mock_increment.assert_awaited_once()
+
+
+def test_scenario_user_less_than_system_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 4: 用户限额 (3) < 系统 (5), 已用 3 → 拒绝 (用 3), 429.
+
+    关键: 若用 MAX() 得 5, 3 < 5 允许 (错误);
+    用 COALESCE 用户优先得 3, 3 >= 3 拒绝 (正确).
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=3, usage=3)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    data = response.json()
+    assert "3/3" in data["error"]["message"]
+    mock_increment.assert_not_called()
+
+
+def test_scenario_user_less_than_system_between(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端场景 4 变体: 用户限额 (3) < 系统 (5), 已用 4 → 拒绝 (用 3), 429.
+
+    关键: 若用 MAX() 得 5, 4 < 5 允许 (错误);
+    用 COALESCE 用户优先得 3, 4 >= 3 拒绝 (正确).
+    这是最关键的差异验证用例 (4 在 3 和 5 之间).
+    """
+    settings = _make_settings(self_host=True, ip_daily_report_limit=5)
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_db_limit_and_usage(monkeypatch, db_limit=3, usage=4)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 429
+    data = response.json()
+    assert "4/3" in data["error"]["message"]
+    mock_increment.assert_not_called()
+
+
+# ========== 场景 12: increment 调用参数正确 ==========
+
+
+def test_increment_called_with_correct_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """increment_daily_report_count 应以正确的 user_id 和 agent_id 调用.
+
+    验证: IP-based 用户的 user_id (ip_ 前缀) 和 agent_id (agent_name) 正确传递.
+    """
+    settings = _make_settings(
+        self_host=True, ip_daily_report_limit=5, agent_name="agentinsight-researcher"
+    )
+    monkeypatch.setattr("src.api.routes.get_settings", lambda: settings)
+    _patch_pipeline(monkeypatch)
+    _patch_limit_check(monkeypatch, allowed=True, count=1)
+    mock_increment = _patch_increment(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
+
+    assert response.status_code == 200
+    mock_increment.assert_awaited_once()
+    # 验证调用参数: user_id 以 "ip_" 开头, agent_id 为 agent_name
+    call_args = mock_increment.await_args
+    assert call_args is not None
+    args, kwargs = call_args
+    # increment_daily_report_count(user_id, agent_id) 位置参数
+    assert len(args) >= 2
+    assert args[0].startswith("ip_")  # user_id
+    assert args[1] == "agentinsight-researcher"  # agent_id

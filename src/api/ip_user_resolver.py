@@ -4,7 +4,7 @@
 - 1 个 IP 对应 1 个 UserId (确定性: SHA256 哈希, 不存储原始 IP)
 - 每日报告生成限额从数据库 report_limits 表读取 (已从环境变量迁移)
   - UserId 为 NULL 的行表示系统默认限额 (默认 5)
-  - 取限额时取 UserId 专属限额与系统默认限额中较高的那个 (max)
+  - 用户有限额时用用户的, 没有则用系统的 (非取较高者)
 - 每日报告生成使用次数从数据库 daily_report_usage 表读取 (已从 Redis 迁移)
   - 按 UserId + 日期 记录当日报告生成次数
 - 仅报告生成成功才计数
@@ -81,7 +81,7 @@ def _get_beijing_date() -> str:
 async def _get_daily_limit_from_db(user_id: str) -> int:
     """从数据库 report_limits 表读取每日报告限额.
 
-    取 UserId 专属限额与系统默认限额 (user_id IS NULL) 中较高的那个 (max).
+    用户有限额时用用户的, 没有则用系统的 (user_id IS NULL).
     若两者均不存在, 返回 0 (表示不限制, 由调用方降级处理).
 
     Args:
@@ -93,16 +93,15 @@ async def _get_daily_limit_from_db(user_id: str) -> int:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 同时查询用户专属限额 (user_id = $1) 和系统默认限额 (user_id IS NULL)
-        # 取两者中较高的 (COALESCE 处理 NULL)
+        # 优先查询用户专属限额 (user_id = $1), 不存在时回退到系统默认限额 (user_id IS NULL)
+        # COALESCE(子查询1, 子查询2, 0) 实现优先级回退
         row = await conn.fetchrow(
             """
-            SELECT
-                COALESCE(
-                    MAX(COALESCE(daily_limit, 0)), 0
-                ) AS effective_limit
-            FROM report_limits
-            WHERE user_id = $1 OR user_id IS NULL
+            SELECT COALESCE(
+                (SELECT daily_limit FROM report_limits WHERE user_id = $1),
+                (SELECT daily_limit FROM report_limits WHERE user_id IS NULL),
+                0
+            ) AS effective_limit
             """,
             user_id,
         )
@@ -118,7 +117,7 @@ async def check_daily_report_limit(
 ) -> tuple[bool, int, int]:
     """检查用户当日报告生成是否超限.
 
-    限额从数据库 report_limits 表读取 (取用户专属 + 系统默认的较高者).
+    限额从数据库 report_limits 表读取 (用户有限额用用户的, 没有则用系统的).
     使用次数从数据库 daily_report_usage 表读取 (按 user_id + 日期).
 
     Args:
@@ -132,7 +131,7 @@ async def check_daily_report_limit(
         - daily_limit 为有效限额
     """
     try:
-        # 1. 从数据库读取有效限额 (用户专属 + 系统默认取较高者)
+        # 1. 从数据库读取有效限额 (用户有限额用用户的, 没有则用系统的)
         effective_limit = await _get_daily_limit_from_db(user_id)
 
         # 数据库无配置时降级到环境变量 fallback
@@ -195,34 +194,34 @@ async def increment_daily_report_count(
     从数据库 daily_report_usage 表 upsert (user_id + 日期).
     首次计数时 INSERT (daily_count=1), 后续 UPDATE (daily_count + 1).
 
+    异常向上抛出, 由调用方决定是否吞掉 (便于 routes.py 层记录可见日志).
+
     Args:
         user_id: 用户 ID
         agent_id: Agent 名称 (保留兼容)
     Returns:
         递增后的计数值
+    Raises:
+        Exception: 数据库操作失败时向上抛出
     """
-    try:
-        from src.memory.db_initializer import get_pool
+    from src.memory.db_initializer import get_pool
 
-        usage_date = _get_beijing_date()
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            # INSERT ... ON CONFLICT 幂等 upsert
-            # 首次: INSERT daily_count=1; 后续: daily_count = daily_count + 1
-            row = await conn.fetchrow(
-                """
-                INSERT INTO daily_report_usage (user_id, usage_date, daily_count)
-                VALUES ($1, $2, 1)
-                ON CONFLICT (user_id, usage_date)
-                DO UPDATE SET daily_count = daily_report_usage.daily_count + 1
-                RETURNING daily_count
-                """,
-                user_id,
-                usage_date,
-            )
-            new_count = int(row["daily_count"]) if row else 0
-            logger.info("用户 %s 当日报告计数 +1 (当前 %d)", user_id, new_count)
-            return new_count
-    except Exception as e:  # noqa: BLE001
-        logger.warning("每日报告计数递增失败: %s", e)
-        return 0
+    usage_date = _get_beijing_date()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # INSERT ... ON CONFLICT 幂等 upsert
+        # 首次: INSERT daily_count=1; 后续: daily_count = daily_count + 1
+        row = await conn.fetchrow(
+            """
+            INSERT INTO daily_report_usage (user_id, usage_date, daily_count)
+            VALUES ($1, $2, 1)
+            ON CONFLICT (user_id, usage_date)
+            DO UPDATE SET daily_count = daily_report_usage.daily_count + 1
+            RETURNING daily_count
+            """,
+            user_id,
+            usage_date,
+        )
+        new_count = int(row["daily_count"]) if row else 0
+        logger.info("用户 %s 当日报告计数 +1 (当前 %d)", user_id, new_count)
+        return new_count

@@ -1044,7 +1044,9 @@ async def _stream_research(
             async def _persist_report() -> None:
                 # 1. IP-based 用户报告生成成功后递增每日计数 (与 save_report 解耦)
                 #    报告内容非空且未失败即计数, 不依赖持久化是否成功
-                _report_md = final_state.get("report_md", "")
+                #    兼容 report_md 和 report_formats 两种字段 (与非流式路径一致)
+                _final_formats = final_state.get("report_formats") or {}
+                _report_md = _final_formats.get("md") or final_state.get("report_md", "")
                 _uid = initial_state.get("user_id", "")
                 _aid = initial_state.get("agent_id", "")
                 if (
@@ -1058,7 +1060,12 @@ async def _stream_research(
 
                         await increment_daily_report_count(_uid, _aid)
                     except Exception:
-                        logger.warning("每日报告计数递增失败 (不阻断主流程)", exc_info=True)
+                        logger.warning(
+                            "每日报告计数递增失败 (user=%s, session=%s, 不阻断主流程)",
+                            _uid,
+                            session_id,
+                            exc_info=True,
+                        )
 
                 # 2. 报告持久化存储 (独立于计数逻辑, 失败不影响已递增的计数)
                 try:

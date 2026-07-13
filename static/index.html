@@ -679,16 +679,6 @@
           <input type="text" id="modelInput" value="agentinsight-researcher" />
         </div>
         <div class="field">
-          <label>会话 ID (session_id)</label>
-          <div class="session-row">
-            <button class="small-btn primary" id="newSession" title="生成新 UUID v4">新建</button>
-            <span class="session-id-display" id="sessionIdDisplay">—</span>
-            <button class="small-btn" id="copySession" title="复制会话 ID">复制</button>
-            <button class="small-btn" id="clearSession" title="仅清空前端消息">清空</button>
-          </div>
-          <input type="text" id="sessionIdInput" placeholder="切换会话: 粘贴其它 session_id" style="margin-top:6px;" />
-        </div>
-        <div class="field">
           <label for="tokenInput">Bearer JWT Token (可选)</label>
           <div class="token-wrap">
             <input type="password" id="tokenInput" placeholder="留空则后端降级 IP-based UserId" autocomplete="off" />
@@ -1035,6 +1025,7 @@
     //   ws: WebSocket|null, wsReconnectTimer, wsReconnectAttempts,
     //   files: [],                     // 该会话已上传文件 (per-session 隔离)
     //   streamStartedAt: number|null,  // 流开始时间戳 (用于后台流限制 LRU 淘汰)
+    //   config: {reportFormat, reportType, language}, // per-session 报告配置
     // }
     const sessionStreams = new Map();
     // 后台流并发上限: 最多 1 个后台流 (切换到第 3 个会话时, 最早的后台流自动中止)
@@ -1066,9 +1057,31 @@
           wsReconnectAttempts: 0,
           files: [],
           streamStartedAt: null,
+          // per-session 报告配置 (从当前 DOM 值初始化, 后续切换会话时保存/恢复)
+          config: {
+            reportFormat: 'markdown',
+            reportType: 'detailed_report',
+            language: 'zh',
+          },
         });
       }
       return sessionStreams.get(sessionId);
+    }
+
+    /** 保存当前 DOM 配置到当前会话的 StreamContext */
+    function saveConfigToSession() {
+      const stream = currentStream();
+      stream.config.reportFormat = $('reportFormat').value;
+      stream.config.reportType = $('reportType').value;
+      stream.config.language = $('languageInput').value;
+    }
+
+    /** 从指定会话的 StreamContext 恢复配置到 DOM */
+    function restoreConfigFromSession(sessionId) {
+      const stream = ensureSessionStream(sessionId);
+      $('reportFormat').value = stream.config.reportFormat || 'markdown';
+      $('reportType').value = stream.config.reportType || 'detailed_report';
+      $('languageInput').value = stream.config.language || 'zh';
     }
 
     /** 获取当前会话流上下文 */
@@ -1104,10 +1117,6 @@
     });
 
     // ========== 会话管理 (以 UserId 为单位的会话持久化) ==========
-    function refreshSessionDisplay() {
-      $('sessionIdDisplay').textContent = state.sessionId;
-      $('sessionIdInput').value = state.sessionId;
-    }
 
     /** 构造请求头 (含 Authorization, 如有 Token) */
     function buildHeaders(json = false) {
@@ -1220,7 +1229,7 @@
             console.log('[loadLatestSession] 检测到后台流式会话, 优先切换:', targetSessionId);
           }
           state.sessionId = targetSessionId;
-          refreshSessionDisplay();
+          restoreConfigFromSession(targetSessionId);
           // 挂载该会话的消息容器
           attachSessionContainer(targetSessionId);
           // 加载最近 10 条消息 (守卫会跳过正在流式或已加载历史的会话)
@@ -1236,7 +1245,6 @@
       } catch (e) {
         console.warn('加载最近会话失败:', e);
         // 失败时降级为本地 UUID (不调用后端创建)
-        refreshSessionDisplay();
         attachSessionContainer(state.sessionId);
         showEmptyHint();
       }
@@ -1304,8 +1312,11 @@
      *  per-session 独立流: 旧会话的 SSE 流在后台继续生成, 不中止
      *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发, 切换会话本身不中止任何流 */
     async function switchSession(sessionId) {
+      // 保存当前会话的报告配置到 StreamContext
+      saveConfigToSession();
       state.sessionId = sessionId;
-      refreshSessionDisplay();
+      // 恢复目标会话的报告配置到 DOM
+      restoreConfigFromSession(sessionId);
       // 挂载目标会话的消息容器 (旧容器自动 detach, DOM 保留在内存中供后台流写入)
       attachSessionContainer(sessionId);
       // 按当前会话的 streaming 状态更新按钮
@@ -1427,6 +1438,8 @@
      *  per-session 独立流: 旧会话的 SSE 流在后台继续生成, 不中止
      *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发 */
     async function createNewSession() {
+      // 保存当前会话的报告配置到 StreamContext
+      saveConfigToSession();
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       try {
         const resp = await fetch(base + '/v1/sessions', {
@@ -1438,7 +1451,8 @@
         const session = await resp.json();
         if (session && session.session_id) {
           state.sessionId = session.session_id;
-          refreshSessionDisplay();
+          // 新会话使用默认配置 (ensureSessionStream 已初始化默认值)
+          restoreConfigFromSession(session.session_id);
           // 挂载新会话的空容器
           attachSessionContainer(session.session_id);
           showEmptyHint();
@@ -1455,7 +1469,7 @@
       } catch (e) {
         // 失败时降级为本地 UUID
         state.sessionId = uuidv4();
-        refreshSessionDisplay();
+        restoreConfigFromSession(state.sessionId);
         attachSessionContainer(state.sessionId);
         showEmptyHint();
         updateSendStopButtons();
@@ -1491,8 +1505,6 @@
       }
     }
 
-    // 顶部配置栏: 新建会话按钮 (兼容旧按钮)
-    $('newSession').addEventListener('click', createNewSession);
     // 侧边栏: 新建会话按钮
     $('sidebarNewSession').addEventListener('click', createNewSession);
     // 侧边栏: 收缩/展开 toggle (默认展开, 点击切换)
@@ -1502,35 +1514,6 @@
       const collapsed = sidebar.classList.toggle('collapsed');
       toggle.classList.toggle('collapsed', collapsed);
       toggle.title = collapsed ? '展开会话列表' : '收起会话列表';
-    });
-
-    $('copySession').addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(state.sessionId);
-        toast('会话 ID 已复制');
-      } catch {
-        toast('复制失败, 请手动选择');
-      }
-    });
-
-    $('clearSession').addEventListener('click', () => {
-      // 仅清空当前会话的前端消息 (后端 Checkpoint 仍保留), 不中止后台流
-      const container = currentMessagesContainer();
-      container.innerHTML = '';
-      const hint = document.createElement('div');
-      hint.className = 'empty-hint';
-      hint.id = 'emptyHint';
-      hint.innerHTML = '<h2>研究分析智能体 · 演示页</h2><p>当前会话已清空 (仅前端消息, 后端 Checkpoint 仍保留)</p>';
-      container.appendChild(hint);
-      toast('已清空当前会话消息');
-    });
-
-    // 切换会话: 输入新 ID 后失焦或回车即切换
-    $('sessionIdInput').addEventListener('change', () => {
-      const v = $('sessionIdInput').value.trim();
-      if (v && v !== state.sessionId) {
-        switchSession(v);
-      }
     });
 
     // 滚动加载更多消息: 滚动到顶部时触发 (per-session: 使用当前会话的分页状态)
@@ -3136,7 +3119,6 @@
     // ========== 页面初始化: 加载最近会话 + 会话列表 ==========
     // 打开页面时展示最近一个 SessionId 的信息 (默认显示最后十条对话, 滚动加载更多)
     // 没有会话则新建 (调用后端 POST /v1/sessions)
-    refreshSessionDisplay();  // 先显示初始 UUID (loadLatestSession 会覆盖)
     attachSessionContainer(state.sessionId);  // 挂载初始会话容器 (loadLatestSession 会替换为实际会话)
     showEmptyHint();
     loadLatestSession();      // 异步加载最近会话 (内部调用 connectWS + loadReportList)
