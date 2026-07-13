@@ -181,7 +181,7 @@ async def test_redis_get_exception_degrades_to_direct_search() -> None:
         async def get(self, key: str) -> str | None:
             raise ConnectionError("Redis 连接断开")
 
-        async def setex(self, key: str, ttl: int, value: str) -> None:
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
             raise ConnectionError("Redis 连接断开")
 
     class _MockSearcher:

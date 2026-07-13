@@ -109,7 +109,7 @@ class QuotaCache:
         )
 
         try:
-            await r.setex(cache_key, ttl, cache_value)
+            await r.set(cache_key, cache_value, ex=ttl)
             logger.info(
                 f"QuotaCache 标记 {engine} 不可用，TTL={ttl}s，reset_at={reset_at.isoformat()}"
             )

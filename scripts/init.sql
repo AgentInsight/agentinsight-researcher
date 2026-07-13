@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     query TEXT,                                -- 原始研究请求 (允许空会话)
     report_type VARCHAR(32) DEFAULT 'basic_report',  -- 空会话无报告类型
     report_format VARCHAR(16) DEFAULT 'markdown',    -- 空会话无报告格式
+    language VARCHAR(8) DEFAULT 'zh',               -- 报告语言 (zh/en)
     agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona
     agent_role_server VARCHAR(64),             -- 角色简称 (如 financial_analyst)
     title VARCHAR(256),                        -- 会话列表显示标题
@@ -413,6 +414,8 @@ ALTER TABLE IF EXISTS research_sessions ALTER COLUMN query DROP NOT NULL;
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_type DROP NOT NULL;
 -- 旧表兜底: 放宽 report_format 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
 ALTER TABLE IF EXISTS research_sessions ALTER COLUMN report_format DROP NOT NULL;
+-- 旧表兜底: 新增 language 字段 (新表 CREATE TABLE 已含)
+ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS language VARCHAR(8) DEFAULT 'zh';
 -- 旧表兜底: 新增 client_ip 字段 (新表 CREATE TABLE 已含, 审计追溯用)
 ALTER TABLE IF EXISTS research_sessions ADD COLUMN IF NOT EXISTS client_ip VARCHAR(64);
 

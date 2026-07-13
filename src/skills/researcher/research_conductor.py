@@ -670,10 +670,10 @@ class ResearchConductor:
         # 3. 写入缓存 (仅缓存非空结果, TTL=5min)
         if redis is not None and result:
             try:
-                await redis.setex(
+                await redis.set(
                     cache_key,
-                    self.settings.search_cache_ttl,
                     json.dumps(result, ensure_ascii=False, default=str),
+                    ex=self.settings.search_cache_ttl,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.warning("搜索缓存写入失败 (不阻断): %s", e)

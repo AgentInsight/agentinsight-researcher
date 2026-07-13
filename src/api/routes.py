@@ -701,6 +701,28 @@ async def chat_completions(
         "iteration_count": 0,
     }
 
+    # 持久化报告配置到数据库 (per-session)
+    # 失败不阻断主流程, 仅告警 (研究流程仍以 initial_state 中的配置为准)
+    if user_id and agent_id:
+        try:
+            from src.memory.session_store import get_session_store
+
+            store = get_session_store()
+            await store.update_report_config(
+                session_id,
+                agent_id,
+                user_id,
+                report_type=report_type,
+                report_format=report_format,
+                language=(request.language or settings.report_language or "zh").lower(),
+            )
+        except Exception:
+            logger.warning(
+                "保存报告配置失败 (不阻断主流程, session=%s): ",
+                session_id,
+                exc_info=True,
+            )
+
     # LangGraph 配置: thread_id 做会话隔离
     graph_config = {"configurable": {"thread_id": session_id}}
 

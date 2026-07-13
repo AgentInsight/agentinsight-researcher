@@ -99,6 +99,7 @@ async def test_get_cache_redis_none_returns_none() -> None:
     """Redis 为 None 时返回 None."""
     retriever = _make_retriever()
     retriever._redis = None
+    retriever._redis_initialized = True  # 避免 _ensure_redis 覆盖 mock
     result = await retriever._get_cache("key")
     assert result is None
 
@@ -113,6 +114,7 @@ async def test_get_cache_redis_exception_returns_none() -> None:
             raise RuntimeError("redis down")
 
     retriever._redis = _FailingRedis()
+    retriever._redis_initialized = True  # 避免 _ensure_redis 覆盖 mock
     result = await retriever._get_cache("key")
     assert result is None
 
@@ -154,6 +156,7 @@ async def test_get_cache_redis_miss_returns_none() -> None:
             return None
 
     retriever._redis = _FakeRedis()
+    retriever._redis_initialized = True  # 避免 _ensure_redis 覆盖 mock
     result = await retriever._get_cache("key")
     assert result is None
 

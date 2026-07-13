@@ -101,10 +101,10 @@ def _make_searcher(name: str, results: list[dict[str, Any]] | None = None) -> Ma
 
 
 def _make_mock_redis(*, cached_value: str | None = None) -> MagicMock:
-    """构造 mock aioredis.Redis (get/setex/ping 为 AsyncMock)."""
+    """构造 mock aioredis.Redis (get/set/ping 为 AsyncMock)."""
     r = MagicMock()
     r.get = AsyncMock(return_value=cached_value)
-    r.setex = AsyncMock()
+    r.set = AsyncMock()
     r.ping = AsyncMock()
     return r
 
@@ -120,7 +120,7 @@ class TestCachedSearchRedisIntegration:
         conductor: ResearchConductor,
         settings: Settings,
     ) -> None:
-        """缓存未命中: 调用 searcher.search, 结果写入 Redis (setex with TTL)."""
+        """缓存未命中: 调用 searcher.search, 结果写入 Redis (set with TTL)."""
         searcher = _make_searcher("bocha", [{"url": "https://a.com", "title": "A"}])
         mock_redis = _make_mock_redis(cached_value=None)
 
@@ -138,10 +138,10 @@ class TestCachedSearchRedisIntegration:
 
         searcher.search.assert_awaited_once()
         assert result == [{"url": "https://a.com", "title": "A"}]
-        # 验证写入缓存 (setex 带 TTL)
-        mock_redis.setex.assert_awaited_once()
-        setex_args = mock_redis.setex.call_args
-        assert setex_args[0][1] == settings.search_cache_ttl, "setex 第二参数应为 search_cache_ttl"
+        # 验证写入缓存 (set 带 TTL)
+        mock_redis.set.assert_awaited_once()
+        set_args = mock_redis.set.call_args
+        assert set_args.kwargs["ex"] == settings.search_cache_ttl, "set ex 参数应为 search_cache_ttl"
 
     async def test_cache_hit_skips_search(
         self,
@@ -194,7 +194,7 @@ class TestCachedSearchRedisIntegration:
         actual_key = mock_redis.get.call_args[0][0]
         assert actual_key == expected_key, f"缓存 key 格式不符: {actual_key}"
         # 写入缓存的 key 也应一致
-        write_key = mock_redis.setex.call_args[0][0]
+        write_key = mock_redis.set.call_args[0][0]
         assert write_key == expected_key
 
     async def test_cache_key_anonymous_user(
@@ -338,7 +338,7 @@ class TestCacheTtlExpiry:
         searcher.search.assert_awaited_once()
         assert result == [{"url": "https://re-search.com"}]
         # 过期后应重新写入缓存
-        mock_redis.setex.assert_awaited_once()
+        mock_redis.set.assert_awaited_once()
 
     async def test_empty_result_not_cached(
         self,
@@ -362,7 +362,7 @@ class TestCacheTtlExpiry:
 
         assert result == []
         searcher.search.assert_awaited_once()
-        mock_redis.setex.assert_not_awaited()
+        mock_redis.set.assert_not_awaited()
 
 
 # ========== TestRedisUnavailableFallback: Redis 连接失败不阻断搜索 ==========
@@ -417,14 +417,14 @@ class TestRedisUnavailableFallback:
         searcher.search.assert_awaited_once()
         assert result == [{"url": "https://fallback.com"}]
 
-    async def test_redis_setex_error_does_not_block(
+    async def test_redis_set_error_does_not_block(
         self,
         conductor: ResearchConductor,
     ) -> None:
-        """Redis setex 异常 → 不阻断返回结果 (仅告警)."""
+        """Redis set 异常 → 不阻断返回结果 (仅告警)."""
         searcher = _make_searcher("bocha", [{"url": "https://ok.com"}])
         mock_redis = _make_mock_redis(cached_value=None)
-        mock_redis.setex = AsyncMock(side_effect=RuntimeError("redis write failed"))
+        mock_redis.set = AsyncMock(side_effect=RuntimeError("redis write failed"))
 
         with patch(
             "src.skills.researcher.research_conductor.get_redis_client",

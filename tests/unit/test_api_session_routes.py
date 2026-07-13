@@ -496,3 +496,133 @@ def test_data_isolation_agent_user_passed_to_store(
     call_args_b = mock_store.list_sessions.call_args
     assert call_args_b.args[0] == "agent-B"
     assert call_args_b.args[1] == "user-B"
+
+
+# ========== GET /v1/sessions/{session_id}/config: 获取报告配置 ==========
+
+
+def test_get_report_config_success(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """GET /{session_id}/config 成功 → 返回报告配置."""
+    mock_store.get_session.return_value = {
+        "session_id": "sess-1",
+        "report_type": "detailed_report",
+        "report_format": "html",
+        "language": "en",
+    }
+
+    response = client.get("/v1/sessions/sess-1/config")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "sess-1"
+    assert data["report_type"] == "detailed_report"
+    assert data["report_format"] == "html"
+    assert data["language"] == "en"
+    # 验证数据隔离参数
+    mock_store.get_session.assert_awaited_once_with("sess-1", "test-agent", "test-user")
+
+
+def test_get_report_config_not_found_404(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """GET /{session_id}/config 会话不存在 → 404."""
+    mock_store.get_session.return_value = None
+
+    response = client.get("/v1/sessions/nonexistent/config")
+
+    assert response.status_code == 404
+    assert "会话不存在" in response.json()["detail"]
+
+
+# ========== PUT /v1/sessions/{session_id}/config: 更新报告配置 ==========
+
+
+def test_update_report_config_success(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """PUT /{session_id}/config 成功 → 200."""
+    mock_store.get_session.return_value = {"session_id": "sess-1"}
+    mock_store.update_report_config.return_value = True
+
+    response = client.put(
+        "/v1/sessions/sess-1/config",
+        json={
+            "report_type": "deep_research",
+            "report_format": "pdf",
+            "language": "zh",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "sess-1"
+    assert data["updated"] is True
+    mock_store.update_report_config.assert_awaited_once_with(
+        "sess-1",
+        "test-agent",
+        "test-user",
+        report_type="deep_research",
+        report_format="pdf",
+        language="zh",
+    )
+
+
+def test_update_report_config_partial(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """PUT /{session_id}/config 部分更新 → 200 (未传字段为 None, 保持原值)."""
+    mock_store.get_session.return_value = {"session_id": "sess-1"}
+    mock_store.update_report_config.return_value = True
+
+    response = client.put("/v1/sessions/sess-1/config", json={"language": "en"})
+
+    assert response.status_code == 200
+    # 验证 update_report_config 被调用时 report_type/report_format 为 None
+    mock_store.update_report_config.assert_awaited_once()
+    call_kwargs = mock_store.update_report_config.call_args.kwargs
+    assert call_kwargs["language"] == "en"
+    assert call_kwargs["report_type"] is None
+    assert call_kwargs["report_format"] is None
+
+
+def test_update_report_config_not_found_404(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """PUT /{session_id}/config 会话不存在 → 404."""
+    mock_store.get_session.return_value = None
+
+    response = client.put("/v1/sessions/nonexistent/config", json={"report_type": "basic_report"})
+
+    assert response.status_code == 404
+    assert "会话不存在" in response.json()["detail"]
+    # 不应调用 update_report_config
+    mock_store.update_report_config.assert_not_awaited()
+
+
+def test_update_report_config_empty_body(
+    client: TestClient,
+    mock_store: AsyncMock,
+    mock_request_context: None,
+) -> None:
+    """PUT /{session_id}/config 空请求体 → 200 (所有字段 None, 保持原值)."""
+    mock_store.get_session.return_value = {"session_id": "sess-1"}
+    mock_store.update_report_config.return_value = True
+
+    response = client.put("/v1/sessions/sess-1/config", json={})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "sess-1"
+    assert data["updated"] is True

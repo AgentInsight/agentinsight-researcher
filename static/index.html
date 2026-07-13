@@ -1068,20 +1068,64 @@
       return sessionStreams.get(sessionId);
     }
 
-    /** 保存当前 DOM 配置到当前会话的 StreamContext */
-    function saveConfigToSession() {
+    /** 保存当前 DOM 配置到当前会话的 StreamContext (内存缓存) + 持久化到数据库 */
+    async function saveConfigToSession() {
       const stream = currentStream();
-      stream.config.reportFormat = $('reportFormat').value;
-      stream.config.reportType = $('reportType').value;
-      stream.config.language = $('languageInput').value;
+      const reportFormat = $('reportFormat').value;
+      const reportType = $('reportType').value;
+      const language = $('languageInput').value;
+      stream.config.reportFormat = reportFormat;
+      stream.config.reportType = reportType;
+      stream.config.language = language;
+      // 持久化到数据库 (per-session)
+      const sessionId = state.sessionId;
+      if (!sessionId) return;
+      try {
+        const base = $('apiBase').value.trim().replace(/\/+$/, '');
+        await fetch(base + '/v1/sessions/' + encodeURIComponent(sessionId) + '/config', {
+          method: 'PUT',
+          headers: buildHeaders(true),
+          body: JSON.stringify({ report_type: reportType, report_format: reportFormat, language: language }),
+        });
+      } catch (e) {
+        /* 静默失败, 不阻断切换 (内存缓存仍生效) */
+      }
     }
 
-    /** 从指定会话的 StreamContext 恢复配置到 DOM */
-    function restoreConfigFromSession(sessionId) {
+    /** 从指定会话恢复配置到 DOM
+     *  1. 先用内存缓存快速恢复 DOM (同步, 立即响应)
+     *  2. 异步从数据库拉取最新值覆盖 (保证跨设备/刷新后一致) */
+    async function restoreConfigFromSession(sessionId) {
       const stream = ensureSessionStream(sessionId);
+      // 先用内存缓存快速恢复
       $('reportFormat').value = stream.config.reportFormat || 'markdown';
       $('reportType').value = stream.config.reportType || 'detailed_report';
       $('languageInput').value = stream.config.language || 'zh';
+      // 异步从数据库恢复最新值 (覆盖内存缓存)
+      try {
+        const base = $('apiBase').value.trim().replace(/\/+$/, '');
+        const resp = await fetch(
+          base + '/v1/sessions/' + encodeURIComponent(sessionId) + '/config',
+          { headers: buildHeaders() }
+        );
+        if (resp.ok) {
+          const cfg = await resp.json();
+          if (cfg.report_format) {
+            $('reportFormat').value = cfg.report_format;
+            stream.config.reportFormat = cfg.report_format;
+          }
+          if (cfg.report_type) {
+            $('reportType').value = cfg.report_type;
+            stream.config.reportType = cfg.report_type;
+          }
+          if (cfg.language) {
+            $('languageInput').value = cfg.language;
+            stream.config.language = cfg.language;
+          }
+        }
+      } catch (e) {
+        /* 静默失败, 用内存缓存值 */
+      }
     }
 
     /** 获取当前会话流上下文 */
@@ -1229,7 +1273,7 @@
             console.log('[loadLatestSession] 检测到后台流式会话, 优先切换:', targetSessionId);
           }
           state.sessionId = targetSessionId;
-          restoreConfigFromSession(targetSessionId);
+          await restoreConfigFromSession(targetSessionId);
           // 挂载该会话的消息容器
           attachSessionContainer(targetSessionId);
           // 加载最近 10 条消息 (守卫会跳过正在流式或已加载历史的会话)
@@ -1313,10 +1357,10 @@
      *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发, 切换会话本身不中止任何流 */
     async function switchSession(sessionId) {
       // 保存当前会话的报告配置到 StreamContext
-      saveConfigToSession();
+      await saveConfigToSession();
       state.sessionId = sessionId;
       // 恢复目标会话的报告配置到 DOM
-      restoreConfigFromSession(sessionId);
+      await restoreConfigFromSession(sessionId);
       // 挂载目标会话的消息容器 (旧容器自动 detach, DOM 保留在内存中供后台流写入)
       attachSessionContainer(sessionId);
       // 按当前会话的 streaming 状态更新按钮
@@ -1439,7 +1483,7 @@
      *  后台流限制延迟到用户新会话发送新请求时 (doSend) 才触发 */
     async function createNewSession() {
       // 保存当前会话的报告配置到 StreamContext
-      saveConfigToSession();
+      await saveConfigToSession();
       const base = $('apiBase').value.trim().replace(/\/+$/, '');
       try {
         const resp = await fetch(base + '/v1/sessions', {
@@ -1452,7 +1496,7 @@
         if (session && session.session_id) {
           state.sessionId = session.session_id;
           // 新会话使用默认配置 (ensureSessionStream 已初始化默认值)
-          restoreConfigFromSession(session.session_id);
+          await restoreConfigFromSession(session.session_id);
           // 挂载新会话的空容器
           attachSessionContainer(session.session_id);
           showEmptyHint();
@@ -1469,7 +1513,7 @@
       } catch (e) {
         // 失败时降级为本地 UUID
         state.sessionId = uuidv4();
-        restoreConfigFromSession(state.sessionId);
+        await restoreConfigFromSession(state.sessionId);
         attachSessionContainer(state.sessionId);
         showEmptyHint();
         updateSendStopButtons();

@@ -4,9 +4,11 @@
 - GET    /v1/sessions                          列出当前用户会话
 - GET    /v1/sessions/latest                   获取最近会话
 - GET    /v1/sessions/{session_id}/messages    获取会话消息 (分页, 滚动加载)
+- GET    /v1/sessions/{session_id}/config      获取会话报告配置
 - POST   /v1/sessions                          创建新会话
 - DELETE /v1/sessions/{session_id}             删除会话 (级联清理)
 - PATCH  /v1/sessions/{session_id}             更新会话标题
+- PUT    /v1/sessions/{session_id}/config      更新会话报告配置
 
 数据隔离:
 - 所有查询带 agent_id + user_id
@@ -45,6 +47,18 @@ class UpdateSessionRequest(BaseModel):
     """更新会话请求."""
 
     title: str = Field(..., min_length=1, max_length=256, description="新标题")
+
+
+class UpdateReportConfigRequest(BaseModel):
+    """更新报告配置请求."""
+
+    report_type: str | None = Field(
+        None, description="报告类型: basic_report | detailed_report | deep_research"
+    )
+    report_format: str | None = Field(
+        None, description="输出格式: markdown | html | pdf | docx | json"
+    )
+    language: str | None = Field(None, description="报告语言: zh | en")
 
 
 # ========== 端点实现 ==========
@@ -228,6 +242,58 @@ async def update_session(session_id: str, request: UpdateSessionRequest) -> dict
         raise HTTPException(status_code=500, detail="更新失败")
 
     return {"session_id": session_id, "title": request.title, "updated": True}
+
+
+@router.get("/{session_id}/config")
+async def get_report_config(session_id: str) -> dict[str, Any]:
+    """获取会话的报告配置 (report_type/report_format/language).
+
+    返回: {"session_id", "report_type", "report_format", "language"}
+    """
+    user_id, agent_id = _get_user_agent()
+    store = get_session_store()
+    session = await store.get_session(session_id, agent_id, user_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在或无权访问")
+    return {
+        "session_id": session_id,
+        "report_type": session.get("report_type") or "basic_report",
+        "report_format": session.get("report_format") or "markdown",
+        "language": session.get("language") or "zh",
+    }
+
+
+@router.put("/{session_id}/config")
+async def update_report_config(
+    session_id: str, request: UpdateReportConfigRequest
+) -> dict[str, Any]:
+    """更新会话的报告配置 (report_type/report_format/language).
+
+    请求体: {"report_type": "...", "report_format": "...", "language": "..."}
+    所有字段可选, 传 null/省略则保持原值.
+
+    返回: {"session_id", "updated": true}
+    """
+    user_id, agent_id = _get_user_agent()
+    store = get_session_store()
+
+    # 校验会话归属当前用户
+    session = await store.get_session(session_id, agent_id, user_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在或无权访问")
+
+    updated = await store.update_report_config(
+        session_id,
+        agent_id,
+        user_id,
+        report_type=request.report_type,
+        report_format=request.report_format,
+        language=request.language,
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="更新失败")
+
+    return {"session_id": session_id, "updated": True}
 
 
 # ========== 级联清理辅助函数 ==========

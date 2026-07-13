@@ -388,7 +388,7 @@ async def test_classify_with_cache_miss_calls_llm_and_writes_cache(
     # Mock Redis: 缓存未命中
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     classifier_with_mock_deps._redis = mock_redis
     classifier_with_mock_deps._redis_initialized = True
 
@@ -406,11 +406,11 @@ async def test_classify_with_cache_miss_calls_llm_and_writes_cache(
     # LLM 应被调用一次
     classifier_with_mock_deps._llm.achat.assert_called_once()
     # 缓存应被写入
-    mock_redis.setex.assert_called_once()
+    mock_redis.set.assert_called_once()
     # 检查写入的 TTL 与 value
-    call_args = mock_redis.setex.call_args
-    assert call_args.args[1] == classifier_with_mock_deps.settings.query_classify_cache_ttl
-    assert call_args.args[2] == "research"
+    call_args = mock_redis.set.call_args
+    assert call_args.kwargs["ex"] == classifier_with_mock_deps.settings.query_classify_cache_ttl
+    assert call_args.args[1] == "research"
 
 
 @pytest.mark.asyncio
@@ -446,7 +446,7 @@ async def test_classify_with_cache_llm_failure_returns_fallback_no_cache_write(
     # Mock Redis
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     classifier_with_mock_deps._redis = mock_redis
     classifier_with_mock_deps._redis_initialized = True
 
@@ -461,7 +461,7 @@ async def test_classify_with_cache_llm_failure_returns_fallback_no_cache_write(
     assert intent == QueryIntent.OFF_TOPIC
     assert source == "llm_fallback"
     # 缓存不应被写入 (避免缓存 fallback 结果)
-    mock_redis.setex.assert_not_called()
+    mock_redis.set.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -474,7 +474,7 @@ async def test_classify_with_cache_redis_failure_degrades_to_llm(
     # (源码已从 aioredis.from_url 重构为 src.common.redis_client.get_redis_client)
     mock_redis = AsyncMock()
     mock_redis.get = AsyncMock(side_effect=Exception("Redis 连接失败"))
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     classifier_with_mock_deps._redis = mock_redis
     classifier_with_mock_deps._redis_initialized = True
 

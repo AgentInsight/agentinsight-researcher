@@ -126,7 +126,7 @@ async def test_cached_search_cache_hit_returns_cached(
     cached_results = _make_results(3)
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=json.dumps(cached_results, ensure_ascii=False))
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     result = await conductor._cached_search(
@@ -144,7 +144,7 @@ async def test_cached_search_cache_hit_returns_cached(
     # 验证未调用真实搜索
     mock_searcher.search.assert_not_awaited()
     # 验证未写入缓存 (命中后不写)
-    mock_redis.setex.assert_not_awaited()
+    mock_redis.set.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -170,7 +170,7 @@ async def test_cached_search_cache_hit_same_query_engine(
 
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(side_effect=mock_get)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     mock_searcher.search = AsyncMock(return_value=_make_results(2))
@@ -207,7 +207,7 @@ async def test_cached_search_cache_miss_calls_search_and_writes(
     场景: Redis 中无缓存, _cached_search 应:
     1. redis.get 返回 None
     2. 调用 searcher.search 执行搜索
-    3. 用 redis.setex 写入缓存 (TTL=search_cache_ttl)
+    3. 用 redis.set 写入缓存 (ex=search_cache_ttl)
     4. 返回搜索结果
     """
     search_results = _make_results(2)
@@ -215,7 +215,7 @@ async def test_cached_search_cache_miss_calls_search_and_writes(
 
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     result = await conductor._cached_search(
@@ -231,12 +231,12 @@ async def test_cached_search_cache_miss_calls_search_and_writes(
     # 验证调用了搜索
     mock_searcher.search.assert_awaited_once_with("未命中查询", max_results=5, query_domains=None)
     # 验证写入了缓存
-    mock_redis.setex.assert_awaited_once()
+    mock_redis.set.assert_awaited_once()
     # 验证 TTL 来自 settings.search_cache_ttl
-    ttl = mock_redis.setex.call_args[0][1]
+    ttl = mock_redis.set.call_args.kwargs["ex"]
     assert ttl == settings.search_cache_ttl
     # 验证缓存内容是 JSON 序列化的搜索结果
-    cached_value = mock_redis.setex.call_args[0][2]
+    cached_value = mock_redis.set.call_args[0][1]
     assert json.loads(cached_value) == search_results
 
 
@@ -263,7 +263,7 @@ async def test_cached_search_cache_key_format(
     mock_searcher.search = AsyncMock(return_value=_make_results(1))
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     query = "缓存key测试"
@@ -279,9 +279,9 @@ async def test_cached_search_cache_key_format(
         agent_id=settings.agent_name,
         user_id=user_id,
     )
-    # redis.get 与 redis.setex 应使用相同的 key
+    # redis.get 与 redis.set 应使用相同的 key
     assert mock_redis.get.call_args[0][0] == expected_key
-    assert mock_redis.setex.call_args[0][0] == expected_key
+    assert mock_redis.set.call_args[0][0] == expected_key
 
 
 @pytest.mark.asyncio
@@ -296,7 +296,7 @@ async def test_cached_search_cache_key_anonymous_user(
     mock_searcher.search = AsyncMock(return_value=_make_results(1))
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     await conductor._cached_search(
@@ -323,7 +323,7 @@ async def test_cached_search_different_queries_different_keys(
     mock_searcher.search = AsyncMock(return_value=_make_results(1))
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     await conductor._cached_search(
@@ -349,18 +349,18 @@ async def test_cached_search_ttl_matches_settings(
     mock_searcher: MagicMock,
     settings: Settings,
 ) -> None:
-    """测试 setex 的 TTL 取自 settings.search_cache_ttl (默认 300s = 5min)."""
+    """测试 set 的 TTL 取自 settings.search_cache_ttl (默认 300s = 5min)."""
     mock_searcher.search = AsyncMock(return_value=_make_results(1))
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     await conductor._cached_search(
         mock_searcher, "TTL测试", max_results=3, query_domains=None, user_id="u1"
     )
 
-    ttl = mock_redis.setex.call_args[0][1]
+    ttl = mock_redis.set.call_args.kwargs["ex"]
     assert ttl == settings.search_cache_ttl
     assert ttl == 300  # 默认 5min
 
@@ -380,12 +380,12 @@ async def test_cached_search_empty_result_not_cached(
     场景: searcher.search 返回空列表, _cached_search 应:
     1. 调用搜索
     2. 返回空列表
-    3. 不调用 redis.setex (空结果不缓存)
+    3. 不调用 redis.set (空结果不缓存)
     """
     mock_searcher.search = AsyncMock(return_value=[])
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     result = await conductor._cached_search(
@@ -395,7 +395,7 @@ async def test_cached_search_empty_result_not_cached(
     assert result == []
     mock_searcher.search.assert_awaited_once()
     # 空结果不写入缓存
-    mock_redis.setex.assert_not_awaited()
+    mock_redis.set.assert_not_awaited()
 
 
 # ========== Redis 不可用降级 ==========
@@ -449,7 +449,7 @@ async def test_cached_search_cache_read_exception_degrades(
 
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(side_effect=Exception("Redis connection lost"))
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     result = await conductor._cached_search(
@@ -473,7 +473,7 @@ async def test_cached_search_cache_write_exception_does_not_block(
 ) -> None:
     """测试缓存写入异常时不阻断主流程, 仍返回搜索结果.
 
-    场景: redis.setex 抛异常 (如磁盘满), _cached_search 应:
+    场景: redis.set 抛异常 (如磁盘满), _cached_search 应:
     1. 捕获异常 (log warning)
     2. 正常返回搜索结果 (不阻断)
     """
@@ -482,7 +482,7 @@ async def test_cached_search_cache_write_exception_does_not_block(
 
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock(side_effect=Exception("Redis write failed"))
+    mock_redis.set = AsyncMock(side_effect=Exception("Redis write failed"))
     mock_get_redis.return_value = mock_redis
 
     result = await conductor._cached_search(
@@ -492,7 +492,7 @@ async def test_cached_search_cache_write_exception_does_not_block(
     # 验证写入异常不阻断, 仍返回搜索结果
     assert result == search_results
     mock_searcher.search.assert_awaited_once()
-    mock_redis.setex.assert_awaited_once()
+    mock_redis.set.assert_awaited_once()
 
 
 # ========== query_domains 透传 ==========
@@ -509,7 +509,7 @@ async def test_cached_search_passes_query_domains_to_searcher(
     mock_searcher.search = AsyncMock(return_value=_make_results(1))
     mock_redis = MagicMock()
     mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.setex = AsyncMock()
+    mock_redis.set = AsyncMock()
     mock_get_redis.return_value = mock_redis
 
     domains = ["example.com", "arxiv.org"]

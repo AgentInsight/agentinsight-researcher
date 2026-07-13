@@ -469,7 +469,7 @@ class LLMClient:
                 },
                 default=str,
             )
-            await r.setex(key, self.settings.llm_response_cache_ttl, payload)
+            await r.set(key, payload, ex=self.settings.llm_response_cache_ttl)
             logger.debug(
                 "LLM 响应缓存已写入: model=%s, ttl=%ds",
                 response.model,

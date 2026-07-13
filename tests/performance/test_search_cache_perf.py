@@ -73,7 +73,7 @@ class _FakeRedis:
     def __init__(self) -> None:
         self._store: dict[str, tuple[str, float]] = {}  # key → (value, expire_at)
         self.get_count = 0
-        self.setex_count = 0
+        self.set_count = 0
 
     async def get(self, key: str) -> str | None:
         self.get_count += 1
@@ -84,8 +84,9 @@ class _FakeRedis:
             del self._store[key]
         return None
 
-    async def setex(self, key: str, ttl: int, value: str) -> None:
-        self.setex_count += 1
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.set_count += 1
+        ttl = ex if ex is not None else 3600
         self._store[key] = (value, time.time() + ttl)
 
     async def aclose(self) -> None:
@@ -308,7 +309,7 @@ async def test_cache_only_stores_non_empty_results() -> None:
             searcher, query, max_results=5, query_domains=None, user_id="test_user"
         )
         assert result_1 == [], "应返回空结果"
-        assert fake_redis.setex_count == 0, "空结果不应写入缓存"
+        assert fake_redis.set_count == 0, "空结果不应写入缓存"
 
         # 第二次搜索 (缓存无数据, 再次调用 searcher)
         await conductor._cached_search(

@@ -443,10 +443,10 @@ class QueryIntentClassifier:
             # 写入缓存 (仅缓存 LLM 真实分类结果, 不缓存 fallback, 避免缓存污染)
             if r is not None and source == "llm":
                 try:
-                    await r.setex(
+                    await r.set(
                         cache_key,
-                        self.settings.query_classify_cache_ttl,
                         intent.value,
+                        ex=self.settings.query_classify_cache_ttl,
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning("QueryClassifier 缓存写入失败 (不阻断): %s", e)

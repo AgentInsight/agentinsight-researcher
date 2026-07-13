@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # research_sessions 查询字段列表 (显式列出, 避免 SELECT * 在表结构变更时的隐患)
 _SESSION_COLUMNS = (
     "session_id, agent_id, user_id, query, title, report_type, "
-    "report_format, agent_role, agent_role_server, status, client_ip, "
+    "report_format, language, agent_role, agent_role_server, status, client_ip, "
     "created_at, updated_at, expires_at"
 )
 
@@ -169,6 +169,49 @@ class SessionStore:
             )
             return result.endswith(" 1")
 
+    async def update_report_config(
+        self,
+        session_id: str,
+        agent_id: str,
+        user_id: str,
+        report_type: str | None = None,
+        report_format: str | None = None,
+        language: str | None = None,
+    ) -> bool:
+        """更新会话的报告配置 (report_type/report_format/language).
+
+        任一参数为 None 时保持原值不变 (COALESCE).
+
+        Args:
+            session_id: 会话 ID
+            agent_id: Agent 名称
+            user_id: 用户 ID
+            report_type: 报告类型 (basic_report/detailed_report/deep_research)
+            report_format: 输出格式 (markdown/html/pdf/docx/json)
+            language: 报告语言 (zh/en)
+
+        Returns:
+            True 更新成功, False 会话不存在
+        """
+        pool = await get_pool(self._settings)
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE research_sessions
+                SET report_type = COALESCE($4, report_type),
+                    report_format = COALESCE($5, report_format),
+                    language = COALESCE($6, language)
+                WHERE session_id = $1 AND agent_id = $2 AND user_id = $3
+                """,
+                session_id,
+                agent_id,
+                user_id,
+                report_type,
+                report_format,
+                language,
+            )
+            return result.endswith(" 1")
+
     async def touch_session(
         self,
         session_id: str,
@@ -221,6 +264,7 @@ class SessionStore:
                 """
                 SELECT
                     rs.session_id, rs.title, rs.query, rs.status,
+                    rs.report_type, rs.report_format, rs.language,
                     rs.created_at, rs.updated_at,
                     COALESCE(cm.cnt, 0) AS message_count
                 FROM research_sessions rs
@@ -262,6 +306,7 @@ class SessionStore:
                 """
                 SELECT
                     rs.session_id, rs.title, rs.query, rs.status,
+                    rs.report_type, rs.report_format, rs.language,
                     rs.created_at, rs.updated_at,
                     COALESCE(cm.cnt, 0) AS message_count
                 FROM research_sessions rs

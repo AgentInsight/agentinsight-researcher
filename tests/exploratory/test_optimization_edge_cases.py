@@ -70,7 +70,7 @@ async def test_empty_query_search_cache() -> None:
         async def get(self, key: str) -> str | None:
             return redis_store.get(key)
 
-        async def setex(self, key: str, ttl: int, value: str) -> None:
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
             redis_store[key] = value
 
     class _MockSearcher:
@@ -297,7 +297,7 @@ async def test_concurrent_100_search_cache_reads() -> None:
         async def get(self, key: str) -> str | None:
             return redis_store.get(key)
 
-        async def setex(self, key: str, ttl: int, value: str) -> None:
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
             redis_store[key] = value
 
     search_count = 0
@@ -364,7 +364,7 @@ async def test_concurrent_different_queries_no_collision() -> None:
         async def get(self, key: str) -> str | None:
             return redis_store.get(key)
 
-        async def setex(self, key: str, ttl: int, value: str) -> None:
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
             redis_store[key] = value
 
     class _MockSearcher:

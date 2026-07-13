@@ -563,11 +563,11 @@ async def test_rapid_sequential_requests() -> None:
     async def _redis_get(key: str) -> object:
         return cache_store.get(key)
 
-    async def _redis_setex(key: str, ttl: int, value: bytes) -> None:
+    async def _redis_set(key: str, value: bytes, ex: int | None = None) -> None:
         cache_store[key] = value
 
     mock_redis.get = AsyncMock(side_effect=_redis_get)
-    mock_redis.setex = AsyncMock(side_effect=_redis_setex)
+    mock_redis.set = AsyncMock(side_effect=_redis_set)
 
     with (
         patch("src.llm.client.litellm", fake_litellm),

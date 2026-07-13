@@ -774,3 +774,87 @@ class TestGenerateSessionId:
         parts = sid1.split("-")
         assert len(parts) == 5
         assert len(parts[0]) == 8
+
+
+# ========== update_report_config 测试 ==========
+
+
+class TestUpdateReportConfig:
+    """update_report_config: 更新会话报告配置 (COALESCE 保持原值)."""
+
+    async def test_all_fields_updated_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """更新全部三个报告配置字段 → 返回 True."""
+        mock_conn = _MockConn(execute_result="UPDATE 1")
+        _install_mock_pool(monkeypatch, mock_conn)
+
+        store = SessionStore(_make_settings())
+        result = await store.update_report_config(
+            "sess-1",
+            "agent-1",
+            "user-1",
+            report_type="detailed_report",
+            report_format="html",
+            language="en",
+        )
+
+        assert result is True
+        assert len(mock_conn.execute_calls) == 1
+        query, args = mock_conn.execute_calls[0]
+        assert "UPDATE research_sessions" in query
+        assert "report_type = COALESCE" in query
+        assert "report_format = COALESCE" in query
+        assert "language = COALESCE" in query
+        # 参数顺序: session_id, agent_id, user_id, report_type, report_format, language
+        assert args[0] == "sess-1"
+        assert args[1] == "agent-1"
+        assert args[2] == "user-1"
+        assert args[3] == "detailed_report"
+        assert args[4] == "html"
+        assert args[5] == "en"
+
+    async def test_partial_fields_keep_original(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """仅更新部分字段 (None 的保持原值) → 返回 True."""
+        mock_conn = _MockConn(execute_result="UPDATE 1")
+        _install_mock_pool(monkeypatch, mock_conn)
+
+        store = SessionStore(_make_settings())
+        result = await store.update_report_config(
+            "sess-1",
+            "agent-1",
+            "user-1",
+            report_type="deep_research",
+            report_format=None,
+            language=None,
+        )
+
+        assert result is True
+        # 验证 None 参数正确传递 (COALESCE 会保持原值)
+        _, args = mock_conn.execute_calls[0]
+        assert args[3] == "deep_research"  # report_type
+        assert args[4] is None  # report_format
+        assert args[5] is None  # language
+
+    async def test_session_not_found_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """会话不存在 (UPDATE 0) → 返回 False."""
+        mock_conn = _MockConn(execute_result="UPDATE 0")
+        _install_mock_pool(monkeypatch, mock_conn)
+
+        store = SessionStore(_make_settings())
+        result = await store.update_report_config(
+            "nonexistent", "agent-1", "user-1", report_type="basic_report"
+        )
+
+        assert result is False
+
+    async def test_all_none_still_executes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """所有字段都为 None → SQL 仍执行 (COALESCE 全部保持原值)."""
+        mock_conn = _MockConn(execute_result="UPDATE 1")
+        _install_mock_pool(monkeypatch, mock_conn)
+
+        store = SessionStore(_make_settings())
+        result = await store.update_report_config(
+            "sess-1", "agent-1", "user-1", report_type=None, report_format=None, language=None
+        )
+
+        assert result is True
+        assert len(mock_conn.execute_calls) == 1
