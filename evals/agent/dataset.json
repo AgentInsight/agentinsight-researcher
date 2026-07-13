@@ -1,0 +1,44 @@
+[
+  {
+    "question": "什么是大语言模型(LLM)的幻觉问题？如何缓解？",
+    "expected_tools": ["searx", "rag_retrieve"],
+    "expected_keywords": ["幻觉", "hallucination", "RAG", "检索增强", "事实核查"],
+    "ground_truth": "大语言模型幻觉是指模型生成看似合理但事实不正确或无法被来源支持的内容。缓解方法包括：检索增强生成(RAG)、事实核查、引用来源、降低温度参数、使用高质量训练数据、RLHF对齐训练等。",
+    "tags": ["ai", "llm", "rag"]
+  },
+  {
+    "question": "What are the recent breakthroughs in mRNA vaccine technology?",
+    "expected_tools": ["searx", "pubmed"],
+    "expected_keywords": ["mRNA", "vaccine", "lipid nanoparticle", "modified nucleosides"],
+    "ground_truth": "Recent mRNA vaccine breakthroughs include improved lipid nanoparticle delivery systems, modified nucleosides reducing immunogenicity, self-amplifying mRNA vaccines, and applications beyond COVID-19 such as cancer immunotherapy and personalized vaccines.",
+    "tags": ["biotech", "mrna", "vaccine"]
+  },
+  {
+    "question": "LangGraph 和 AutoGen 在多 Agent 编排上有什么区别？",
+    "expected_tools": ["searx", "rag_retrieve"],
+    "expected_keywords": ["LangGraph", "AutoGen", "状态机", "条件边", "Checkpointer"],
+    "ground_truth": "LangGraph 基于状态机+条件边+Checkpointer，控制流显式可追溯，适合生产环境；AutoGen 基于对话式协作，控制流隐式，适合快速原型。LangGraph 支持子图/Supervisor/Swarm 三种多 Agent 模式。",
+    "tags": ["ai", "agent", "langgraph"]
+  },
+  {
+    "question": "BM25 检索和向量检索的优缺点对比？",
+    "expected_tools": ["searx", "rag_retrieve"],
+    "expected_keywords": ["BM25", "向量检索", "关键词匹配", "语义", "混合检索"],
+    "ground_truth": "BM25 基于关键词匹配和词频，优点是快、无需训练、可解释、对精确关键词召回强；缺点是无语义理解、无法处理同义词。向量检索基于语义嵌入，优点是语义召回强、跨语言；缺点是需训练嵌入模型、对精确关键词可能漏召回、计算成本高。混合检索(BM25+向量)结合两者优势。",
+    "tags": ["rag", "bm25", "vector"]
+  },
+  {
+    "question": "How is artificial intelligence being used in drug discovery?",
+    "expected_tools": ["searx", "arxiv"],
+    "expected_keywords": ["AI", "drug discovery", "protein folding", "AlphaFold", "molecular"],
+    "ground_truth": "AI is transforming drug discovery through protein structure prediction (AlphaFold), virtual screening of molecular compounds, de novo drug design with generative models, predicting drug-target interactions, and optimizing clinical trial design. These approaches significantly reduce the time and cost of traditional drug development.",
+    "tags": ["ai", "drug", "biotech"]
+  },
+  {
+    "question": "Qdrant 向量数据库相比 Pinecone 有哪些优势？",
+    "expected_tools": ["searx", "rag_retrieve"],
+    "expected_keywords": ["Qdrant", "Pinecone", "开源", "过滤", "部署"],
+    "ground_truth": "Qdrant 相比 Pinecone 的优势包括：开源可自托管（数据不出境）、强大的 payload 过滤能力、API 优雅、部署简单（单二进制/Docker）、支持多种距离度量、社区活跃。Pinecone 为闭源托管服务，适合无运维诉求的场景，但存在数据出境合规风险。",
+    "tags": ["rag", "vector", "qdrant"]
+  }
+]
