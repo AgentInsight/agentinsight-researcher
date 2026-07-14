@@ -49,6 +49,7 @@ packages/npm-pkgs/
 packages/playwright-browsers/
 packages/uv/
 packages/searxng-wheels/
+packages/frontend-wheels/
 !packages/wheels/.gitkeep
 !packages/debs/.gitkeep
 !packages/models/.gitkeep
@@ -58,11 +59,13 @@ packages/searxng-wheels/
 !packages/playwright-browsers/.gitkeep
 !packages/uv/.gitkeep
 !packages/searxng-wheels/.gitkeep
+!packages/frontend-wheels/.gitkeep
 
 # QA 模式构建文件 (AGENTS.md 第 12 章三套构建模式, 不入仓)
 docker-compose-qa.yaml
 Dockerfile.qa
 docker-build.qa.bat
+frontend/Dockerfile.qa
 scripts/build-offline.ps1
 scripts/offline-deploy.ps1
 
@@ -70,6 +73,7 @@ scripts/offline-deploy.ps1
 docker-compose-offline.yaml
 Dockerfile.offline
 docker-build.offline.sh
+frontend/Dockerfile.offline
 
 # 临时文件
 *.log
@@ -98,3 +102,4 @@ tests/manual/
 /docker-compose-offline-self.yaml
 /docs/OPEN_SOURCE_READINESS_ASSESSMENT.md
 /docs/TEST_REPORT_v1.1.md
+/.env.frontend
