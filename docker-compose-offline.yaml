@@ -1,0 +1,185 @@
+# agentinsight-researcher 容器编排 (生产/离线模式)
+# 离线部署 + depends_on service_healthy + 命名卷
+# 生产离线模式: 所有镜像从 tarball 加载, 依赖从 packages/ 安装, 模型从本地 volume 加载
+# PostgreSQL 由外部托管 (env 配置 POSTGRES_HOST/PORT/USER/PASSWORD/DB), 不在 compose 内构建
+# 仅 agent:8066 + frontend:3000 + embeddings:8088 + qdrant:6333 对外暴露, 其余绑定 127.0.0.1 (生产部署硬约束)
+# 依赖顺序: redis → qdrant → embeddings → searxng → agent → frontend (rerank 可选)
+# rerank 容器通过 profile 控制, 默认不启动; 启用: docker compose -f docker-compose-offline.yaml --profile rerank up -d
+# 所有环境变量统一从 .env 加载 (env_file + compose 插值), compose 文件不含硬编码
+# 镜像版本由 packages/images/ 中的 tarball 决定, 必须与 .env 中版本变量保持一致
+# 镜像版本/TEI 服务端配置等 compose-only 参数已硬编码 (V4 简化: 从 .env 移除)
+# 使用方式: docker compose -p agentinsight -f docker-compose-offline.yaml --env-file .env up -d
+
+services:
+  redis:
+    # 生产离线模式: redis 镜像从 tarball 加载 (packages/images/redis-8.tar)
+    image: docker.io/redis:8
+    restart: always
+    env_file:
+      - .env
+    command: >
+      sh -c "redis-server
+      $${REDIS_AUTH:+--requirepass \"$$REDIS_AUTH\"}
+      --maxmemory-policy noeviction"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli $${REDIS_AUTH:+-a \"$$REDIS_AUTH\"} ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  qdrant:
+    # 生产离线模式: qdrant 镜像从 tarball 加载 (packages/images/qdrant-v1.18.0.tar)
+    image: qdrant/qdrant:v1.18.0
+    restart: always
+    env_file:
+      - .env
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__STATIC_API_KEY: ${QDRANT_API_KEY:-}
+    ports:
+      - "6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  embeddings:
+    # BGE 服务镜像 (bge-base-zh-v1.5, 768维), 生产离线模式镜像从 tarball 加载
+    # tarball: packages/images/text-embeddings-inference-cpu-1.9.tar
+    # 模型权重从宿主机 packages/models/ bind mount (只读), 禁止运行时从 HuggingFace 下载 (生产离线部署硬约束)
+    image: tei-embedding:cpu-1.9
+    restart: always
+    env_file:
+      - .env
+    environment:
+      # TEI 服务端配置 (V4 简化: compose-only 参数硬编码, 不暴露到 .env)
+      MODEL_ID: /data/bge-base-zh-v1.5
+      DTYPE: float32
+      MAX_BATCH_TOKENS: 16384
+      MAX_CLIENT_BATCH_SIZE: ${EMBEDDINGS_MAX_CLIENT_BATCH_SIZE:-4}
+      MAX_CONCURRENT_REQUESTS: ${EMBEDDINGS_TEI_MAX_CONCURRENT:-16}
+      AUTO_TRUNCATE: "true"
+      PORT: "8088"
+      API_KEY: ${EMBEDDINGS_API_KEY:-}
+    ports:
+      - "8088:8088"
+    volumes:
+      # 命名卷: TEI 用 /data 作为 HF cache (可写, 存放下载元数据)
+      - embeddings_models:/data
+      # bind mount: 预下载的模型权重 (只读), 覆盖命名卷同路径内容, 确保 TEI 直接加载本地模型
+      - ./packages/models/bge-base-zh-v1.5:/data/bge-base-zh-v1.5:ro
+    healthcheck:
+      # TEI 镜像 ENTRYPOINT=[text-embeddings-router], CMD 形式会被拦截
+      # 改用 CMD-SHELL + curl 绝对路径, 绕过 ENTRYPOINT 拦截
+      test: ["CMD-SHELL", "/usr/bin/curl -sf http://localhost:8088/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  searxng:
+    # 元搜索引擎 (替代 DuckDuckGo 直连, 国内可用), 聚合 Bing/Baidu/Brave 等
+    # 仅绑定 127.0.0.1, agent 容器通过 compose 网络以服务名 searxng:8099 访问
+    # 自定义镜像: 构建时预装 curl_cffi (替代启动时 pip install, 真正离线)
+    # Dockerfile.searxng 通过 packages/searxng-wheels/ 离线安装 (生产离线硬约束)
+    # 预下载 wheel: powershell -ExecutionPolicy Bypass -File scripts\prepare-searxng-packages.ps1
+    build:
+      context: .
+      dockerfile: Dockerfile.searxng
+    image: agentinsight-searxng:offline
+    restart: always
+    ports:
+      - "127.0.0.1:8099:8099"
+    env_file:
+      - .env
+    environment:
+      # SearXNG 镜像启动脚本通过 SEARXNG_PORT 覆盖 settings.yml 的 server.port
+      SEARXNG_PORT: "8099"
+    volumes:
+      # 配置文件 (含引擎开关/limiter/redis 配置)
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml
+      - ./config/searxng/limiter.toml:/etc/searxng/limiter.toml
+      # sogou_stealth 自定义引擎直接 bind mount 到 searx 包目录 (替代 cp 命令, 更可靠)
+      - ./config/searxng/engines/sogou_stealth.py:/usr/local/searxng/searx/engines/sogou_stealth.py:ro
+      # baidu_stealth / quark_stealth 自定义引擎 (curl_cffi Chrome TLS 指纹规避 CAPTCHA)
+      - ./config/searxng/engines/baidu_stealth.py:/usr/local/searxng/searx/engines/baidu_stealth.py:ro
+      - ./config/searxng/engines/quark_stealth.py:/usr/local/searxng/searx/engines/quark_stealth.py:ro
+      # 数据卷 (limiter 限流数据, 如启用 redis 则无需)
+      - searxng_data:/etc/searxng/data
+    # 资源限制 (元搜索引擎轻量, 限制内存防泄漏)
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 1.0
+    healthcheck:
+      # SearXNG 镜像基于 Alpine 无 curl, 改用 busybox wget
+      # 添加 X-Forwarded-For 头, 避免 SearXNG botdetection "X-Forwarded-For nor X-Real-IP header is set!" 警告
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header='X-Forwarded-For: 127.0.0.1' http://127.0.0.1:8099/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 多 Agent 架构: 服务名带 -researcher 后缀, 与未来 agent-xxx 区分
+  agent-researcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.offline
+    image: agentinsight-researcher:offline
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8066:8066"
+    volumes:
+      - session_data:/app/data/sessions
+      - uploads_data:/tmp/uploads
+      # FastEmbed ONNX 模型文件 (bge-small-zh-v1.5, 上下文压缩精排用)
+      # 生产离线模式: 模型文件从宿主机 packages/models/ bind mount (只读)
+      - ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  session_data:
+    driver: local
+  uploads_data:
+    driver: local
+  embeddings_models:
+    driver: local
+  rerank_models:
+    driver: local
+  searxng_data:
+    driver: local

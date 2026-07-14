@@ -1,0 +1,160 @@
+# agentinsight-researcher Dockerfile (生产/离线模式)
+# 多阶段构建 + 非 root + 离线安装 + python:3.12-slim
+# 禁止: 部署时联网拉镜像/装依赖/下模型; latest 标签
+# 生产离线模式: 所有依赖预下载到 packages/ (wheels/debs/models/images)
+
+# ========== Builder 阶段: 离线安装 Python wheel ==========
+FROM python:3.12-slim AS builder
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# 离线安装 Python 依赖 (--no-index 禁联网)
+# 预下载 wheel 包到 packages/wheels/ (宿主机 pip download)
+COPY packages/wheels/ /app/packages/
+COPY requirements.txt .
+RUN pip install --no-index --find-links=/app/packages -r requirements.txt
+
+# ========== Runtime 阶段 ==========
+FROM python:3.12-slim AS runtime
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# 离线安装运行时共享库 (WeasyPrint/lxml/psycopg 依赖)
+# 预下载 .deb 到 packages/debs/ (宿主机 docker cp from temp container)
+# 任务1: 需预下载中文字体 .deb 到 packages/debs/ (PDF/DOCX 报告中文显示):
+#   fonts-noto-cjk, fonts-noto-cjk-extra, fonts-wqy-zenhei, fonts-wqy-microhei
+#   预下载命令 (宿主机执行, 需联网):
+#   apt-get download fonts-noto-cjk fonts-noto-cjk-extra fonts-wqy-zenhei fonts-wqy-microhei
+#   或: docker run --rm -v $PWD/packages/debs:/out python:3.12-slim bash -c \
+#       "apt-get update && apt-get install -y --download-only fonts-noto-cjk fonts-wqy-microhei && cp /var/cache/apt/archives/*.deb /out/"
+COPY packages/debs/ /tmp/debs/
+# 循环 dpkg -i 解决依赖顺序 (离线安装标准技巧)
+RUN dpkg -i /tmp/debs/*.deb 2>/dev/null; \
+    dpkg -i /tmp/debs/*.deb 2>/dev/null; \
+    dpkg -i /tmp/debs/*.deb; \
+    rm -rf /tmp/debs && ldconfig; \
+    # 任务1: 验证中文字体已安装 (PDF/DOCX 报告需要)
+    if ! fc-list | grep -qi "noto sans cjk\|wenquanyi"; then \
+        echo "[WARNING] 中文字体未安装 (fonts-noto-cjk/fonts-wqy-*), PDF/DOCX 报告将乱码. 请预下载字体 .deb 到 packages/debs/"; \
+    fi
+
+# 离线安装 Node.js 22 LTS + 预装 MCP npm 包 (方案 C)
+# 预下载 Node.js 二进制到 packages/nodejs/, npm 全局包到 packages/npm-pkgs/
+# 准备脚本: scripts/prepare-nodejs-packages.ps1 (Windows) / .sh (Linux)
+# 若未运行准备脚本, Node.js 不会安装, MCP 服务将不可用 (不阻断构建)
+COPY packages/nodejs/ /tmp/nodejs/
+COPY packages/npm-pkgs/ /tmp/npm-pkgs/
+RUN if ls /tmp/nodejs/node-v*-linux-x64.tar.gz 2>/dev/null 1>&2; then \
+        echo "[Node.js] 安装 Node.js 22 LTS (离线)"; \
+        tar -xzf /tmp/nodejs/node-v*-linux-x64.tar.gz -C /usr/local --strip-components=1 --no-same-owner; \
+        node --version && npm --version && npx --version; \
+    else \
+        echo "[Node.js] 未找到预下载二进制, 跳过安装 (MCP 服务将不可用)"; \
+    fi && \
+    if ls /tmp/npm-pkgs/node-global.tar.gz 2>/dev/null 1>&2; then \
+        echo "[npm] 预装 MCP npm 包到全局 (离线)"; \
+        mkdir -p /usr/local/lib/node_modules; \
+        tar -xzf /tmp/npm-pkgs/node-global.tar.gz -C /usr/local/lib/node_modules --strip-components=1; \
+        ls /usr/local/lib/node_modules/ | head -5; \
+    else \
+        echo "[npm] 未找到预打包 npm 全局包, 跳过预装"; \
+    fi && \
+    rm -rf /tmp/nodejs /tmp/npm-pkgs && \
+    # 离线模式: 将全局 npm 包的 bin 软链接到 /usr/local/bin \
+    # 修复 npx 离线解析: npx 不从 NODE_PATH 解析包 (查找顺序: local node_modules/.bin \
+    #   -> npx 自己缓存 ~/.npm/_npx -> 远程 registry), 但 npx 会从 PATH 查找可执行文件, \
+    #   预装到 /usr/local/lib/node_modules 的全局包对 npx 不可见, 故需软链接 bin 到 PATH \
+    # 对每个全局包, 解析 package.json 的 bin 字段 (支持 string/object 两种形式) 并软链接 \
+    if [ -x /usr/local/bin/node ] && [ -d /usr/local/lib/node_modules ]; then \
+        echo "[npm] 软链接全局包 bin 到 /usr/local/bin (npx 离线解析修复)"; \
+        for pkg_dir in /usr/local/lib/node_modules/*/; do \
+            [ -f "$pkg_dir/package.json" ] || continue; \
+            node -e "const path=require('path');const d=process.argv[1];const p=require(path.join(d,'package.json'));const b=p.bin;if(typeof b==='string'){let n=p.name||'';if(n.startsWith('@'))n=n.split('/').pop();console.log(n+' '+path.resolve(d,b))}else if(b&&typeof b==='object'){for(const k in b)console.log(k+' '+path.resolve(d,b[k]))}" "$pkg_dir" 2>/dev/null | while IFS=' ' read -r name target; do \
+                if [ -f "$target" ]; then \
+                    ln -sf "$target" "/usr/local/bin/$name" 2>/dev/null || true; \
+                    echo "  linked: $name -> $target"; \
+                fi; \
+            done; \
+        done; \
+    fi
+
+# 设置 npm 离线模式 (避免 npx 启动时尝试联网检查, 加速启动)
+ENV NPM_CONFIG_OFFLINE=true \
+    NODE_PATH=/usr/local/lib/node_modules
+
+# 离线安装 uv/uvx (运行 PyPI MCP 服务, 如 mcp-server-fetch/mcp-server-git 等)
+# 预下载 uv 二进制 tarball 到 packages/uv/uv-x86_64-linux.tar.gz
+# 准备脚本: scripts/prepare-uv-packages.ps1 (Windows) / .sh (Linux)
+# 若未运行准备脚本, uv 不会安装, uvx 类 MCP 不可用 (不阻断构建)
+COPY packages/uv/ /tmp/uv/
+RUN if ls /tmp/uv/uv-*-linux.tar.gz 2>/dev/null 1>&2; then \
+        echo "[uv] 安装 uv (离线)"; \
+        tar -xzf /tmp/uv/uv-*-linux.tar.gz -C /tmp/uv --strip-components=1; \
+        cp /tmp/uv/uv /usr/local/bin/uv; \
+        cp /tmp/uv/uvx /usr/local/bin/uvx; \
+        chmod +x /usr/local/bin/uv /usr/local/bin/uvx; \
+        uv --version && uvx --version; \
+    else \
+        echo "[uv] 未找到预下载二进制, 跳过安装 (uvx 类 MCP 将不可用)"; \
+    fi && \
+    rm -rf /tmp/uv
+
+# 离线安装 Playwright chromium (JS 渲染抓取, 方案 E)
+# 预下载 chromium 到 packages/playwright-browsers/ (宿主机 playwright install)
+# 准备脚本: scripts/prepare-playwright-chromium.ps1 (Windows) / .sh (Linux)
+# 若未运行准备脚本, chromium 不会安装, PlaywrightScraper 降级返回空内容 (不阻断构建)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY packages/playwright-browsers/ /tmp/pw-browsers/
+RUN if ls /tmp/pw-browsers/chromium-*/ 2>/dev/null 1>&2; then \
+        echo "[Playwright] 安装 chromium (离线)"; \
+        mkdir -p /opt/pw-browsers; \
+        cp -r /tmp/pw-browsers/* /opt/pw-browsers/; \
+        chmod -R a+rx /opt/pw-browsers; \
+        echo "[Playwright] chromium 安装完成"; \
+    else \
+        echo "[Playwright] 未找到预下载 chromium, 跳过安装 (PlaywrightScraper 将降级)"; \
+    fi && \
+    rm -rf /tmp/pw-browsers
+
+# 复制 Python site-packages (含已安装依赖)
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 创建非 root 用户
+RUN groupadd -r agent && useradd -r -g agent -d /app -s /sbin/nologin agent \
+    && mkdir -p /app/data/sessions /tmp/uploads \
+    && chown -R agent:agent /app /tmp/uploads
+
+# 复制业务代码
+COPY --chown=agent:agent . .
+
+# FastEmbed ONNX 模型文件 (bge-small-zh-v1.5, 上下文压缩精排用)
+# 生产离线模式: 模型文件通过 docker-compose-offline.yaml bind mount 挂载 (只读)
+# 路径: ./packages/models/bge-small-zh-v1.5-onnx:/app/models/bge-small-zh-v1.5-onnx:ro
+
+USER agent
+
+# 构建时强校验 litellm 已正确安装 (避免运行时 ModuleNotFoundError)
+# 重建镜像须加 --no-cache: docker compose -p agentinsight build --no-cache (确保 litellm 被重新安装)
+# 注意: litellm 库不暴露 __version__ 属性, 用 importlib.metadata.version 读取
+RUN python -c "import litellm; from importlib.metadata import version; print(f'litellm version: {version(\"litellm\")}')" || \
+    (echo "ERROR: litellm not installed, rebuild required" && exit 1)
+
+EXPOSE 8066
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import httpx; r=httpx.get('http://localhost:8066/health', timeout=5.0); assert r.status_code==200" || exit 1
+
+CMD ["python", "server.py"]
