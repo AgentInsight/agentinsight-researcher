@@ -141,6 +141,49 @@ try {
         Write-Host "@tailwindcss/oxide-linux-x64-musl already exists" -ForegroundColor Green
     }
 
+    # --- @next/swc-linux-x64-gnu (Next.js SWC 编译器, 构建时必需) ---
+    # Next.js 构建时会自动下载 @next/swc-<platform> 原生二进制到 /root/.cache/next-swc
+    # 离线模式下必须预装到 node_modules/@next/swc-linux-x64-gnu, 否则构建时联网下载
+    # 注意: 即使使用 Alpine (musl), Next.js 也会优先尝试 gnu 版本, 故两个版本都预装
+    $nextSwcGnuDir = Join-Path $frontendDir "node_modules\@next\swc-linux-x64-gnu"
+    if (-not (Test-Path $nextSwcGnuDir)) {
+        $nextPkgDir = Join-Path $frontendDir "node_modules\next"
+        if (Test-Path $nextPkgDir) {
+            $nextVersion = (& node -p "require('./node_modules/next/package.json').version").Trim()
+            Write-Host "Downloading @next/swc-linux-x64-gnu@$nextVersion..."
+            $packResult = & npm pack "@next/swc-linux-x64-gnu@$nextVersion" 2>&1
+            $tarballFile = ($packResult | Where-Object { $_ -match '\.tgz$' } | Select-Object -Last 1).Trim()
+            if ($tarballFile -and (Test-Path $tarballFile)) {
+                New-Item -ItemType Directory -Force -Path $nextSwcGnuDir | Out-Null
+                & tar -xzf $tarballFile -C $nextSwcGnuDir --strip-components=1
+                Write-Host "  @next/swc-linux-x64-gnu installed" -ForegroundColor Green
+                Remove-Item $tarballFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Write-Host "@next/swc-linux-x64-gnu already exists" -ForegroundColor Green
+    }
+
+    # --- @next/swc-linux-x64-musl (Alpine 平台 fallback) ---
+    $nextSwcMuslDir = Join-Path $frontendDir "node_modules\@next\swc-linux-x64-musl"
+    if (-not (Test-Path $nextSwcMuslDir)) {
+        $nextPkgDir = Join-Path $frontendDir "node_modules\next"
+        if (Test-Path $nextPkgDir) {
+            $nextVersion = (& node -p "require('./node_modules/next/package.json').version").Trim()
+            Write-Host "Downloading @next/swc-linux-x64-musl@$nextVersion..."
+            $packResult = & npm pack "@next/swc-linux-x64-musl@$nextVersion" 2>&1
+            $tarballFile = ($packResult | Where-Object { $_ -match '\.tgz$' } | Select-Object -Last 1).Trim()
+            if ($tarballFile -and (Test-Path $tarballFile)) {
+                New-Item -ItemType Directory -Force -Path $nextSwcMuslDir | Out-Null
+                & tar -xzf $tarballFile -C $nextSwcMuslDir --strip-components=1
+                Write-Host "  @next/swc-linux-x64-musl installed" -ForegroundColor Green
+                Remove-Item $tarballFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Write-Host "@next/swc-linux-x64-musl already exists" -ForegroundColor Green
+    }
+
     Write-Host "========== 3. Pack node_modules as tarball ==========" -ForegroundColor Cyan
     # Pack node_modules directory as tarball (strip root 'node_modules' dir for Docker extraction)
     # tar -czf <output> -C <base-dir> node_modules  →  archive contains node_modules/...

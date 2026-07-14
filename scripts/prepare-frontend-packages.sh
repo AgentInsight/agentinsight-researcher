@@ -97,6 +97,37 @@ if [ ! -d "$OXIDE_DIR" ] && [ -d "node_modules/@tailwindcss/oxide" ]; then
     fi
 fi
 
+# --- @next/swc-linux-x64-gnu (Next.js SWC 编译器, 构建时必需) ---
+# Next.js 构建时会自动下载 @next/swc-<platform> 原生二进制到 /root/.cache/next-swc
+# 离线模式下必须预装到 node_modules/@next/swc-linux-x64-gnu, 否则构建时联网下载
+# 注意: 即使使用 Alpine (musl), Next.js 也会优先尝试 gnu 版本, 故两个版本都预装
+NEXT_SWC_GNU_DIR="node_modules/@next/swc-linux-x64-gnu"
+if [ ! -d "$NEXT_SWC_GNU_DIR" ] && [ -d "node_modules/next" ]; then
+    NEXT_VERSION=$(node -p "require('./node_modules/next/package.json').version")
+    echo "Downloading @next/swc-linux-x64-gnu@$NEXT_VERSION..."
+    TARBALL=$(npm pack "@next/swc-linux-x64-gnu@$NEXT_VERSION" 2>&1 | grep '\.tgz$' | tail -1)
+    if [ -f "$TARBALL" ]; then
+        mkdir -p "$NEXT_SWC_GNU_DIR"
+        tar -xzf "$TARBALL" -C "$NEXT_SWC_GNU_DIR" --strip-components=1
+        rm -f "$TARBALL"
+        echo "  @next/swc-linux-x64-gnu installed"
+    fi
+fi
+
+# --- @next/swc-linux-x64-musl (Alpine 平台 fallback) ---
+NEXT_SWC_MUSL_DIR="node_modules/@next/swc-linux-x64-musl"
+if [ ! -d "$NEXT_SWC_MUSL_DIR" ] && [ -d "node_modules/next" ]; then
+    NEXT_VERSION=$(node -p "require('./node_modules/next/package.json').version")
+    echo "Downloading @next/swc-linux-x64-musl@$NEXT_VERSION..."
+    TARBALL=$(npm pack "@next/swc-linux-x64-musl@$NEXT_VERSION" 2>&1 | grep '\.tgz$' | tail -1)
+    if [ -f "$TARBALL" ]; then
+        mkdir -p "$NEXT_SWC_MUSL_DIR"
+        tar -xzf "$TARBALL" -C "$NEXT_SWC_MUSL_DIR" --strip-components=1
+        rm -f "$TARBALL"
+        echo "  @next/swc-linux-x64-musl installed"
+    fi
+fi
+
 echo "========== 3. Pack node_modules as tarball =========="
 # Pack node_modules directory as tarball (strip root 'node_modules' dir for Docker extraction)
 # tar -czf <output> -C <base-dir> node_modules  →  archive contains node_modules/...
