@@ -43,6 +43,60 @@ if [ ! -d "node_modules" ]; then
 fi
 echo "node_modules created successfully"
 
+# ========== 补装 Linux 平台原生模块 (Docker Alpine 构建) ==========
+echo "========== 2.5. Install Linux platform native binaries =========="
+
+# --- lightningcss (Tailwind CSS v4 依赖) ---
+LIGHTNINGCSS_LINUX_BINARY="node_modules/lightningcss/lightningcss.linux-x64-musl.node"
+if [ ! -f "$LIGHTNINGCSS_LINUX_BINARY" ]; then
+    echo "Downloading lightningcss-linux-x64-musl..."
+    LC_VERSION=$(node -p "require('./node_modules/lightningcss/package.json').version")
+    echo "  lightningcss version: $LC_VERSION"
+    # 注意: 包名无 @lightningcss/ scope 前缀
+    TARBALL=$(npm pack "lightningcss-linux-x64-musl@$LC_VERSION" 2>&1 | grep '\.tgz$' | tail -1)
+    if [ -f "$TARBALL" ]; then
+        TEMP_DIR=$(mktemp -d)
+        tar -xzf "$TARBALL" -C "$TEMP_DIR"
+        NODE_FILE=$(find "$TEMP_DIR" -name "*.node" | head -1)
+        if [ -n "$NODE_FILE" ]; then
+            cp "$NODE_FILE" "$LIGHTNINGCSS_LINUX_BINARY"
+            echo "  lightningcss.linux-x64-musl.node installed"
+        fi
+        rm -rf "$TEMP_DIR" "$TARBALL"
+    fi
+else
+    echo "lightningcss.linux-x64-musl.node already exists"
+fi
+
+# --- esbuild ---
+ESBUILD_DIR="node_modules/@esbuild/linux-x64"
+if [ ! -d "$ESBUILD_DIR" ] && [ -d "node_modules/esbuild" ]; then
+    ESBUILD_VERSION=$(node -p "require('./node_modules/esbuild/package.json').version")
+    echo "Downloading @esbuild/linux-x64@$ESBUILD_VERSION..."
+    mkdir -p "node_modules/@esbuild"
+    TARBALL=$(npm pack "@esbuild/linux-x64@$ESBUILD_VERSION" 2>&1 | grep '\.tgz$' | tail -1)
+    if [ -f "$TARBALL" ]; then
+        mkdir -p "$ESBUILD_DIR"
+        tar -xzf "$TARBALL" -C "$ESBUILD_DIR" --strip-components=1
+        rm -f "$TARBALL"
+        echo "  @esbuild/linux-x64 installed"
+    fi
+fi
+
+# --- @tailwindcss/oxide ---
+OXIDE_DIR="node_modules/@tailwindcss/oxide-linux-x64-musl"
+if [ ! -d "$OXIDE_DIR" ] && [ -d "node_modules/@tailwindcss/oxide" ]; then
+    OXIDE_VERSION=$(node -p "require('./node_modules/@tailwindcss/oxide/package.json').version")
+    echo "Downloading @tailwindcss/oxide-linux-x64-musl@$OXIDE_VERSION..."
+    TARBALL=$(npm pack "@tailwindcss/oxide-linux-x64-musl@$OXIDE_VERSION" 2>&1 | grep '\.tgz$' | tail -1)
+    if [ -f "$TARBALL" ]; then
+        mkdir -p "$OXIDE_DIR"
+        tar -xzf "$TARBALL" -C "$OXIDE_DIR" --strip-components=1
+        rm -f "$TARBALL"
+        echo "  @tailwindcss/oxide-linux-x64-musl installed"
+    fi
+fi
+
 echo "========== 3. Pack node_modules as tarball =========="
 # Pack node_modules directory as tarball (strip root 'node_modules' dir for Docker extraction)
 # tar -czf <output> -C <base-dir> node_modules  →  archive contains node_modules/...

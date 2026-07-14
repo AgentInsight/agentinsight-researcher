@@ -190,23 +190,27 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: /frontend/Dockerfile
+      dockerfile: frontend/Dockerfile
       args:
         # 构建时注入 NEXT_PUBLIC_ 变量 (会被内联到产物)
         NEXT_PUBLIC_SELF_HOST: ${NEXT_PUBLIC_SELF_HOST:-true}
-        NEXT_PUBLIC_AGENT_RESEARCHER_API_URL: ${NEXT_PUBLIC_AGENT_RESEARCHER_API_URL:-http://agent-researcher:8066}
+        NEXT_PUBLIC_AGENT_RESEARCHER_API_URL: ${NEXT_PUBLIC_AGENT_RESEARCHER_API_URL:-http://localhost:8066}
     image: agentinsight-frontend:latest
     restart: always
     env_file:
       - .env
       - .env.frontend
+    environment:
+      # 覆盖 Docker 默认 HOSTNAME (容器ID), 让 Next.js standalone 监听 0.0.0.0 而非容器具体 IP
+      # 否则 healthcheck wget http://localhost:8801 会 Connection refused
+      HOSTNAME: "0.0.0.0"
     ports:
       - "8801:8801"
     depends_on:
       agent-researcher:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8801/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

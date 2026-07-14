@@ -94,4 +94,4 @@ python-dotenv==1.2.2  # .env 加载
 numpy==2.5.1  # 语义路由矩阵化余弦相似度
 
 # === JWT 本地解析 (middleware.py 本地验证 Token) ===
-PyJWT==2.9.0  # HS256 本地 JWT 解析, 替代远程 API 验证
+PyJWT==2.13.0  # HS256 本地 JWT 解析, 替代远程 API 验证
