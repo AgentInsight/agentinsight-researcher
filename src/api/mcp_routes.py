@@ -330,11 +330,11 @@ async def test_mcp_config_by_id(config_id: int) -> dict[str, Any]:
         )
         if not row:
             # 系统 MCP 也可测试 (用户可对系统 MCP 进行可用性验证)
+            # 系统 MCP 的 agent_id 为 NULL (全局共享), 用 IS NULL 查询
             row = await conn.fetchrow(
                 f"SELECT {_SELECT_COLUMNS} FROM mcp_configs "
-                "WHERE id = $1 AND agent_id = $2 AND is_system = TRUE",
+                "WHERE id = $1 AND agent_id IS NULL AND is_system = TRUE",
                 config_id,
-                agent_id,
             )
             if not row:
                 raise HTTPException(status_code=404, detail="MCP 配置不存在")
@@ -362,8 +362,7 @@ async def list_system_mcp_configs() -> list[dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             f"SELECT {_SELECT_COLUMNS} FROM mcp_configs "
-            "WHERE agent_id = $1 AND is_system = TRUE ORDER BY name",
-            agent_id,
+            "WHERE agent_id IS NULL AND is_system = TRUE ORDER BY name",
         )
     return [dict(row) for row in rows]
 
@@ -387,12 +386,11 @@ async def clone_system_mcp_config(config_id: int) -> dict[str, Any]:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 1. 查询系统 MCP 配置
+        # 1. 查询系统 MCP 配置 (agent_id IS NULL = 全局共享)
         src = await conn.fetchrow(
             f"SELECT {_SELECT_COLUMNS} FROM mcp_configs "
-            "WHERE id = $1 AND agent_id = $2 AND is_system = TRUE",
+            "WHERE id = $1 AND agent_id IS NULL AND is_system = TRUE",
             config_id,
-            agent_id,
         )
         if not src:
             raise HTTPException(status_code=404, detail="系统 MCP 配置不存在")

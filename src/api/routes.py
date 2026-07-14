@@ -124,6 +124,7 @@ async def _has_report(session_id: str) -> bool:
         report_store = get_report_store()
         # list_reports 已按 session_id 过滤, 取 1 条即可判断
         reports = await report_store.list_reports(
+            agent_id=get_settings().agent_name,
             user_id=None,  # _has_report 仅按 session_id 判断, 不区分 user_id
             session_id=session_id,
             limit=1,
@@ -136,7 +137,9 @@ async def _has_report(session_id: str) -> bool:
     # report_store 查询失败时回退到 aget_state
     try:
         graph = await _get_graph()
-        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        agent_id = get_settings().agent_name
+        thread_id = f"{agent_id}:{session_id}"
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         state_snapshot = await graph.aget_state(config)
         if state_snapshot and state_snapshot.values:
             report_md = state_snapshot.values.get("report_md", "")
@@ -161,7 +164,9 @@ async def _load_chitchat_history(session_id: str) -> list[dict[str, str]]:
     """
     try:
         graph = await _get_chat_graph()
-        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        agent_id = get_settings().agent_name
+        thread_id = f"{agent_id}:{session_id}"
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         state_snapshot = await graph.aget_state(config)
         if not state_snapshot or not state_snapshot.values:
             return []
@@ -206,7 +211,9 @@ async def _save_chitchat_response(
     """
     try:
         graph = await _get_chat_graph()
-        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        effective_agent_id = agent_id or get_settings().agent_name
+        thread_id = f"{effective_agent_id}:{session_id}"
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         await graph.aupdate_state(
             config,
             {
@@ -586,7 +593,8 @@ async def chat_completions(
             "query_intent": intent.value,
             "messages": [],
         }
-        chat_config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        thread_id = f"{agent_id}:{session_id}"
+        chat_config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         if request.stream:
             return StreamingResponse(
                 _stream_chat(
@@ -724,7 +732,8 @@ async def chat_completions(
             )
 
     # LangGraph 配置: thread_id 做会话隔离
-    graph_config = {"configurable": {"thread_id": session_id}}
+    thread_id = f"{agent_id}:{session_id}"
+    graph_config = {"configurable": {"thread_id": thread_id}}
 
     # IP-based 用户每日报告限额检查 (仅 self_host=True + IP-based 用户)
     # 限额从数据库 report_limits 表读取 (已从环境变量迁移)
@@ -1955,6 +1964,10 @@ async def upload_file(
         user_id,
     )
 
+    # 异步索引到 Qdrant (用户私有 namespace), 失败不阻塞主请求
+    # 经 _create_background_task 保留引用, 防止 GC 静默取消
+    _create_background_task(index_file_to_qdrant(str(save_path), user_id, file_id))
+
     return JSONResponse(
         status_code=201,
         content={
@@ -1966,6 +1979,51 @@ async def upload_file(
             "uploaded_at": int(time.time()),
         },
     )
+
+
+async def index_file_to_qdrant(file_path: str, user_id: str, file_id: str) -> None:
+    """将上传文件索引到 Qdrant (用户私有 namespace).
+
+    上传文件作为研究数据源, 异步写入 Qdrant 用户私有 namespace
+    (namespace = {agent_id}-data:{user_id}), 供后续 RAG 检索召回.
+
+    DocumentLoader.load 返回 list[Document] (page_content 字段);
+    QdrantManager.upsert_points 内部批量 embedding, 仅需传 content+metadata.
+    索引失败不阻塞主请求 (调用方经 _create_background_task 后台执行).
+    """
+    from src.rag.qdrant_manager import QdrantManager
+    from src.skills.researcher.document_loader import get_document_loader
+
+    try:
+        # 1. 加载文档内容 (工厂按 source 形态路由: 本地文件 → LocalDocumentLoader)
+        loader = get_document_loader(file_path)
+        documents = await loader.load(file_path)
+        if not documents:
+            logger.warning("文件 %s 无可索引内容 (空文档)", file_path)
+            return
+
+        # 2. 写入 Qdrant 用户私有 namespace (upsert_points 内部批量 embedding)
+        qdrant = QdrantManager()
+        namespace = qdrant.build_data_user_namespace(user_id)
+        await qdrant.upsert_points(
+            namespace=namespace,
+            user_id=user_id,
+            points=[
+                {
+                    "content": doc.page_content,
+                    "metadata": {"file_id": file_id, "chunk_index": i},
+                }
+                for i, doc in enumerate(documents)
+            ],
+        )
+        logger.info(
+            "文件索引到 Qdrant 成功: file_id=%s, chunks=%d, namespace=%s",
+            file_id,
+            len(documents),
+            namespace,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("索引文件到 Qdrant 失败 (file_id=%s): %s", file_id, e)
 
 
 async def _load_uploaded_files_context(
@@ -2192,6 +2250,7 @@ async def list_session_reports(
     user_id = get_request_user_id() or "anonymous"
     store = get_report_store()
     reports = await store.list_reports(
+        agent_id=get_settings().agent_name,
         session_id=session_id,
         user_id=user_id,
         limit=50,
@@ -2242,12 +2301,17 @@ async def download_report(
     except ValueError:
         report = None
     else:
-        report = await store.get_report(report_id)
+        report = await store.get_report(
+            report_id,
+            agent_id=get_settings().agent_name,
+            user_id=user_id,
+        )
 
     deprecated_fallback = False
     if not report:
         # 向后兼容: 调用方仍传 session_id (旧逻辑), 取该 session 最新报告下载
         reports = await store.list_reports(
+            agent_id=get_settings().agent_name,
             session_id=report_id,
             user_id=user_id,
             limit=1,

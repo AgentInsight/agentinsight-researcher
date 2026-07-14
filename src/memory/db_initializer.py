@@ -214,30 +214,36 @@ async def init_database(settings: Settings | None = None) -> bool:
     try:
         conn = await asyncpg.connect(dsn)
         try:
-            # 每条语句独立事务: BEGIN/COMMIT/ROLLBACK 隔离错误, 单条失败不影响后续
-            # 修复: 原 sql.split(";") 会错误拆分 dollar-quoted 字符串 $$ ... $$ 内的分号
-            #   (如 CREATE OR REPLACE FUNCTION 体内的 NEW.updated_at = NOW(); )
-            #   导致函数体被截断, 后续语句在 aborted 事务中全部失败 (chat_messages 表未创建)
-            statements = _split_sql_statements(sql)
-            failed_count = 0
-            for stmt in statements:
-                try:
-                    await conn.execute("BEGIN")
-                    await conn.execute(stmt)
-                    await conn.execute("COMMIT")
-                except Exception as stmt_err:  # noqa: BLE001
-                    # 单条失败: ROLLBACK 清理事务状态, 不阻断后续 (DDL 幂等)
+            # 获取 advisory lock (固定 key, 防止多 Agent 并发启动竞态)
+            # 会话级锁, 同一连接内持有; 显式释放, 防止长期占用
+            await conn.execute("SELECT pg_advisory_lock(20260714)")
+            try:
+                # 每条语句独立事务: BEGIN/COMMIT/ROLLBACK 隔离错误, 单条失败不影响后续
+                # 修复: 原 sql.split(";") 会错误拆分 dollar-quoted 字符串 $$ ... $$ 内的分号
+                #   (如 CREATE OR REPLACE FUNCTION 体内的 NEW.updated_at = NOW(); )
+                #   导致函数体被截断, 后续语句在 aborted 事务中全部失败 (chat_messages 表未创建)
+                statements = _split_sql_statements(sql)
+                failed_count = 0
+                for stmt in statements:
                     try:
-                        await conn.execute("ROLLBACK")
-                    except Exception:  # noqa: BLE001
-                        pass  # ROLLBACK 失败忽略 (连接可能已断)
-                    logger.debug("SQL 语句执行跳过 (可能已存在): %s", str(stmt_err)[:200])
-                    failed_count += 1
-            logger.info(
-                "PostgreSQL 业务表初始化完成 (init.sql 已执行, 幂等, %d 条跳过)",
-                failed_count,
-            )
-            return True
+                        await conn.execute("BEGIN")
+                        await conn.execute(stmt)
+                        await conn.execute("COMMIT")
+                    except Exception as stmt_err:  # noqa: BLE001
+                        # 单条失败: ROLLBACK 清理事务状态, 不阻断后续 (DDL 幂等)
+                        try:
+                            await conn.execute("ROLLBACK")
+                        except Exception:  # noqa: BLE001
+                            pass  # ROLLBACK 失败忽略 (连接可能已断)
+                        logger.debug("SQL 语句执行跳过 (可能已存在): %s", str(stmt_err)[:200])
+                        failed_count += 1
+                logger.info(
+                    "PostgreSQL 业务表初始化完成 (init.sql 已执行, 幂等, %d 条跳过, advisory lock 保护)",
+                    failed_count,
+                )
+                return True
+            finally:
+                await conn.execute("SELECT pg_advisory_unlock(20260714)")
         finally:
             await conn.close()
     except Exception as e:  # noqa: BLE001

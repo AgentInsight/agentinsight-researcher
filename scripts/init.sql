@@ -187,7 +187,7 @@ CREATE OR REPLACE TRIGGER trg_uploaded_files_updated_at
 -- is_system=TRUE 为系统预置公用 MCP (用户不可编辑/删除, 可克隆到自己的列表)
 CREATE TABLE IF NOT EXISTS mcp_configs (
     id BIGSERIAL PRIMARY KEY,
-    agent_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64),                     -- NULL = 系统公用 (所有 Agent 共享); 非 NULL = Agent 专属
     user_id VARCHAR(64) NOT NULL,
     name VARCHAR(128) NOT NULL,
     server_url TEXT,                           -- stdio 模式不需要 URL, 允许为空
@@ -209,6 +209,9 @@ ALTER TABLE IF EXISTS mcp_configs ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT
 -- 旧表兜底: 添加 version 列 (IF NOT EXISTS, 用于控制 MCP 配置更新)
 -- ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段 (避免覆盖用户克隆后的定制)
 ALTER TABLE IF EXISTS mcp_configs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+-- 旧表兜底: 放宽 agent_id 约束 (新表 CREATE TABLE 已去掉 NOT NULL)
+-- 系统公用 MCP 的 agent_id 为 NULL (所有 Agent 共享), 用户私有 MCP 的 agent_id 非 NULL
+ALTER TABLE IF EXISTS mcp_configs ALTER COLUMN agent_id DROP NOT NULL;
 
 -- 索引: 删除被复合索引前缀覆盖的冗余单列索引 (idx_mcp_configs_agent_user)
 CREATE INDEX IF NOT EXISTS idx_mcp_configs_enabled ON mcp_configs (agent_id, user_id, enabled);
@@ -222,7 +225,7 @@ CREATE OR REPLACE TRIGGER trg_mcp_configs_updated_at
 -- ========== 预置系统公用 MCP 服务 ==========
 -- 来源: modelcontextprotocol/servers + 国内外流行 MCP 服务
 -- 用户可查看但不可编辑/删除, 可克隆到自己的列表后定制
--- 使用 ON CONFLICT (agent_id, user_id, name) 保证幂等 (重复启动不重复插入)
+-- 使用 ON CONFLICT (COALESCE(agent_id, ''), user_id, name) 保证幂等 (重复启动不重复插入)
 
 -- 清理历史重复数据 (保留每个 name 的最小 id, 防止唯一索引创建失败)
 -- 同时清理系统 MCP 和用户私有 MCP 的重复记录
@@ -232,10 +235,17 @@ WHERE id NOT IN (
     GROUP BY agent_id, user_id, name
 );
 
--- 添加唯一索引 (agent_id, user_id, name) 防止重复插入
--- 同一 agent + 同一 user 下 name 唯一 (系统 MCP 与用户私有 MCP 共用此约束)
+-- 旧表兜底: 系统公用 MCP 的 agent_id 改为 NULL (所有 Agent 共享)
+-- 历史数据中系统 MCP 的 agent_id = 'agentinsight-researcher', 迁移为 NULL 表示共享
+UPDATE mcp_configs SET agent_id = NULL WHERE is_system = TRUE AND agent_id = 'agentinsight-researcher';
+
+-- 删除旧唯一索引 (agent_id, user_id, name), 改为 COALESCE 表达式索引支持 NULL
+-- PostgreSQL 中 NULL != NULL, 用 COALESCE(agent_id, '') 将 NULL 视为 '' 保证系统 MCP 行唯一
+DROP INDEX IF EXISTS idx_mcp_configs_unique_name;
+-- 添加唯一索引 (COALESCE(agent_id, ''), user_id, name) 防止重复插入
+-- 同一 agent + 同一 user 下 name 唯一 (系统 MCP agent_id=NULL 与用户私有 MCP 共用此约束)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_configs_unique_name
-    ON mcp_configs (agent_id, user_id, name);
+    ON mcp_configs (COALESCE(agent_id, ''), user_id, name);
 
 -- 清理已移除的系统 MCP (从 130 精简至 23, 仅保留包名真实存在的核心+推荐档)
 -- 用户私有克隆 (is_system=FALSE) 不受影响
@@ -269,109 +279,110 @@ WHERE is_system = TRUE
 INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, version, description) VALUES
     -- ===== 核心保留 12 个 (研究场景高价值、无冗余、合规无冲突) =====
     -- 1. Web 抓取与文件操作 (3 个)
-    ('agentinsight-researcher', 'system', 'fetch', NULL, 'stdio', 'uvx',
+    (NULL, 'system', 'fetch', NULL, 'stdio', 'uvx',
      '["mcp-server-fetch"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
-    ('agentinsight-researcher', 'system', 'filesystem', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
+    (NULL, 'system', 'filesystem', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]'::jsonb, NULL,
-     TRUE, TRUE, 3, '安全文件操作, 可配置访问路径 (官方 npm 实现, 核心保留)'),
-    ('agentinsight-researcher', 'system', 'sequential-thinking', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'安全文件操作, 可配置访问路径 (官方 npm 实现, 核心保留)'),
+    (NULL, 'system', 'sequential-thinking', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-sequential-thinking"]'::jsonb, NULL,
-     TRUE, TRUE, 3, '通过思维序列进行动态反思式问题求解 (官方 npm 实现, 核心保留)'),
+     TRUE, TRUE, 3,'通过思维序列进行动态反思式问题求解 (官方 npm 实现, 核心保留)'),
     -- 2. 代码与知识库 (5 个)
-    ('agentinsight-researcher', 'system', 'github', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'github', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-github"]'::jsonb,
      '{"GITHUB_PERSONAL_ACCESS_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 3, 'GitHub API: 仓库管理/文件操作 (核心保留, 需配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
-    ('agentinsight-researcher', 'system', 'notion', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'GitHub API: 仓库管理/文件操作 (核心保留, 需配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
+    (NULL, 'system', 'notion', NULL, 'stdio', 'npx',
      '["-y", "@notionhq/notion-mcp-server"]'::jsonb,
      '{"OPENAPI_MCP_HEADERS": "{\"Authorization\":\"Bearer <your-token>\",\"Notion-Version\":\"2022-06-28\"}"}'::jsonb,
-     TRUE, TRUE, 3, 'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需配置 Notion Integration Token)'),
-    ('agentinsight-researcher', 'system', 'obsidian', NULL, 'stdio', 'npx',
-     '["-y", "mcp-obsidian", "--vault-path", "/path/to/vault"]'::jsonb, NULL,
+     TRUE, TRUE, 3,'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需配置 Notion Integration Token)'),
+    (NULL, 'system', 'obsidian', NULL, 'stdio', 'npx',
+     '["-y", "mcp-obsidian", "--vault-path=/path/to/vault"]'::jsonb, NULL,
      TRUE, TRUE, 3, 'Obsidian 知识库: Markdown 解析/双向链接/语义搜索 (核心保留, 需配置 vault 路径)'),
-    ('agentinsight-researcher', 'system', 'confluence', NULL, 'stdio', 'uvx',
-     '["mcp-atlassian", "--confluence"]'::jsonb,
+    (NULL, 'system', 'confluence', NULL, 'stdio', 'uvx',
+     '["mcp-atlassian", "--confluence-url", "<your-confluence-url>", "--confluence-username", "<your-email>", "--confluence-token", "<your-token>"]'::jsonb,
      '{"ATLASSIAN_SITE_NAME": "<your-site>", "ATLASSIAN_USER_EMAIL": "<your-email>", "ATLASSIAN_API_TOKEN": "<your-token>"}'::jsonb,
      TRUE, TRUE, 3, 'Confluence: 维基内容/空间/页面管理 (PyPI 实现 mcp-atlassian, 需配置 ATLASSIAN_API_TOKEN)'),
-    ('agentinsight-researcher', 'system', 'elasticsearch', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'elasticsearch', NULL, 'stdio', 'npx',
      '["-y", "@elastic/mcp-server-elasticsearch"]'::jsonb,
      '{"ES_URL": "http://localhost:9200", "ES_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 3, 'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
+     TRUE, TRUE, 3,'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
     -- 3. 搜索与新闻信源 (2 个)
-    ('agentinsight-researcher', 'system', 'wikipedia', NULL, 'stdio', 'uvx',
+    (NULL, 'system', 'wikipedia', NULL, 'stdio', 'uvx',
      '["--from", "mcp-server-wikipedia", "wikipedia-mcp-server"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia, 可执行文件名 wikipedia-mcp-server)'),
-    ('agentinsight-researcher', 'system', 'hackernews', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia, 可执行文件名 wikipedia-mcp-server)'),
+    (NULL, 'system', 'hackernews', NULL, 'stdio', 'npx',
      '["-y", "mcp-hacker-news"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
+     TRUE, TRUE, 3,'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
     -- 4. 数据库 (1 个)
-    ('agentinsight-researcher', 'system', 'neo4j', NULL, 'stdio', 'uvx',
+    (NULL, 'system', 'neo4j', NULL, 'stdio', 'uvx',
      '["mcp-server-neo4j"]'::jsonb,
      '{"NEO4J_URL": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 3, 'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需配置连接凭据)'),
+     TRUE, TRUE, 3,'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需配置连接凭据)'),
     -- 5. 翻译 (1 个)
-    ('agentinsight-researcher', 'system', 'deepl', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'deepl', NULL, 'stdio', 'npx',
      '["-y", "deepl-mcp-server"]'::jsonb,
      '{"DEEPL_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 3, 'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
+     TRUE, TRUE, 3,'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
     -- ===== 推荐 11 个 (有价值但需用户按需配置 Key 或验证场景) =====
     -- 6. 开发与代码工具 (3 个)
-    ('agentinsight-researcher', 'system', 'git', NULL, 'stdio', 'uvx',
+    (NULL, 'system', 'git', NULL, 'stdio', 'uvx',
      '["mcp-server-git", "--repository", "/path/to/git/repo"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行)'),
-    ('agentinsight-researcher', 'system', 'gitlab', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行)'),
+    (NULL, 'system', 'gitlab', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gitlab"]'::jsonb,
      '{"GITLAB_PERSONAL_ACCESS_TOKEN": "<your-token>", "GITLAB_API_URL": "https://gitlab.com/api/v4"}'::jsonb,
-     TRUE, TRUE, 3, 'GitLab: 仓库管理/项目/合并请求 (推荐, 需配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
-    ('agentinsight-researcher', 'system', 'chrome-mcp', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'GitLab: 仓库管理/项目/合并请求 (推荐, 需配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
+    (NULL, 'system', 'chrome-mcp', NULL, 'stdio', 'npx',
      '["-y", "chrome-devtools-mcp"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
+     TRUE, TRUE, 3,'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
     -- 7. 知识库与协作 (1 个)
-    ('agentinsight-researcher', 'system', 'google-drive', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'google-drive', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gdrive"]'::jsonb,
      '{"GDRIVE_CLIENT_ID": "<your-client-id>", "GDRIVE_CLIENT_SECRET": "<your-client-secret>"}'::jsonb,
-     TRUE, TRUE, 3, 'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
+     TRUE, TRUE, 3,'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
     -- 8. 社交媒体与视频 (2 个)
-    ('agentinsight-researcher', 'system', 'youtube', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'youtube', NULL, 'stdio', 'npx',
      '["-y", "@anaisbetts/mcp-youtube"]'::jsonb,
      '{"YOUTUBE_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 3, 'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需配置 YOUTUBE_API_KEY)'),
-    ('agentinsight-researcher', 'system', 'twitter', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需配置 YOUTUBE_API_KEY)'),
+    (NULL, 'system', 'twitter', NULL, 'stdio', 'npx',
      '["-y", "@enescinar/twitter-mcp"]'::jsonb,
      '{"TWITTER_API_KEY": "<your-api-key>", "TWITTER_API_SECRET": "<your-secret>", "TWITTER_ACCESS_TOKEN": "<your-token>", "TWITTER_ACCESS_SECRET": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 3, 'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
+     TRUE, TRUE, 3,'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
     -- 9. 数据库 (3 个)
-    ('agentinsight-researcher', 'system', 'mongodb', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'mongodb', NULL, 'stdio', 'npx',
      '["-y", "mongodb-mcp-server", "mongodb://localhost:27017/mydb"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
-    ('agentinsight-researcher', 'system', 'supabase', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
+    (NULL, 'system', 'supabase', NULL, 'stdio', 'npx',
      '["-y", "@supabase/mcp-server-supabase"]'::jsonb,
      '{"SUPABASE_URL": "<your-url>", "SUPABASE_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 3, 'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
-    ('agentinsight-researcher', 'system', 'clickhouse', NULL, 'stdio', 'npx',
+     TRUE, TRUE, 3,'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
+    (NULL, 'system', 'clickhouse', NULL, 'stdio', 'npx',
      '["-y", "clickhouse-mcp-server"]'::jsonb,
      '{"CLICKHOUSE_HOST": "localhost", "CLICKHOUSE_PORT": "8123", "CLICKHOUSE_USER": "default", "CLICKHOUSE_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 3, 'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需配置连接凭据)'),
+     TRUE, TRUE, 3,'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需配置连接凭据)'),
     -- 10. AWS (1 个)
-    ('agentinsight-researcher', 'system', 'aws-kb-retrieval', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'aws-kb-retrieval', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-aws-kb-retrieval"]'::jsonb,
      '{"AWS_REGION": "<your-region>", "AWS_ACCESS_KEY_ID": "<your-key>", "AWS_SECRET_ACCESS_KEY": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 3, 'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
+     TRUE, TRUE, 3,'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
     -- 11. 文档工具 (1 个)
-    ('agentinsight-researcher', 'system', 'pdf-tools', NULL, 'stdio', 'npx',
+    (NULL, 'system', 'pdf-tools', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-pdf"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
+     TRUE, TRUE, 3,'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
 -- v3 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
 -- 避免每次启动都 UPDATE (旧 v1 DO NOTHING 无法更新已部署配置)
 -- 避免覆盖用户克隆后的定制 (仅系统 MCP is_system=TRUE 且 version 落后时更新)
 -- 注意: 用户私有克隆 (is_system=FALSE) 不受此 UPSERT 影响 (user_id 不同)
-ON CONFLICT (agent_id, user_id, name) DO UPDATE SET
+ON CONFLICT (COALESCE(agent_id, ''), user_id, name) DO UPDATE SET
     server_url = EXCLUDED.server_url,
     transport_type = EXCLUDED.transport_type,
     command = EXCLUDED.command,
     args = EXCLUDED.args,
     env_vars = EXCLUDED.env_vars,
+    enabled = EXCLUDED.enabled,
     description = EXCLUDED.description,
     version = EXCLUDED.version,
     updated_at = NOW()
@@ -432,42 +443,76 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_research_sessions_unique_session
     ON research_sessions(session_id, agent_id, user_id);
 
 -- ========== 业务表: 每日报告生成限额 (从环境变量迁移到数据库) ==========
--- UserId 为 NULL 时表示系统默认每日报告生成限额
--- 用户有限额时用用户的, 没有则用系统的 (非取较高者)
+-- 语义说明 (agent_id + user_id 三级默认):
+--   (agent_id IS NULL, user_id IS NULL) → 全局默认 (所有 Agent 的兜底)
+--   (agent_id = 'xxx',  user_id IS NULL) → Agent 级默认
+--   (agent_id = 'xxx',  user_id = 'yyy') → 用户级专属
+-- 用户有限额时用用户的, 没有则用 Agent 级, 再没有用全局 (非取较高者)
 CREATE TABLE IF NOT EXISTS report_limits (
     id BIGSERIAL PRIMARY KEY,
-    user_id VARCHAR(64) UNIQUE,                -- NULL = 系统默认限额; 非 NULL = 用户专属限额
+    agent_id VARCHAR(64),                     -- NULL = 全局默认; 非 NULL = Agent 级/用户级
+    user_id VARCHAR(64),                      -- NULL = (agent_id 级) 默认; 非 NULL = 用户专属
     daily_limit INTEGER NOT NULL DEFAULT 5,    -- 每日报告生成限额 (0 = 不限制)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- 唯一索引: user_id 仅允许一个非 NULL 值 (系统默认) 和多个用户专属行
--- CREATE TABLE 已含 UNIQUE, 此处补兜底 (旧表可能无)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_report_limits_user
-    ON report_limits(user_id);
+-- 旧表兜底: 新增 agent_id 列 (新表 CREATE TABLE 已含)
+ALTER TABLE IF EXISTS report_limits ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64);
+-- 旧表兜底: 移除 user_id 列级 UNIQUE 约束 (改为复合唯一索引)
+-- 列级 UNIQUE 约束名默认为 <table>_<column>_key
+ALTER TABLE IF EXISTS report_limits DROP CONSTRAINT IF EXISTS report_limits_user_id_key;
+-- 删除旧唯一索引 (user_id 单列), 改为 (agent_id, user_id) 复合唯一索引
+DROP INDEX IF EXISTS idx_report_limits_user;
+-- 唯一索引: (agent_id, user_id) 支持 ON CONFLICT 幂等 upsert
+-- COALESCE 处理 NULL: PostgreSQL 中 NULL != NULL, 用 COALESCE 将 NULL 视为 '' 保证全局默认行唯一
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_limits_agent_user
+    ON report_limits (COALESCE(agent_id, ''), COALESCE(user_id, ''));
 -- 触发器: 自动维护 updated_at
 CREATE OR REPLACE TRIGGER trg_report_limits_updated_at
     BEFORE UPDATE ON report_limits
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
--- 预置系统默认限额 (user_id IS NULL, daily_limit = 5)
--- ON CONFLICT 保证幂等: 已存在则不覆盖 (管理员可手动调整后不被重置)
-INSERT INTO report_limits (user_id, daily_limit)
-VALUES (NULL, 5)
-ON CONFLICT (user_id) DO NOTHING;
+-- 预置全局默认限额 (agent_id IS NULL, user_id IS NULL, daily_limit = 5)
+-- 清理历史重复记录 (旧 ON CONFLICT bug 导致每次启动新增一行, 保留 id 最小的一条)
+-- 同时清理所有 (agent_id, user_id) 组合的重复行 (不仅限于全局默认)
+DELETE FROM report_limits
+WHERE id NOT IN (
+    SELECT MIN(id) FROM report_limits
+    GROUP BY COALESCE(agent_id, ''), COALESCE(user_id, '')
+);
+-- 用 WHERE NOT EXISTS 保证幂等: 已存在则不插入 (管理员可手动调整后不被重置)
+-- 不用 ON CONFLICT (COALESCE(...)): PostgreSQL 推断用原始 NULL 值比较, NULL != NULL 导致冲突检测失败
+INSERT INTO report_limits (agent_id, user_id, daily_limit)
+SELECT NULL, NULL, 5
+WHERE NOT EXISTS (
+    SELECT 1 FROM report_limits
+    WHERE agent_id IS NULL AND user_id IS NULL
+);
 
 -- ========== 业务表: 每日报告生成使用次数 (从 Redis 迁移到数据库) ==========
--- 按 UserId + 日期 记录当日报告生成次数
+-- 按 agent_id + UserId + 日期 记录当日报告生成次数
 CREATE TABLE IF NOT EXISTS daily_report_usage (
     id BIGSERIAL PRIMARY KEY,
+    agent_id VARCHAR(64) NOT NULL,             -- agent_name, 全局唯一隔离键
     user_id VARCHAR(64) NOT NULL,              -- 用户 ID (IP-based 或 JWT 解析)
     usage_date DATE NOT NULL,                  -- 使用日期 (北京时间 YYYY-MM-DD)
     daily_count INTEGER NOT NULL DEFAULT 0,    -- 当日已生成次数
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- 唯一约束: (user_id, usage_date) 支持 ON CONFLICT 幂等 upsert
-CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_report_usage_user_date
-    ON daily_report_usage(user_id, usage_date);
+-- 旧表兜底: 新增 agent_id 列 (新表 CREATE TABLE 已含 NOT NULL)
+ALTER TABLE IF EXISTS daily_report_usage ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64);
+-- 旧表兜底: 回填历史数据的 agent_id (默认归属当前 Agent)
+UPDATE daily_report_usage SET agent_id = 'agentinsight-researcher' WHERE agent_id IS NULL;
+-- 旧表兜底: 加固 agent_id NOT NULL 约束 (新表 CREATE TABLE 已含)
+ALTER TABLE IF EXISTS daily_report_usage ALTER COLUMN agent_id SET NOT NULL;
+-- 删除旧唯一索引 (user_id, usage_date), 改为 (agent_id, user_id, usage_date) 复合唯一索引
+DROP INDEX IF EXISTS idx_daily_report_usage_user_date;
+-- 唯一约束: (agent_id, user_id, usage_date) 支持 ON CONFLICT 幂等 upsert
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_report_usage_agent_user_date
+    ON daily_report_usage(agent_id, user_id, usage_date);
+-- 复合索引: (agent_id, user_id) 支持按用户统计用量
+CREATE INDEX IF NOT EXISTS idx_daily_report_usage_agent_user
+    ON daily_report_usage(agent_id, user_id);
 -- 触发器: 自动维护 updated_at
 CREATE OR REPLACE TRIGGER trg_daily_report_usage_updated_at
     BEFORE UPDATE ON daily_report_usage

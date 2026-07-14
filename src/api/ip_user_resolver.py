@@ -80,13 +80,18 @@ def _get_beijing_date() -> date:
     return now_bj.date()
 
 
-async def _get_daily_limit_from_db(user_id: str) -> int:
+async def _get_daily_limit_from_db(agent_id: str, user_id: str) -> int:
     """从数据库 report_limits 表读取每日报告限额.
 
-    用户有限额时用用户的, 没有则用系统的 (user_id IS NULL).
-    若两者均不存在, 返回 0 (表示不限制, 由调用方降级处理).
+    优先级回退:
+    1. (agent_id, user_id) 精确匹配 (Agent + 用户专属限额)
+    2. (agent_id, user_id IS NULL) (Agent 默认限额)
+    3. (agent_id IS NULL, user_id IS NULL) (全局系统默认限额)
+
+    若三者均不存在, 返回 0 (表示不限制, 由调用方降级处理).
 
     Args:
+        agent_id: Agent ID (即 agent_name, 多 Agent 数据隔离键)
         user_id: 用户 ID
     Returns:
         每日限额 (0 = 不限制; >0 = 限额值)
@@ -95,16 +100,19 @@ async def _get_daily_limit_from_db(user_id: str) -> int:
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 优先查询用户专属限额 (user_id = $1), 不存在时回退到系统默认限额 (user_id IS NULL)
-        # COALESCE(子查询1, 子查询2, 0) 实现优先级回退
+        # 三级优先级回退: (agent_id+user_id) > (agent_id, user_id IS NULL) > (agent_id IS NULL, user_id IS NULL)
+        # COALESCE(子查询1, 子查询2, 子查询3, 0) 实现优先级回退
+        # LIMIT 1 防御: 历史脏数据可能含重复行 (唯一索引创建前已插入), 避免子查询返回多行报错
         row = await conn.fetchrow(
             """
             SELECT COALESCE(
-                (SELECT daily_limit FROM report_limits WHERE user_id = $1),
-                (SELECT daily_limit FROM report_limits WHERE user_id IS NULL),
+                (SELECT daily_limit FROM report_limits WHERE agent_id = $1 AND user_id = $2 LIMIT 1),
+                (SELECT daily_limit FROM report_limits WHERE agent_id = $1 AND user_id IS NULL LIMIT 1),
+                (SELECT daily_limit FROM report_limits WHERE agent_id IS NULL AND user_id IS NULL LIMIT 1),
                 0
             ) AS effective_limit
             """,
+            agent_id,
             user_id,
         )
         if row:
@@ -114,17 +122,17 @@ async def _get_daily_limit_from_db(user_id: str) -> int:
 
 async def check_daily_report_limit(
     user_id: str,
-    agent_id: str,  # noqa: ARG001 保留以兼容旧调用签名
-    limit: int | None = None,  # noqa: ARG001 保留以兼容旧调用签名, 数据库模式忽略
+    agent_id: str,
+    limit: int | None = None,  # noqa: ARG001 保留兼容旧调用签名, 数据库模式忽略
 ) -> tuple[bool, int, int]:
     """检查用户当日报告生成是否超限.
 
-    限额从数据库 report_limits 表读取 (用户有限额用用户的, 没有则用系统的).
-    使用次数从数据库 daily_report_usage 表读取 (按 user_id + 日期).
+    限额从数据库 report_limits 表读取 (优先级: agent_id+user_id > agent_id > 全局默认).
+    使用次数从数据库 daily_report_usage 表读取 (按 agent_id + user_id + 日期).
 
     Args:
         user_id: 用户 ID (IP 生成的或 JWT 解析的)
-        agent_id: Agent 名称 (保留兼容, 数据库模式按 user_id 隔离)
+        agent_id: Agent ID (即 agent_name, 多 Agent 数据隔离键)
         limit: 保留兼容旧调用, 数据库模式忽略此参数
     Returns:
         (allowed, current_count, daily_limit):
@@ -133,8 +141,8 @@ async def check_daily_report_limit(
         - daily_limit 为有效限额
     """
     try:
-        # 1. 从数据库读取有效限额 (用户有限额用用户的, 没有则用系统的)
-        effective_limit = await _get_daily_limit_from_db(user_id)
+        # 1. 从数据库读取有效限额 (优先级: agent_id+user_id > agent_id > 全局默认)
+        effective_limit = await _get_daily_limit_from_db(agent_id, user_id)
 
         # 数据库无配置时降级到环境变量 fallback
         if effective_limit <= 0:
@@ -146,13 +154,14 @@ async def check_daily_report_limit(
         if effective_limit <= 0:
             return True, 0, 0
 
-        # 2. 从数据库读取当日使用次数
-        current_count = await _get_daily_usage_from_db(user_id)
+        # 2. 从数据库读取当日使用次数 (按 agent_id + user_id 隔离)
+        current_count = await _get_daily_usage_from_db(agent_id, user_id)
 
         if current_count >= effective_limit:
             logger.info(
-                "用户 %s 当日报告已达限额 (%d/%d)",
+                "用户 %s (agent=%s) 当日报告已达限额 (%d/%d)",
                 user_id,
+                agent_id,
                 current_count,
                 effective_limit,
             )
@@ -164,10 +173,13 @@ async def check_daily_report_limit(
         return True, 0, _DEFAULT_DAILY_LIMIT
 
 
-async def _get_daily_usage_from_db(user_id: str) -> int:
+async def _get_daily_usage_from_db(agent_id: str, user_id: str) -> int:
     """从数据库 daily_report_usage 表读取当日使用次数.
 
+    按 agent_id + user_id + 日期 三级隔离 (多 Agent 共享表, 各 Agent 各用户独立计数).
+
     Args:
+        agent_id: Agent ID (即 agent_name, 多 Agent 数据隔离键)
         user_id: 用户 ID
     Returns:
         当日已使用次数 (无记录返回 0)
@@ -178,7 +190,9 @@ async def _get_daily_usage_from_db(user_id: str) -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT daily_count FROM daily_report_usage WHERE user_id = $1 AND usage_date = $2",
+            "SELECT daily_count FROM daily_report_usage "
+            "WHERE agent_id = $1 AND user_id = $2 AND usage_date = $3",
+            agent_id,
             user_id,
             usage_date,
         )
@@ -189,18 +203,18 @@ async def _get_daily_usage_from_db(user_id: str) -> int:
 
 async def increment_daily_report_count(
     user_id: str,
-    agent_id: str,  # noqa: ARG001 保留兼容旧调用签名
+    agent_id: str,
 ) -> int:
     """报告生成成功后递增当日计数.
 
-    从数据库 daily_report_usage 表 upsert (user_id + 日期).
+    从数据库 daily_report_usage 表 upsert (agent_id + user_id + 日期).
     首次计数时 INSERT (daily_count=1), 后续 UPDATE (daily_count + 1).
 
     异常向上抛出, 由调用方决定是否吞掉 (便于 routes.py 层记录可见日志).
 
     Args:
         user_id: 用户 ID
-        agent_id: Agent 名称 (保留兼容)
+        agent_id: Agent ID (即 agent_name, 多 Agent 数据隔离键)
     Returns:
         递增后的计数值
     Raises:
@@ -213,17 +227,24 @@ async def increment_daily_report_count(
     async with pool.acquire() as conn:
         # INSERT ... ON CONFLICT 幂等 upsert
         # 首次: INSERT daily_count=1; 后续: daily_count = daily_count + 1
+        # ON CONFLICT (agent_id, user_id, usage_date): 三级隔离键联合唯一约束
         row = await conn.fetchrow(
             """
-            INSERT INTO daily_report_usage (user_id, usage_date, daily_count)
-            VALUES ($1, $2, 1)
-            ON CONFLICT (user_id, usage_date)
+            INSERT INTO daily_report_usage (agent_id, user_id, usage_date, daily_count)
+            VALUES ($1, $2, $3, 1)
+            ON CONFLICT (agent_id, user_id, usage_date)
             DO UPDATE SET daily_count = daily_report_usage.daily_count + 1
             RETURNING daily_count
             """,
+            agent_id,
             user_id,
             usage_date,
         )
         new_count = int(row["daily_count"]) if row else 0
-        logger.info("用户 %s 当日报告计数 +1 (当前 %d)", user_id, new_count)
+        logger.info(
+            "用户 %s (agent=%s) 当日报告计数 +1 (当前 %d)",
+            user_id,
+            agent_id,
+            new_count,
+        )
         return new_count

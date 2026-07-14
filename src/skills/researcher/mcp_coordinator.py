@@ -7,7 +7,8 @@
 - deep: 每子查询都运行
 - disabled: 完全跳过
 
-工具调用结果 TTL 缓存, 缓存 key = hash(query + tool_name + tool_args),
+工具调用结果 TTL 缓存, 缓存 key = hash(agent_id + user_id + query + tool_name + tool_args),
+含 agent_id + user_id 隔离键 (多 Agent 共享模块级缓存, 避免跨 Agent / 跨用户串扰),
 命中直接返回, 未命中调用 MCP Server 后写入缓存.
 
 多工具并发调用 (asyncio.gather + 信号量), 默认并发上限 3,
@@ -42,12 +43,22 @@ MCP_MAX_CONCURRENCY = 3
 MCP_TOOL_TIMEOUT_SECONDS = 30.0
 
 
-def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> str:
+def _make_cache_key(
+    agent_id: str | None,
+    user_id: str | None,
+    query: str,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> str:
     """生成 MCP 工具调用缓存 key.
 
-    key = md5(query + tool_name + tool_args 序列化), 保证可哈希且定长.
+    key = sha256(agent_id + user_id + query + tool_name + tool_args 序列化),
+    含 agent_id + user_id 隔离键, 避免跨 Agent / 跨用户缓存串扰
+    (多 Agent 共享模块级 _MCP_CACHE, 必须按 agent_id + user_id 隔离).
 
     Args:
+        agent_id: Agent ID (即 agent_name, 多 Agent 数据隔离键)
+        user_id: 用户 ID
         query: 用户查询
         tool_name: 工具名
         tool_args: 工具调用参数
@@ -60,22 +71,28 @@ def _make_cache_key(query: str, tool_name: str, tool_args: dict[str, Any]) -> st
     except (TypeError, ValueError):
         # 含不可序列化对象时降级为 repr
         args_str = repr(tool_args)
-    raw = f"{query}:{tool_name}:{args_str}"
+    raw = f"{agent_id or ''}:{user_id or ''}:{query}:{tool_name}:{args_str}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
 async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, Any]]:
-    """从 postgres 获取用户的启用 MCP 配置.
+    """从 postgres 获取用户的启用 MCP 配置 (用户专属 + 系统共享).
 
     数据隔离键 agent_id = agent_name, 用户私有数据按 user_id 区分.
     Agent 初始化时调用, 合并到 MCP_SERVERS (动态工具注册).
+
+    查询范围 (S-13 共享改造):
+    - 用户专属 MCP: agent_id 精确匹配 + user_id 精确匹配 (is_system 可为 TRUE/FALSE)
+    - 系统共享 MCP: agent_id IS NULL AND is_system=TRUE (全局共享, 所有 Agent 可用)
+
+    排序: 系统共享 MCP 优先 (is_system DESC), 同类按 name ASC.
 
     Args:
         user_id: 用户 ID (从请求上下文注入).
         agent_id: Agent ID (即 agent_name).
 
     Returns:
-        启用的 MCP 配置列表 (dict 含 name/server_url/transport_type/command/args/env_vars).
+        启用的 MCP 配置列表 (dict 含 name/server_url/transport_type/command/args/env_vars/is_system).
         查询失败时返回空列表 (降级, 不阻断研究流程).
     """
     try:
@@ -83,11 +100,14 @@ async def get_user_mcp_configs(user_id: str, agent_id: str) -> list[dict[str, An
 
         pool = await get_pool()
         async with pool.acquire() as conn:
-            # 仅获取用户私有的启用 MCP (不含系统公用 MCP, is_system=FALSE)
-            # Agent 只调用用户自己启用且不属于系统的 MCP
+            # 用户专属 MCP (agent_id+user_id 精确匹配) OR 系统共享 MCP (agent_id IS NULL AND is_system=TRUE)
+            # ORDER BY is_system DESC: 系统共享 MCP 排前 (便于日志/调试区分), name ASC 同类按字母序
             rows = await conn.fetch(
-                "SELECT name, server_url, transport_type, command, args, env_vars "
-                "FROM mcp_configs WHERE agent_id=$1 AND user_id=$2 AND enabled=TRUE AND is_system=FALSE",
+                "SELECT name, server_url, transport_type, command, args, env_vars, is_system "
+                "FROM mcp_configs "
+                "WHERE enabled=TRUE AND "
+                "((agent_id=$1 AND user_id=$2) OR (agent_id IS NULL AND is_system=TRUE)) "
+                "ORDER BY is_system DESC, name ASC",
                 agent_id,
                 user_id,
             )
@@ -137,6 +157,7 @@ async def conduct_mcp_if_enabled(
             sub_query,
             strategy=settings.mcp_strategy,
             mcp_configs=mcp_configs,
+            agent_id=settings.agent_name,
             user_id=user_id,
             session_id=session_id,
         )
@@ -205,6 +226,7 @@ class MCPCoordinator:
         *,
         strategy: str | None = None,
         mcp_configs: list[dict[str, Any]] | None = None,
+        agent_id: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
@@ -230,9 +252,11 @@ class MCPCoordinator:
         ) as span:
             try:
                 # 用 langchain-mcp-adapters 连接 MCP Server
+                # 透传 agent_id 用于缓存 key 隔离 (避免跨 Agent 缓存串扰)
                 context = await self._execute_mcp(
                     query,
                     mcp_configs,
+                    agent_id=agent_id,
                     user_id=user_id,
                     session_id=session_id,
                 )
@@ -257,6 +281,7 @@ class MCPCoordinator:
         query: str,
         mcp_configs: list[dict[str, Any]],
         *,
+        agent_id: str | None = None,
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
@@ -338,11 +363,20 @@ class MCPCoordinator:
 
             # 并发执行工具调用 (asyncio.gather + 信号量, 默认并发 3)
             # 单个工具失败返回 None 不影响其他工具; 保留 TTL 缓存逻辑
+            # 透传 agent_id + user_id 用于缓存 key 隔离 (避免跨 Agent / 跨用户缓存串扰)
             cache_enabled = self.settings.mcp_cache_enabled
             sem = asyncio.Semaphore(MCP_MAX_CONCURRENCY)
             results = await asyncio.gather(
                 *[
-                    self._call_single_tool(tool, args, query, cache_enabled, sem)
+                    self._call_single_tool(
+                        tool,
+                        args,
+                        query,
+                        cache_enabled,
+                        sem,
+                        agent_id=agent_id,
+                        user_id=user_id,
+                    )
                     for tool, args in selected
                 ],
                 return_exceptions=False,
@@ -361,6 +395,9 @@ class MCPCoordinator:
         query: str,
         cache_enabled: bool,
         sem: asyncio.Semaphore,
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> str | None:
         """执行单个 MCP 工具调用 (并发 + TTL 缓存).
 
@@ -373,15 +410,18 @@ class MCPCoordinator:
             query: 用户查询 (用于缓存 key)
             cache_enabled: 是否启用 TTL 缓存
             sem: 并发信号量
+            agent_id: Agent ID (即 agent_name, 缓存 key 隔离键)
+            user_id: 用户 ID (缓存 key 隔离键)
 
         Returns:
             工具结果字符串, 失败/空结果返回 None
         """
         tool_name = getattr(tool, "name", "")
         # TTL 缓存检查 (缓存命中不消耗信号量)
+        # cache key 含 agent_id + user_id, 避免跨 Agent / 跨用户缓存串扰
         cache_key: str | None = None
         if cache_enabled:
-            cache_key = _make_cache_key(query, tool_name, tool_args)
+            cache_key = _make_cache_key(agent_id, user_id, query, tool_name, tool_args)
             if cache_key in _MCP_CACHE:
                 cached_result, expire = _MCP_CACHE[cache_key]
                 if time.time() < expire:
@@ -585,8 +625,9 @@ class MCPCoordinator:
         - mcp_routes.delete_mcp_config 后
         - mcp_routes.clone_system_mcp_config 后
 
-        注: 模块级 _MCP_CACHE 按 (query, tool_name, tool_args) 哈希, 无法按 user_id
-        精细清理, 全量清空以失效所有用户的工具调用结果缓存 (TTL 兜底, 影响有限).
+        注: 模块级 _MCP_CACHE 按 (agent_id, user_id, query, tool_name, tool_args) 哈希,
+        无法按单 user_id 精细清理, 全量清空以失效所有 Agent / 用户的工具调用结果缓存
+        (TTL 兜底, 影响有限).
         """
         # 实例级缓存 (fast 策略复用)
         self._cache = None

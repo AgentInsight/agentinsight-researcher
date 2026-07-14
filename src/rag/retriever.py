@@ -30,6 +30,7 @@ import orjson
 from rank_bm25 import BM25Okapi
 
 from src.common.redis_client import get_redis_client
+from src.common.redis_lock import RedisDistributedLock
 from src.config.settings import Settings, get_settings
 from src.observability.tracing import trace_retriever
 from src.rag.embeddings import EmbeddingsClient, get_embeddings_client
@@ -57,6 +58,8 @@ class HybridRetriever:
     # BM25 断点修复: BM25 语料 Redis 缓存 TTL (秒, 24 小时兜底过期)
     # 主路径靠 invalidate_bm25_cache 主动失效 (版本号 +1), TTL 仅兜底防止长期僵尸缓存
     _BM25_CORPUS_CACHE_TTL: int = 86400
+    # BM25 版本号键 / LRU 排序集合键 TTL (秒, 7 天, 防止长期僵尸键)
+    _BM25_KEY_TTL: int = 7 * 24 * 3600
     # BM25 断点修复: BM25 语料 Redis 缓存默认版本号 (从未 INCR 过的 namespace)
     _BM25_CORPUS_DEFAULT_VERSION: int = 1
 
@@ -431,6 +434,7 @@ class HybridRetriever:
             if self.settings.redis_cache_lru_enabled:
                 lru_key = self._lru_key(user_id)
                 await self._redis.zadd(lru_key, {key: time.time()})
+                await self._redis.expire(lru_key, self._BM25_KEY_TTL)
             return cast(list[dict[str, Any]], orjson.loads(data))
         except Exception as e:  # noqa: BLE001
             logger.warning("Redis 缓存读取失败, 降级无缓存: %s", e)
@@ -461,6 +465,7 @@ class HybridRetriever:
             if self.settings.redis_cache_lru_enabled:
                 lru_key = self._lru_key(user_id)
                 await self._redis.zadd(lru_key, {key: time.time()})
+                await self._redis.expire(lru_key, self._BM25_KEY_TTL)
                 count = await self._redis.zcard(lru_key)
                 if count > self.settings.redis_cache_max_size:
                     # 取最久未访问的 (count - max_size) 条
@@ -744,11 +749,18 @@ class HybridRetriever:
                 continue
 
             # singleflight: 按 namespace 分锁, 防止并发检索重复拉取
-            lock = self._bm25_load_locks.get(ns)
-            if lock is None:
-                lock = asyncio.Lock()
-                self._bm25_load_locks[ns] = lock
-            async with lock:
+            # Redis 可用时用分布式锁 (跨 Agent 实例互斥, 防多实例并发重复拉取 BM25 语料);
+            # Redis 不可用降级进程内 asyncio.Lock (单实例内仍互斥)
+            if self._redis is not None:
+                lock_key = f"{self.settings.agent_name}:{cache_uid}:rag:bm25:lock:{ns}"
+                lock_ctx: Any = RedisDistributedLock(self._redis, lock_key, ttl=60)
+            else:
+                proc_lock = self._bm25_load_locks.get(ns)
+                if proc_lock is None:
+                    proc_lock = asyncio.Lock()
+                    self._bm25_load_locks[ns] = proc_lock
+                lock_ctx = proc_lock
+            async with lock_ctx:
                 # 双重检查: 持有锁后再次检查内存缓存 (可能在等待期间已被其他协程填充)
                 cached = self._bm25_per_namespace.get(ns)
                 if cached is not None and cached[1] == current_version:
@@ -811,6 +823,7 @@ class HybridRetriever:
         try:
             version_key = self._bm25_version_key(namespace, cache_uid)
             new_version = await self._redis.incr(version_key)
+            await self._redis.expire(version_key, self._BM25_KEY_TTL)
             logger.info(
                 "BM25 语料缓存已失效 (namespace=%s, user_id=%s, 新版本号=%d)",
                 namespace,

@@ -152,6 +152,13 @@ class QdrantManager:
                 field_name="namespace",
                 field_schema=PayloadSchemaType.KEYWORD,
             )
+            # 为 user_id 字段创建 payload 索引 (用户私有数据检索性能关键)
+            # 用户私有数据按 user_id 隔离, 无索引时全扫描
+            await self._client.create_payload_index(
+                collection_name=self.settings.qdrant_collection,
+                field_name="user_id",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
             self._collection_ready = True
 
     def build_shared_namespace(self) -> str:

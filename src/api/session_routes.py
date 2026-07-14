@@ -189,7 +189,8 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     1. chat_messages 表 (SessionStore.delete_session 事务内清理)
     2. research_sessions 表 (SessionStore.delete_session 事务内清理)
     3. LangGraph Checkpointer (checkpoints 表, 按 thread_id 删除)
-    4. Redis 缓存 (按 {agent_id}:{user_id}:{session_id}* 模式清理)
+
+    注: Redis 键不含 session_id 维度, 依赖 TTL 自然过期, 无需按 session 清理.
 
     返回: {"session_id", "deleted": true}
     """
@@ -206,10 +207,11 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    # 3: 清理 LangGraph Checkpointer (按 thread_id 删除 checkpoints/writes)
-    await _cleanup_checkpointer(session_id)
+    # 3: 清理 LangGraph Checkpointer (按 thread_id 删除 checkpoints/checkpoint_writes)
+    await _cleanup_checkpointer(session_id, agent_id)
 
-    # 4: 清理 Redis 缓存 (按前缀模式删除)
+    # 4: Redis 缓存 — 当前 Redis 键不含 session_id 维度, 依赖 TTL 自然过期, 无需按 session 清理.
+    #    保留 _cleanup_redis_cache 调用为 no-op, 仅为兼容测试 mock; 实际不执行任何删除.
     await _cleanup_redis_cache(agent_id, user_id, session_id)
 
     logger.info(
@@ -299,27 +301,34 @@ async def update_report_config(
 # ========== 级联清理辅助函数 ==========
 
 
-async def _cleanup_checkpointer(session_id: str) -> None:
+async def _cleanup_checkpointer(session_id: str, agent_id: str | None = None) -> None:
     """清理 LangGraph Checkpointer 中该会话的 checkpoint 数据.
 
-    LangGraph PostgresSaver 的 checkpoints/writes 表按 thread_id 隔离,
+    LangGraph PostgresSaver 的 checkpoints/checkpoint_writes 表按 thread_id 隔离,
     直接通过 asyncpg 删除 (不依赖 LangGraph SDK 的删除方法, 保持解耦).
     失败仅告警, 不阻断删除流程 (业务表已清理).
+
+    thread_id 格式: f"{agent_id}:{session_id}" (多 Agent 命名空间隔离, 见 routes.py).
     """
     try:
+        from src.config.settings import get_settings
         from src.memory.db_initializer import get_pool
+
+        # thread_id 加 agent_id 前缀 (与 routes.py 的 thread_id 构造保持一致)
+        effective_agent_id = agent_id or get_settings().agent_name
+        thread_id = f"{effective_agent_id}:{session_id}"
 
         pool = await get_pool()
         async with pool.acquire() as conn:
             # checkpoints 表: 按 thread_id 删除
             await conn.execute(
                 "DELETE FROM checkpoints WHERE thread_id = $1",
-                session_id,
+                thread_id,
             )
-            # writes 表: 按 thread_id 删除
+            # checkpoint_writes 表: 按 thread_id 删除 (注意表名带 checkpoint_ 前缀)
             await conn.execute(
-                "DELETE FROM writes WHERE thread_id = $1",
-                session_id,
+                "DELETE FROM checkpoint_writes WHERE thread_id = $1",
+                thread_id,
             )
             # migration tracking 表通常不含 thread_id, 跳过
     except Exception as e:  # noqa: BLE001
@@ -331,44 +340,18 @@ async def _cleanup_checkpointer(session_id: str) -> None:
 
 
 async def _cleanup_redis_cache(agent_id: str, user_id: str, session_id: str) -> None:
-    """清理 Redis 中该会话的缓存数据.
+    """清理 Redis 中该会话的缓存数据 (已废弃, no-op).
 
-    Redis 键格式: {agent_id}:{user_id}:{module}:{type}:{id}
-    按 {agent_id}:{user_id}:{session_id}* 模式扫描并删除.
-    失败仅告警, 不阻断删除流程.
+    当前 Redis 键格式为 {agent_id}:{user_id}:{module}:{type}:{id}, 不含 session_id 维度,
+    无法按 session 精确清理. Redis 缓存依赖 TTL 自然过期, 无需按 session 主动清理.
+
+    保留函数签名仅为兼容现有测试 mock (test_api_session_routes.py), 实际不执行任何删除.
     """
-    try:
-        from src.common.redis_client import get_redis_client
-
-        client = await get_redis_client()
-        if client is None:
-            return
-
-        # 按前缀模式扫描 (SCAN 非阻塞, 不影响 Redis 性能)
-        pattern = f"{agent_id}:{user_id}:*{session_id}*"
-        deleted_count = 0
-        async for key in client.scan_iter(match=pattern, count=100):
-            await client.delete(key)
-            deleted_count += 1
-
-        # 同时清理以 session_id 开头的键 (部分模块可能用 session_id 做前缀)
-        pattern2 = f"{agent_id}:{user_id}:{session_id}:*"
-        async for key in client.scan_iter(match=pattern2, count=100):
-            await client.delete(key)
-            deleted_count += 1
-
-        if deleted_count > 0:
-            logger.info(
-                "Redis 缓存已清理: session_id=%s, 删除 %d 个键",
-                session_id,
-                deleted_count,
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "清理 Redis 缓存失败 (不阻断, session=%s): %s",
-            session_id,
-            e,
-        )
+    # no-op: Redis 键不含 session_id 维度, 依赖 TTL 自然过期, 无需按 session 清理.
+    logger.debug(
+        "Redis 清理跳过 (键不含 session_id 维度, 依赖 TTL 自然过期): session_id=%s",
+        session_id,
+    )
 
 
 __all__ = ["router"]

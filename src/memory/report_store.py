@@ -110,11 +110,19 @@ class ReportStore:
             )
             return report_id
 
-    async def get_report(self, report_id: str) -> dict[str, Any] | None:
-        """按 report_id 获取报告.
+    async def get_report(
+        self,
+        *,
+        report_id: str,
+        agent_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """按 report_id 获取报告 (带 agent_id + user_id 隔离过滤).
 
         Args:
             report_id: 报告 UUID (字符串)
+            agent_id: Agent 名称 (数据隔离键)
+            user_id: 用户 ID (数据隔离键)
 
         Returns:
             报告字典, 不存在返回 None
@@ -122,8 +130,13 @@ class ReportStore:
         pool = await get_pool(self._settings)
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT {_SELECT_COLUMNS} FROM research_reports WHERE report_id = $1::uuid",
+                f"""
+                SELECT {_SELECT_COLUMNS} FROM research_reports
+                WHERE report_id = $1::uuid AND agent_id = $2 AND user_id = $3
+                """,
                 report_id,
+                agent_id,
+                user_id,
             )
             if not row:
                 return None
@@ -131,14 +144,17 @@ class ReportStore:
 
     async def list_reports(
         self,
+        *,
+        agent_id: str,
         session_id: str | None = None,
         user_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """列出报告 (按 session_id + user_id 组合过滤, AND 语义).
+        """列出报告 (按 agent_id 必传 + session_id + user_id 组合过滤, AND 语义).
 
         Args:
+            agent_id: Agent 名称 (数据隔离键, 必传)
             session_id: 会话 ID (可选过滤)
             user_id: 用户 ID (可选过滤)
             limit: 返回上限
@@ -153,11 +169,12 @@ class ReportStore:
                 rows = await conn.fetch(
                     f"""
                     SELECT {_SELECT_COLUMNS} FROM research_reports
-                    WHERE session_id = $1 AND user_id = $2
-                    ORDER BY created_at DESC LIMIT $3 OFFSET $4
+                    WHERE session_id = $1 AND user_id = $2 AND agent_id = $3
+                    ORDER BY created_at DESC LIMIT $4 OFFSET $5
                     """,
                     session_id,
                     user_id,
+                    agent_id,
                     limit,
                     offset,
                 )
@@ -165,10 +182,11 @@ class ReportStore:
                 rows = await conn.fetch(
                     f"""
                     SELECT {_SELECT_COLUMNS} FROM research_reports
-                    WHERE session_id = $1
-                    ORDER BY created_at DESC LIMIT $2 OFFSET $3
+                    WHERE session_id = $1 AND agent_id = $2
+                    ORDER BY created_at DESC LIMIT $3 OFFSET $4
                     """,
                     session_id,
+                    agent_id,
                     limit,
                     offset,
                 )
@@ -176,10 +194,11 @@ class ReportStore:
                 rows = await conn.fetch(
                     f"""
                     SELECT {_SELECT_COLUMNS} FROM research_reports
-                    WHERE user_id = $1
-                    ORDER BY created_at DESC LIMIT $2 OFFSET $3
+                    WHERE user_id = $1 AND agent_id = $2
+                    ORDER BY created_at DESC LIMIT $3 OFFSET $4
                     """,
                     user_id,
+                    agent_id,
                     limit,
                     offset,
                 )
@@ -187,18 +206,28 @@ class ReportStore:
                 rows = await conn.fetch(
                     f"""
                     SELECT {_SELECT_COLUMNS} FROM research_reports
-                    ORDER BY created_at DESC LIMIT $1 OFFSET $2
+                    WHERE agent_id = $1
+                    ORDER BY created_at DESC LIMIT $2 OFFSET $3
                     """,
+                    agent_id,
                     limit,
                     offset,
                 )
             return [_row_to_dict(r) for r in rows]
 
-    async def delete_report(self, report_id: str) -> bool:
-        """删除报告.
+    async def delete_report(
+        self,
+        *,
+        report_id: str,
+        agent_id: str,
+        user_id: str,
+    ) -> bool:
+        """删除报告 (带 agent_id + user_id 隔离过滤).
 
         Args:
             report_id: 报告 UUID (字符串)
+            agent_id: Agent 名称 (数据隔离键)
+            user_id: 用户 ID (数据隔离键)
 
         Returns:
             True 删除成功, False 报告不存在
@@ -206,13 +235,23 @@ class ReportStore:
         pool = await get_pool(self._settings)
         async with pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM research_reports WHERE report_id = $1::uuid",
+                """
+                DELETE FROM research_reports
+                WHERE report_id = $1::uuid AND agent_id = $2 AND user_id = $3
+                """,
                 report_id,
+                agent_id,
+                user_id,
             )
             # asyncpg execute 返回 "DELETE N" 格式
             deleted = bool(result.endswith(" 1"))
             if deleted:
-                logger.info("报告已删除: report_id=%s", report_id)
+                logger.info(
+                    "报告已删除: report_id=%s, agent_id=%s, user_id=%s",
+                    report_id,
+                    agent_id,
+                    user_id,
+                )
             return deleted
 
 
