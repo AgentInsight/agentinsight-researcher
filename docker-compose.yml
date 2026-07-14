@@ -61,7 +61,7 @@ services:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__STATIC_API_KEY: ${QDRANT_API_KEY:-}
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
       - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
@@ -91,7 +91,7 @@ services:
       PORT: "8088"
       API_KEY: ${EMBEDDINGS_API_KEY:-}
     ports:
-      - "8088:8088"
+      - "127.0.0.1:8088:8088"
     volumes:
       # 命名卷: TEI 用 /data 作为 HF cache (可写, 首次启动从 HuggingFace 下载模型并缓存)
       - embeddings_models:/data
@@ -150,7 +150,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  agent:
+  # 多 Agent 架构: 服务名带 -researcher 后缀, 与未来 agent-xxx 区分
+  agent-researcher:
     build:
       context: .
       dockerfile: Dockerfile
@@ -184,6 +185,50 @@ services:
       retries: 3
       start_period: 30s
 
+  # 新增: 独立 frontend 容器 (Next.js + Node 运行时)
+  # 多阶段构建: builder 阶段 npm ci + npm run build, runtime 阶段仅复制 .next/standalone
+  frontend:
+    build:
+      context: .
+      dockerfile: /frontend/Dockerfile
+      args:
+        # 构建时注入 NEXT_PUBLIC_ 变量 (会被内联到产物)
+        NEXT_PUBLIC_SELF_HOST: ${NEXT_PUBLIC_SELF_HOST:-true}
+        NEXT_PUBLIC_AGENT_RESEARCHER_API_URL: ${NEXT_PUBLIC_AGENT_RESEARCHER_API_URL:-http://agent-researcher:8066}
+    image: agentinsight-frontend:latest
+    restart: always
+    env_file:
+      - .env
+      - .env.frontend
+    ports:
+      - "8801:8801"
+    depends_on:
+      agent-researcher:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 未来添加新 Agent 示例 (取消注释即启用):
+  # agent-writer:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   image: agentinsight-writer:latest
+  #   ports:
+  #     - "8067:8066"
+  #   environment:
+  #     - AGENT_NAME=agentinsight-writer
+  #     - SELF_HOST=true
+
 volumes:
   postgres_data:
     driver: local
@@ -200,4 +245,6 @@ volumes:
   rerank_models:
     driver: local
   searxng_data:
+    driver: local
+  frontend_cache:
     driver: local

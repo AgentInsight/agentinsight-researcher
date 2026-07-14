@@ -1,20 +1,21 @@
 """单元测试: API 中间件.
 
 验证 src/api/middleware.py:
-- JWTAuthMiddleware: 无 token / 有 token / 调用失败 / 超时 → user_id 解析
+- JWTAuthMiddleware: 无 token / 有效 token / 无效 token / 无 signing_key → user_id 解析
 - SecurityHeadersMiddleware: 安全响应头注入 + HSTS (prod 环境)
 - 请求上下文 getter: get_request_user_id/get_request_session_id/get_request_agent_id
 
 单元测试不依赖外部服务.
-JWT 解析 + 安全响应头约束.
+本地 JWT 解析 (PyJWT + HS256) + IP-based 降级.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
-import httpx
+import jwt as pyjwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -31,55 +32,19 @@ from src.api.middleware import (
 )
 from src.config.settings import Settings
 
-# ========== Fake httpx client ==========
+# ========== JWT 测试辅助 ==========
+
+_JWT_SECRET = "test-jwt-secret-key"  # 测试用密钥, 不入仓
 
 
-class _FakeResponse:
-    """伪造 httpx.Response, 支持 raise_for_status 与 json."""
-
-    def __init__(self, status_code: int = 200, json_data: dict[str, Any] | None = None) -> None:
-        self.status_code = status_code
-        self._json = json_data or {}
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise httpx.HTTPStatusError(
-                "error",
-                request=httpx.Request("GET", "http://test"),
-                response=self,
-            )
-
-    def json(self) -> dict[str, Any]:
-        return self._json
-
-
-class _FakeAsyncClient:
-    """伪造 httpx.AsyncClient, 捕获 get 调用."""
-
-    def __init__(
-        self,
-        response: _FakeResponse | None = None,
-        exc: Exception | None = None,
-    ) -> None:
-        self._response = response
-        self._exc = exc
-        self.calls: list[dict[str, Any]] = []
-
-    async def get(self, url: str, headers: dict[str, str] | None = None) -> _FakeResponse:
-        self.calls.append({"url": url, "headers": headers})
-        if self._exc is not None:
-            raise self._exc
-        if self._response is None:
-            return _FakeResponse(200, {"id": "fake-user"})
-        return self._response
-
-    async def aclose(self) -> None:
-        """无需操作 (测试用)."""
-
-
-def _patch_httpx_client(monkeypatch: pytest.MonkeyPatch, fake: _FakeAsyncClient) -> None:
-    """替换 httpx.AsyncClient 为 fake 实例 (中间件 __init__ 内调用)."""
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: fake)
+def _make_jwt(payload: dict[str, Any], secret: str = _JWT_SECRET) -> str:
+    """生成测试用 JWT token (HS256)."""
+    claims = {
+        "exp": int(time.time()) + 3600,
+        "iat": int(time.time()),
+        **payload,
+    }
+    return pyjwt.encode(claims, secret, algorithm="HS256")
 
 
 def _make_test_app(settings: Settings) -> FastAPI:
@@ -105,22 +70,14 @@ def _make_test_app(settings: Settings) -> FastAPI:
 # ========== JWTAuthMiddleware: 无 Authorization 头 ==========
 
 
-def test_jwt_no_auth_header_uses_ip_based_user_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """无 Authorization 头 → 降级 IP-based UserId (不调用 user_info API).
+def test_jwt_no_auth_header_uses_ip_based_user_id() -> None:
+    """无 Authorization 头 → 降级 IP-based UserId.
 
-    default_user_id 环境变量已移除, 无 token 时按客户端
-    IP 生成确定性 UserId (TestClient 默认 client host 为 "testclient",
+    无 token 时按客户端 IP 生成确定性 UserId
+    (TestClient 默认 client host 为 "testclient",
     generate_user_id_from_ip("testclient") = "ip_846488f1dc5c07b4cebe5c14").
     """
-    settings = Settings(
-        _env_file=None,
-        agent_name="test-agent",
-    )
-    fake = _FakeAsyncClient()
-    _patch_httpx_client(monkeypatch, fake)
-
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
     app = _make_test_app(settings)
     client = TestClient(app)
 
@@ -129,146 +86,149 @@ def test_jwt_no_auth_header_uses_ip_based_user_id(
     data = response.json()
     assert data["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
     assert data["agent_id"] == "test-agent"
-    # 无 token 时不应调用 user_info API
-    assert len(fake.calls) == 0
 
 
-# ========== JWTAuthMiddleware: 有 Bearer token ==========
+# ========== JWTAuthMiddleware: 有效 Bearer token (本地解析) ==========
 
 
-def test_jwt_bearer_token_calls_user_info_api(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """有 Bearer token → 调用 user_info_api_url 获取 user_id."""
-    settings = Settings(
-        _env_file=None,
-        agent_name="test-agent",
-        user_info_api_url="https://fake.example.com/api/user",
-    )
-    fake = _FakeAsyncClient(response=_FakeResponse(200, {"id": "real-user-123"}))
-    _patch_httpx_client(monkeypatch, fake)
+def test_jwt_bearer_token_local_verification_returns_user_id() -> None:
+    """有效 Bearer JWT token: 本地 PyJWT 解析返回真实 user_id.
+
+    不再调用远程 user_info API, 直接本地解析 token 的 UserId claim.
+    """
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
+    token = _make_jwt({"UserId": "real-user-123"})
 
     app = _make_test_app(settings)
     client = TestClient(app)
 
-    response = client.get("/test", headers={"Authorization": "Bearer my-jwt-token"})
+    response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.json()["user_id"] == "real-user-123"
-    # 应调用 user_info API 一次, 携带原 Authorization 头
-    assert len(fake.calls) == 1
-    assert fake.calls[0]["url"] == "https://fake.example.com/api/user"
-    assert fake.calls[0]["headers"] == {"Authorization": "Bearer my-jwt-token"}
 
 
-def test_jwt_bearer_token_user_id_field_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """token 解析响应优先 id 字段, 其次 user_id 字段."""
-    settings = Settings(_env_file=None)
-    fake = _FakeAsyncClient(response=_FakeResponse(200, {"user_id": "alt-user-456"}))
-    _patch_httpx_client(monkeypatch, fake)
+def test_jwt_bearer_token_user_id_field_fallback() -> None:
+    """JWT payload 优先 UserId 字段, 其次 user_id 字段 (小写)."""
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
+    token = _make_jwt({"user_id": "alt-user-456"})
 
     app = _make_test_app(settings)
     client = TestClient(app)
 
-    response = client.get("/test", headers={"Authorization": "Bearer tok"})
+    response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.json()["user_id"] == "alt-user-456"
 
 
-# ========== JWTAuthMiddleware: token 调用失败 ==========
+# ========== JWTAuthMiddleware: token 解析失败 / 无效 ==========
 
 
-def test_jwt_token_call_fails_falls_back_to_ip(
-    monkeypatch: pytest.MonkeyPatch,
+def test_jwt_invalid_token_falls_back_to_ip(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """token 调用失败 (连接错误) → 降级 IP-based UserId + 告警.
+    """无效 JWT token → 降级 IP-based UserId + 告警.
 
-    调用失败按无 token 处理并告警, 按 IP 生成确定性 UserId.
+    JWT 本地解析失败时, 按客户端 IP 生成确定性 UserId 并记录告警.
     """
-    settings = Settings(_env_file=None)
-    fake = _FakeAsyncClient(exc=httpx.ConnectError("connection refused"))
-    _patch_httpx_client(monkeypatch, fake)
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
 
     app = _make_test_app(settings)
     client = TestClient(app)
 
     with caplog.at_level(logging.WARNING):
-        response = client.get("/test", headers={"Authorization": "Bearer bad-token"})
+        response = client.get(
+            "/test", headers={"Authorization": "Bearer not-a-valid-jwt-token"}
+        )
 
     assert response.status_code == 200
     assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
-    # 应记录解析失败告警 (中间件 _resolve_user_id 捕获异常并降级到 IP-based UserId)
-    assert any("解析失败" in rec.message for rec in caplog.records)
+    # 应记录解析失败告警
+    assert any("JWT 本地解析失败" in rec.message for rec in caplog.records)
 
 
-def test_jwt_token_call_http_error_falls_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """token 调用返回 HTTP 4xx/5xx → 降级 IP-based UserId."""
-    settings = Settings(_env_file=None)
-    fake = _FakeAsyncClient(response=_FakeResponse(401, {"error": "unauthorized"}))
-    _patch_httpx_client(monkeypatch, fake)
-
-    app = _make_test_app(settings)
-    client = TestClient(app)
-
-    response = client.get("/test", headers={"Authorization": "Bearer expired"})
-    assert response.status_code == 200
-    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
-
-
-def test_jwt_token_returns_empty_user_id_falls_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """token 解析响应中 id/user_id 为空 → 降级 IP-based UserId."""
-    settings = Settings(_env_file=None)
-    fake = _FakeAsyncClient(response=_FakeResponse(200, {"other": "value"}))
-    _patch_httpx_client(monkeypatch, fake)
-
-    app = _make_test_app(settings)
-    client = TestClient(app)
-
-    response = client.get("/test", headers={"Authorization": "Bearer tok"})
-    assert response.status_code == 200
-    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
-
-
-# ========== JWTAuthMiddleware: 超时 ==========
-
-
-def test_jwt_timeout_falls_back_to_ip(
-    monkeypatch: pytest.MonkeyPatch,
+def test_jwt_token_with_wrong_secret_falls_back_to_ip(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """超时 → 降级 IP-based UserId + 告警."""
-    settings = Settings(
-        _env_file=None,
-        user_info_api_timeout=1,
-    )
-    fake = _FakeAsyncClient(exc=httpx.TimeoutException("timed out"))
-    _patch_httpx_client(monkeypatch, fake)
+    """JWT 用错误密钥签名 → 本地解析失败 → 降级 IP-based UserId + 告警."""
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
+    # 用不同密钥签发 token
+    token = _make_jwt({"UserId": "wrong-secret-user"}, secret="another-secret")
 
     app = _make_test_app(settings)
     client = TestClient(app)
 
     with caplog.at_level(logging.WARNING):
-        response = client.get("/test", headers={"Authorization": "Bearer slow-token"})
+        response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
     assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
-    assert any("超时" in rec.message for rec in caplog.records)
+    assert any("JWT 本地解析失败" in rec.message for rec in caplog.records)
+
+
+def test_jwt_token_expired_falls_back_to_ip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """过期 JWT token → 本地解析失败 → 降级 IP-based UserId + 告警."""
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
+    # 签发已过期的 token
+    expired_payload = {
+        "UserId": "expired-user",
+        "exp": int(time.time()) - 3600,  # 1 小时前过期
+        "iat": int(time.time()) - 7200,
+    }
+    token = pyjwt.encode(expired_payload, _JWT_SECRET, algorithm="HS256")
+
+    app = _make_test_app(settings)
+    client = TestClient(app)
+
+    with caplog.at_level(logging.WARNING):
+        response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
+    assert any("JWT 本地解析失败" in rec.message for rec in caplog.records)
+
+
+def test_jwt_empty_user_id_claim_falls_back_to_ip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """JWT payload 中 UserId/user_id 均为空 → 降级 IP-based UserId + 告警."""
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
+    token = _make_jwt({"UserId": "", "user_id": ""})
+
+    app = _make_test_app(settings)
+    client = TestClient(app)
+
+    with caplog.at_level(logging.WARNING):
+        response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
+
+
+def test_jwt_no_signing_key_falls_back_to_ip() -> None:
+    """未配置 jwt_signing_key → 跳过本地解析, 直接 IP-based 降级.
+
+    生产环境应配置 jwt_signing_key, 未配置时所有 token 都降级.
+    """
+    settings = Settings(_env_file=None, agent_name="test-agent", jwt_signing_key="", jwt_issuer="", jwt_audience="")
+    token = _make_jwt({"UserId": "would-be-real-user"})
+
+    app = _make_test_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    # 未配置密钥 → 跳过本地解析 → IP-based 降级
+    assert response.json()["user_id"] == "ip_846488f1dc5c07b4cebe5c14"
 
 
 # ========== JWTAuthMiddleware: session_id 注入 ==========
 
 
-def test_jwt_session_id_from_query_param(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jwt_session_id_from_query_param() -> None:
     """session_id 可从查询参数注入."""
-    settings = Settings(_env_file=None)
-    _patch_httpx_client(monkeypatch, _FakeAsyncClient())
-
+    settings = Settings(_env_file=None, jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
     app = _make_test_app(settings)
     client = TestClient(app)
 
@@ -277,11 +237,9 @@ def test_jwt_session_id_from_query_param(monkeypatch: pytest.MonkeyPatch) -> Non
     assert response.json()["session_id"] == "my-session-123"
 
 
-def test_jwt_session_id_from_header(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jwt_session_id_from_header() -> None:
     """session_id 可从 X-Session-Id 头注入."""
-    settings = Settings(_env_file=None)
-    _patch_httpx_client(monkeypatch, _FakeAsyncClient())
-
+    settings = Settings(_env_file=None, jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
     app = _make_test_app(settings)
     client = TestClient(app)
 
@@ -290,13 +248,9 @@ def test_jwt_session_id_from_header(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["session_id"] == "header-session"
 
 
-def test_jwt_session_id_auto_generated_when_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_jwt_session_id_auto_generated_when_missing() -> None:
     """无显式 session_id → 自动生成 UUID."""
-    settings = Settings(_env_file=None)
-    _patch_httpx_client(monkeypatch, _FakeAsyncClient())
-
+    settings = Settings(_env_file=None, jwt_signing_key=_JWT_SECRET, jwt_issuer="", jwt_audience="")
     app = _make_test_app(settings)
     client = TestClient(app)
 

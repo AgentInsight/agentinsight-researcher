@@ -2,8 +2,8 @@
 
 安全约束:
 - JWT 验证与 user_id 获取必须在 API 入口中间件完成
-- self_host=True (自托管): token 不存在或调用失败时降级 IP-based UserId
-- self_host=False (云托管): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
+- 统一降级策略: Token 不存在/解析失败 → IP-based UserId (无论 self_host 值)
+- 本地 JWT 解析 (PyJWT + HS256), 不再调用远程 API
 - 禁止将原始 JWT token 写入日志或持久化存储
 - 安全响应头中间件不可绕过
 - CORS * 限制已移除
@@ -18,8 +18,6 @@ import contextvars
 import logging
 import uuid as _uuid
 
-import httpx
-from fastapi.responses import JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message
 
@@ -125,10 +123,8 @@ class JWTAuthMiddleware:
     """JWT 身份解析中间件 (纯 ASGI middleware).
 
     安全约束:
-    - Bearer JWT Token 可选, 不存在时按 IP 生成确定性 UserId (self_host=True 自托管模式)
-    - self_host=False (云托管模式): 强制校验 JWT Token, 不存在或取不到 User 信息时返回 401
-    - token 存在时: 同步调用 GET /api/user 获取 user_id, 携带原 Authorization 头
-    - self_host=True 时: token 不存在 → IP-based UserId; 调用失败/超时 → IP-based UserId 并告警
+    - 统一降级策略: Token 不存在/解析失败 → IP-based UserId (无论 self_host 值)
+    - 本地 JWT 解析 (PyJWT + HS256), 不再调用远程 API
     - 禁止将原始 JWT token 写入日志或持久化存储
 
     改用纯 ASGI __call__, 避免 BaseHTTPMiddleware 对 StreamingResponse 的 task 包装开销.
@@ -137,7 +133,6 @@ class JWTAuthMiddleware:
     def __init__(self, app: ASGIApp, settings: Settings | None = None) -> None:
         self.app = app
         self.settings = settings or get_settings()
-        self._client = httpx.AsyncClient(timeout=self.settings.user_info_api_timeout)
         # 注册到模块级变量, 供 close_jwt_middleware() 在 lifespan shutdown 时调用
         global _jwt_middleware_instance
         _jwt_middleware_instance = self
@@ -180,17 +175,10 @@ class JWTAuthMiddleware:
         auth_header = request.headers.get("Authorization", "")
         token = self._extract_bearer_token(auth_header)
 
-        # 解析 user_id
+        # 解析 user_id (统一降级策略: Token 不存在/解析失败 → IP-based)
         user_id, error = await self._resolve_user_id(token, client_ip)
-        if error:
-            # SELF_HOST=False 时返回 401 (token 不存在或校验失败)
-            response = JSONResponse(
-                status_code=401,
-                content={"error": {"message": error, "type": "authentication_error"}},
-            )
-            await response(scope, receive, send)
-            return
-        assert user_id is not None  # error is None implies user_id is not None
+        # 统一降级后 error 始终为 None, user_id 始终非 None
+        assert user_id is not None
         _request_user_id.set(user_id)
 
         # 从查询参数或请求体提取 session_id (thread_id)
@@ -219,53 +207,53 @@ class JWTAuthMiddleware:
     async def _resolve_user_id(
         self, token: str, client_ip: str = ""
     ) -> tuple[str | None, str | None]:
-        """解析 user_id.
+        """解析 user_id. 统一降级策略: Token 不存在/解析失败 → IP-based UserId.
 
-        返回 (user_id, error_message):
-        - self_host=True: token 不存在或失败时按 IP 生成确定性 UserId
-        - self_host=False: token 不存在或失败时返回错误 (云托管强制校验)
+        无论 self_host 值, 统一走 IP-based 降级, 不再返回错误.
+        本地 JWT 解析 (PyJWT), 不再调用远程 API.
         """
         from src.api.ip_user_resolver import generate_user_id_from_ip
 
+        # 无 Token → 直接 IP-based 降级
         if not token:
-            if self.settings.self_host:
-                # 无 Token 时, 按 IP 生成确定性 UserId
-                ip_user_id = generate_user_id_from_ip(client_ip)
-                return ip_user_id, None
-            return None, "缺少 Authorization Bearer Token"
+            ip_user_id = generate_user_id_from_ip(client_ip)
+            return ip_user_id, None
 
-        try:
-            response = await self._client.get(
-                self.settings.user_info_api_url,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            response.raise_for_status()
-            data = response.json()
-            user_id = str(data.get("id") or data.get("user_id") or "")
+        # 优先本地 JWT 解析
+        if self.settings.jwt_local_verify and self.settings.jwt_signing_key:
+            user_id = self._verify_jwt_local(token)
             if user_id:
                 return user_id, None
-            logger.warning("user_id 解析返回空")
-            if self.settings.self_host:
-                # Token 校验成功但 user_id 为空, 降级到 IP-based UserId
-                ip_user_id = generate_user_id_from_ip(client_ip)
-                return ip_user_id, None
-            return None, "通过 Token 无法获取 User 信息"
-        except httpx.TimeoutException:
-            logger.warning("user_id 解析超时 (%ss)", self.settings.user_info_api_timeout)
-            if self.settings.self_host:
-                ip_user_id = generate_user_id_from_ip(client_ip)
-                return ip_user_id, None
-            return None, "Token 校验失败: TimeoutException"
-        except Exception as e:  # noqa: BLE001
-            logger.warning("user_id 解析失败: %s", e)
-            if self.settings.self_host:
-                ip_user_id = generate_user_id_from_ip(client_ip)
-                return ip_user_id, None
-            return None, f"Token 校验失败: {type(e).__name__}"
+            logger.warning("JWT 本地解析失败, 降级到 IP-based UserId")
 
-    async def aclose(self) -> None:
-        """关闭 HTTP 客户端 (lifespan shutdown 调用)."""
-        await self._client.aclose()
+        # 本地解析失败或未启用 → IP-based 降级 (统一行为)
+        ip_user_id = generate_user_id_from_ip(client_ip)
+        return ip_user_id, None
+
+    def _verify_jwt_local(self, token: str) -> str | None:
+        """本地 PyJWT 解析 Token, 返回 user_id.
+
+        使用 jwt_signing_key (HS256) 本地验证, 不调用远程 API.
+        失败返回 None, 由调用方降级到 IP-based.
+        """
+        import jwt  # PyJWT
+
+        try:
+            payload = jwt.decode(
+                token,
+                self.settings.jwt_signing_key,
+                algorithms=[self.settings.jwt_algorithm],
+                issuer=self.settings.jwt_issuer or None,
+                audience=self.settings.jwt_audience or None,
+                options={"verify_exp": True, "require": ["exp", "iat"]},
+                leeway=self.settings.jwt_clock_skew,
+            )
+            # AgentInsightService JWT Claims: UserId (字符串)
+            user_id = str(payload.get("UserId") or payload.get("user_id") or "")
+            return user_id or None
+        except Exception as e:  # noqa: BLE001
+            logger.warning("JWT 本地解析失败: %s", e)
+            return None
 
 
 class SecurityHeadersMiddleware:
@@ -318,11 +306,10 @@ class SecurityHeadersMiddleware:
 
 
 async def close_jwt_middleware() -> None:
-    """关闭 JWTAuthMiddleware 的 httpx.AsyncClient (lifespan shutdown 调用).
+    """JWT 中间件清理 (lifespan shutdown 调用).
 
+    不再需要关闭 HTTP 客户端, 仅清理模块级引用.
     幂等: 无实例时直接返回.
     """
     global _jwt_middleware_instance
-    if _jwt_middleware_instance is not None:
-        await _jwt_middleware_instance.aclose()
-        _jwt_middleware_instance = None
+    _jwt_middleware_instance = None

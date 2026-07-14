@@ -165,8 +165,6 @@ class Settings(BaseSettings):
 
     # ========== 用户身份解析 ==========
     # 无 JWT Token 时, 按 IP 生成确定性 UserId (SHA256 哈希, 不存储原始 IP)
-    user_info_api_url: str = "https://agentinsight.goldebridge.com/api/user"
-    user_info_api_timeout: int = 5
     # 每日报告生成限额 (按 IP 限流, 默认 5 次/日, 仅报告成功才计数)
     # 0 = 不限制; 环境变量 IP_DAILY_REPORT_LIMIT 控制
     # 注意: 此配置已迁移到数据库 report_limits 表 (user_id IS NULL 的系统默认行)
@@ -174,21 +172,19 @@ class Settings(BaseSettings):
     ip_daily_report_limit: int = 5
 
     # ========== 自托管模式 (SELF_HOST) ==========
-    # True (默认): 自托管模式, JWT Token 可选, 不存在时走 IP-based 用户身份解析,
-    #   且跳过 AgentInsightService 点数校验/扣除 (独立部署不依赖 SaaS 后端)
-    # False: 云托管模式, 强制校验 JWT Token, 不存在或取不到 User 信息时直接返回错误,
-    #   且复用 AgentInsightService 的点数校验/扣除 API (见下方 agent_privilege_*)
+    # True (默认): 自托管模式, JWT Token 可选, 不存在时走 IP-based 用户身份解析
+    # False: 云托管模式, JWT Token 本地解析, 不存在时走 IP-based 用户身份解析
+    # 两种模式统一使用项目数据库处理报告限额, 不再调用远程 API
     self_host: bool = True
 
-    # ========== Agent 点数校验/扣除 (SELF_HOST=False 时启用) ==========
-    # 仅在 self_host=False 时生效; self_host=True 时跳过校验/扣除
-    # AgentType 枚举: 1=Assistant (MonthlyAgentRate), 2=Research (MonthlyResearchRate)
-    # 本项目为研究型 Agent, 默认 type=2, 服务端从 JWT token 解析 OrgId
-    agent_privilege_api_base_url: str = "https://agentinsight.goldebridge.com"
-    agent_privilege_validate_path: str = "/api/user/privilege/agent/validate"
-    agent_privilege_deduct_path: str = "/api/user/privilege/agent/deduct"
-    agent_privilege_api_timeout: int = 5
-    agent_privilege_fail_open: bool = True  # API 失败时放行 (降级策略)
+    # ========== JWT 本地解析 (复用 AgentInsightService JWT 规格) ==========
+    # 密钥仅环境变量注入, 禁止入仓/硬编码
+    jwt_signing_key: str = ""  # 从环境变量 JWT_SIGNING_KEY 读取 (HS256 密钥)
+    jwt_issuer: str = ""  # 从环境变量 JWT_ISSUER 读取 (签发者)
+    jwt_audience: str = ""  # 从环境变量 JWT_AUDIENCE 读取 (受众)
+    jwt_algorithm: str = "HS256"  # JWT 签名算法 (固定 HS256)
+    jwt_clock_skew: int = 5  # 时钟偏移容忍秒数
+    jwt_local_verify: bool = True  # 是否启用本地 JWT 解析
 
     # ========== 会话与上下文 ==========
     context_max_chars: int = 800_000

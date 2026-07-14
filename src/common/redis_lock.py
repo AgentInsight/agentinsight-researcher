@@ -32,8 +32,9 @@ class RedisDistributedLock:
         self._ttl = ttl
         self._token = str(uuid.uuid4())
 
-    async def __aenter__(self) -> "RedisDistributedLock":
-        while not await self._client.set(self._key, self._token, ex=self._ttl, nx=True):
+    async def __aenter__(self) -> RedisDistributedLock:
+        # 跨进程分布式锁: 其他进程释放锁时本进程 Event 不会被通知, 轮询 sleep 是合理实现
+        while not await self._client.set(self._key, self._token, ex=self._ttl, nx=True):  # noqa: ASYNC110
             await asyncio.sleep(0.1)
         return self
 

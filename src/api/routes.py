@@ -628,29 +628,8 @@ async def chat_completions(
             return _with_session_id(chat_response, session_id)
 
     # RESEARCH 意图 (或 CHAT + 显式 report_type) → researcher graph
-    # SELF_HOST=False 时, 进入研究前校验 Agent 点数
-    # token 不得入日志/持久化; 仅 RESEARCH 意图校验/扣除
-    if not settings.self_host and (request.org_id or request.project_id):
-        from src.api.agentinsight_client import get_agentinsight_client
-
-        # 提取 token (从 Authorization Bearer 头)
-        token = ""
-        if authorization and authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
-
-        if not token:
-            raise HTTPException(
-                status_code=401,
-                detail="缺少 Authorization Bearer Token (SELF_HOST=False 模式必需)",
-            )
-
-        client = get_agentinsight_client()
-        exceeded, _err = await client.validate_agent_usage(token)
-        if exceeded:
-            raise HTTPException(
-                status_code=429,
-                detail="本月 Agent 调用次数已达上限, 请联系管理员升级套餐",
-            )
+    # 删除 SELF_HOST=False 远程点数校验, 统一用数据库处理报告限额
+    # (IP-based 用户每日报告限额检查见下方, user_id 以 "ip_" 前缀)
 
     # 报告配置 (新研究模式)
     report_type = request.report_type or settings.default_report_type
@@ -735,9 +714,10 @@ async def chat_completions(
     thread_id = f"{agent_id}:{session_id}"
     graph_config = {"configurable": {"thread_id": thread_id}}
 
-    # IP-based 用户每日报告限额检查 (仅 self_host=True + IP-based 用户)
+    # IP-based 用户每日报告限额检查
+    # 统一降级后, self_host=False 的用户也可能走 IP-based (Token 不存在/解析失败时)
     # 限额从数据库 report_limits 表读取 (已从环境变量迁移)
-    if settings.self_host and user_id.startswith("ip_"):
+    if user_id.startswith("ip_"):
         from src.api.ip_user_resolver import check_daily_report_limit
 
         allowed, current_count, effective_limit = await check_daily_report_limit(user_id, agent_id)
@@ -971,22 +951,8 @@ async def _stream_research(
                         if delta.get("curated_sources"):
                             progress += f"已策展 {len(delta['curated_sources'])} 来源\n"
                     elif node_name == "report_generator" and delta.get("report_md"):
-                        # SELF_HOST=False 时, 报告生成成功后异步扣除点数 (不阻塞流式响应)
-                        # token 不得入日志/持久化; 仅 RESEARCH 意图扣除
-                        settings_priv = get_settings()
-                        if not settings_priv.self_host and (request.org_id or request.project_id):
-                            from src.api.agentinsight_client import get_agentinsight_client
-
-                            token = (
-                                authorization[7:].strip()
-                                if authorization and authorization.lower().startswith("bearer ")
-                                else ""
-                            )
-                            if token:
-                                # 保留 Task 引用防止 GC 取消 (扣点任务有副作用)
-                                _create_background_task(
-                                    get_agentinsight_client().deduct_agent_usage(token)
-                                )
+                        # 删除 SELF_HOST=False 异步扣除点数
+                        # 报告生成完成, 继续推送内容
                         # 非 markdown 格式: 跳过逐段推送 (publisher 节点会推送最终格式)
                         fmt = request.report_format or "markdown"
                         if fmt != "markdown":
@@ -1293,29 +1259,8 @@ async def _run_research(
                 "total_tokens": (len(initial_state["query"]) + len(content)) // 4,
             }
 
-    # SELF_HOST=False 时, 报告生成成功后同步扣除点数 (不阻断响应)
-    # token 不得入日志/持久化; 仅 RESEARCH 意图扣除
-    settings_priv = get_settings()
-    if (
-        not settings_priv.self_host
-        and (request.org_id or request.project_id)
-        and content
-        and "研究执行失败" not in content
-    ):
-        try:
-            from src.api.agentinsight_client import get_agentinsight_client
-
-            token = (
-                authorization[7:].strip()
-                if authorization and authorization.lower().startswith("bearer ")
-                else ""
-            )
-            if token:
-                await get_agentinsight_client().deduct_agent_usage(token)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("扣除点数失败 (不阻断响应): %s", e)
-
-    # IP-based 用户报告生成成功后递增每日计数 (self_host=True 且 user_id 以 "ip_" 前缀)
+    # 删除 SELF_HOST=False 同步扣除点数
+    # IP-based 用户报告生成成功后递增每日计数 (user_id 以 "ip_" 前缀)
     # 仅报告内容非空且未失败时计数; 失败/异常不计数 (符合"需生成报告成功才计数"需求)
     _uid_final = initial_state.get("user_id", "")
     _aid_final = initial_state.get("agent_id", "")

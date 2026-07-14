@@ -5,7 +5,7 @@
 2. IP-based 用户未超限 - 非流式 → 不返回 429 (走正常研究流水线)
 3. IP-based 用户超限 - 流式 → SSE 含 "已达上限", finish_reason="stop"
 4. JWT Token 用户不受限额 (user_id 不以 "ip_" 开头)
-5. self_host=False 不走限额 (无 token → 401)
+5. self_host=False 无 token 统一降级 IP-based (不再返回 401, 走限额检查)
 6. ip_daily_report_limit=0 不限制
 7. 非流式成功路径 → increment_daily_report_count 被调用
 8. 非流式失败路径 (限额超限) → increment_daily_report_count 不被调用
@@ -23,7 +23,6 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -217,19 +216,21 @@ def test_jwt_user_not_limited(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_check.assert_not_called()
 
 
-# ========== 场景 5: self_host=False 不走限额 ==========
+# ========== 场景 5: self_host=False 无 token 统一降级 IP-based ==========
 
 
-def test_self_host_false_no_token_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
-    """self_host=False 时无 token → 401 (中间件拦截, 不走限额检查).
+def test_self_host_false_no_token_degrades_to_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """self_host=False 无 token → 统一降级 IP-based UserId (不再返回 401).
 
-    self_host=False (云托管) 强制校验 JWT Token,
-    不存在时返回 401, 请求不会到达限额检查逻辑.
+    本轮改造: 统一降级策略, 无论 self_host 值, Token 不存在/解析失败 → IP-based UserId.
+    请求会到达限额检查逻辑 (IP-based 用户受限额约束).
     """
     settings = _make_settings(self_host=False, ip_daily_report_limit=5)
 
-    # Mock httpx.AsyncClient 避免创建真实 HTTP 客户端 (中间件 __init__ 内调用)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: MagicMock())
+    # Mock 研究流水线 + 限额检查 (IP-based 用户走限额)
+    _patch_pipeline(monkeypatch)
+    mock_check = _patch_limit_check(monkeypatch, allowed=True, count=0, limit=5)
+    _patch_increment(monkeypatch)
 
     test_app = FastAPI()
     test_app.include_router(router)
@@ -239,9 +240,12 @@ def test_self_host_false_no_token_returns_401(monkeypatch: pytest.MonkeyPatch) -
     client = TestClient(test_app)
     response = client.post("/v1/chat/completions", json=_REQUEST_BODY)
 
-    assert response.status_code == 401
-    data = response.json()
-    assert "error" in data
+    # 统一降级: 不再返回 401, 而是降级到 IP-based UserId 走限额检查
+    assert response.status_code != 401, (
+        f"统一降级策略下不应返回 401, 实际: {response.status_code}"
+    )
+    # IP-based 用户应走限额检查 (check_daily_report_limit 被调用)
+    mock_check.assert_called_once()
 
 
 # ========== 场景 6: ip_daily_report_limit=0 不限制 ==========

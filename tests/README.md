@@ -113,7 +113,6 @@ tests/
 │   │ # ── 可观测性 ──
 │   ├── test_tracing.py                     # AgentInsight 6 类 trace span
 │   ├── test_tracing_extended.py            # 追踪扩展 (span 传播/降级)
-│   ├── test_agentinsight_client.py         # AgentInsight 客户端
 │   │
 │   │ # ── 研究流程 / 性能优化 ──
 │   ├── test_research_conductor.py          # ResearchConductor 主流程

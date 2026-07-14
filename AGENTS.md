@@ -363,15 +363,19 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 用生产数据集做 e2e 测试（属第 11 章 PII 安全硬约束）。
 - 跳过回归测试合并代码（破坏门禁保证）。
 
-## 14. 前端测试页面规则
+## 14. 前端规则（双层：测试页面 + 生产前端）
 
-**定位**：Agent 应内置一个自包含的前端测试页面，用于联调、演示与冒烟验证，不承担生产前端职责。
+**定位**：Agent 采用双层前端规则：
+1. **测试页面**（保留）：`static/index.html` 自包含测试页面，用于联调、演示与冒烟验证。
+2. **生产前端**（新增允许）：独立 frontend 容器（Next.js + Node 运行时），用于生产部署。
+
+### 14.1 测试页面规则（保留）
 
 **技术标准（核心约定，优先选择）**：
-- 单文件 `static/index.html`，由 FastAPI `StaticFiles` 挂载到 `/`，不推荐独立前端工程。
-- 原生 HTML + 原生 JS，不推荐引入 React/Vue/构建工具/Node 依赖。
-- 样式用内联 `<style>` 或 CDN `<link>`，不推荐本地 CSS 文件；CDN 资源应可离线（自托管或内联）。
-- 流式响应用浏览器原生 `fetch` + `ReadableStream` 解析 SSE，不推荐引入 EventSource polyfill 以外的库。
+- 单文件 `static/index.html`，由 FastAPI `StaticFiles` 挂载到 `/`（当 `ENABLE_TEST_PAGE=true` 时）。
+- 原生 HTML + 原生 JS，不引入 React/Vue/构建工具/Node 依赖。
+- 样式用内联 `<style>` 或 CDN `<link>`；CDN 资源应可离线（自托管或内联）。
+- 流式响应用浏览器原生 `fetch` + `ReadableStream` 解析 SSE。
 - 配置（API BaseURL/模型名/会话 ID/Bearer JWT Token）应从页面顶部输入框注入，不推荐硬编码后端地址。
 
 **功能要求（核心约定，优先选择）**：
@@ -390,10 +394,10 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - 人在回路端点（仅 `human_review_enabled=True` 时使用）：
   - `POST /v1/feedback`：提交研究计划/大纲审核反馈，请求体 `{"session_id": str, "feedback": str}`；`feedback` 为空字符串或 `approve`/`accept`/`通过` 等关键词表示接受，其他内容视为修订意见。
   - `WS /v1/ws/{session_id}`：WebSocket 双向通道，接收 `{"type":"ping"}`（回 pong）、`{"type":"human_feedback","feedback":"..."}`（提交反馈）；服务端推送 8 类结构化消息（logs/content/node_progress/sources/tool_call/report/human_feedback_request/error）。
-  - SSE（`/v1/chat/completions stream=true`）仍是主通道，WebSocket 是增强通道（仅人在回路审核请求推送与反馈接收）。
+  - SSE（`/v1/chat/completions stream=true`）仍是主通道，WebSocket 是增强通道。
 
 **部署约束**：
-- `static/index.html` 由 Agent 容器内 FastAPI 直接托管，不推荐新增独立容器。
+- `static/index.html` 由 Agent 容器内 FastAPI 直接托管，`ENABLE_TEST_PAGE` 控制开关。
 - 离线部署时该页面随 Agent 镜像分发，不推荐运行时从 CDN 拉取 JS/CSS。
 - 生产环境可通过环境变量 `ENABLE_TEST_PAGE=false` 关闭挂载，默认 `dev=true / prod=false`。
 
@@ -401,8 +405,51 @@ LangGraph ≥1.2 状态机为**优先选择的编排范式**；不推荐 AgentEx
 - e2e 测试应包含一条用例：打开测试页面 → 新建会话 → 发送提问 → 验证流式渲染 → 验证工具调用展示 → 切换会话验证隔离。
 - 不推荐用测试页面替代 API 测试；API 测试仍应直接打 HTTP 接口。
 
+### 14.2 生产前端规则（新增允许）
+
+**技术标准（核心约定，优先选择）**：
+- 独立 `frontend/` 工程，基于 **Next.js 15 + Vercel AI SDK + shadcn/ui + AI Elements**。
+- TypeScript strict 模式；React Server Components 优先，交互组件用 `"use client"` 标注。
+- 状态管理用 Zustand + persist；不推荐 Redux（过重）。
+- 样式用 Tailwind CSS（shadcn/ui 内置）。
+- 流式响应用 Vercel AI SDK 的 `useChat` hook（内置 SSE 解析）。
+- 多 Agent 配置用 TypeScript 配置文件（`agents.config.ts`），运行时从 `NEXT_PUBLIC_` 前缀环境变量注入。
+
+**功能要求（核心约定，优先选择）**：
+- 登录/注册（`SELF_HOST=False` 时）：`/login` + `/register` 页面，密码 + 短信验证码 + 图片验证码。
+- `SELF_HOST=True` 时跳过登录：Next.js middleware 根据 `NEXT_PUBLIC_SELF_HOST` 跳过登录守卫。
+- 多 Agent 切换：侧边栏 Agent 选择器，从 `agents.config.ts` 加载 Agent 列表。
+- 会话管理：新建会话（UUID）/切换会话/删除会话/重命名会话；会话列表持久化到 localStorage。
+- 对话交互：消息输入框 + 发送按钮 + Enter 发送（Shift+Enter 换行）；支持 Markdown 渲染 + 代码高亮。
+- 流式渲染：实时流式显示（Vercel AI SDK `useChat` 内置），渲染期间显示"生成中"状态。
+- 工具调用展示：SSE 自定义事件 `event: tool_call` 触发工具调用面板（折叠展开）。
+- 检索来源展示：SSE 自定义事件 `event: sources` 触发来源列表（折叠面板）。
+- 人在回路：WebSocket `WS /v1/ws/{session_id}` 接收 `human_feedback_request` 消息，弹出审核对话框。
+- MCP 配置管理：`/settings/mcp` 页面，管理 MCP 工具配置（按 `agent_id` + `user_id` 隔离）。
+- 报告配置：`/settings` 页面，配置报告格式/类型/语言（按会话维度）。
+- 响应式设计：移动端（<768px）/平板（768-1024px）/桌面端（>1024px）三档断点。
+
+**API 调用约束（核心约定，优先选择）**：
+- 前端只走对外 OpenAI 兼容接口 `POST /v1/chat/completions`（`stream: true`）+ `/health` + `/v1/feedback` + `WS /v1/ws/{session_id}`。
+- 不推荐调用后端私有端点（如 `/internal/*`）。
+- 请求头 `Authorization: Bearer <jwt_token>`：
+  - `SELF_HOST=False` 时必带（从 httpOnly cookie + localStorage 双重读取）。
+  - `SELF_HOST=True` 时可选（前端可显示 Token 输入框，便于联调）。
+- Token 双重存储（核心约定，优先选择）：
+  - httpOnly cookie：供 Next.js middleware（Edge Runtime）读取，做登录守卫。
+  - localStorage：供客户端 API 调用读取 `Authorization` 头。
+  - 登录成功后双写；登出时双清。
+
+**部署约束（核心约定，优先选择）**：
+- 独立 `frontend` 容器（Node 20-alpine，多阶段构建），不推荐与 Agent 容器混装。
+- 多阶段构建：builder 阶段 `npm ci && npm run build`，runtime 阶段仅复制 `.next/standalone` + `public/` + `.next/static/`。
+- `EXPOSE 3000`，`CMD ["node", "server.js"]`（Next.js standalone 输出）。
+- 依赖顺序：`postgres → redis → qdrant → embeddings → searxng → agent-researcher → frontend`。
+- 健康检查：`GET http://localhost:3000/api/health`（Next.js route handler，返回 200）。
+- 生产端口绑定：`frontend:3000` 对外暴露（`0.0.0.0:3000:3000`）。
+- 环境变量分层：`.env`（公共）+ `.env.frontend`（前端专属，含 `NEXT_PUBLIC_*` 变量）。
+
 **不推荐（选用需说明理由并等待用户确认）**：
-- 引入前端构建工具链（webpack/vite/rollup，违背自包含原则）。
-- 引入前端框架（React/Vue/Svelte，违背原生 JS 约定）。
-- 在测试页面写业务逻辑（路由/鉴权/权限）；页面仅做联调展示。
-- 测试页面调用除 `/v1/chat/completions`、`/health`、`/v1/feedback`、`/v1/ws/{session_id}` 外的任何端点。`/v1/feedback` 与 `/v1/ws/{session_id}` 仅用于人在回路审核反馈，未启用 `human_review_enabled` 时前端不应调用。
+- 引入前端构建工具链以外的运行时依赖（违背 standalone 输出原则）。
+- 在生产前端调用除 `/v1/chat/completions`、`/health`、`/v1/feedback`、`/v1/ws/{session_id}` 外的任何端点。
+- 生产前端硬编码后端 Agent 地址（应从 `NEXT_PUBLIC_` 环境变量注入）。

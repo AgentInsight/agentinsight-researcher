@@ -1,0 +1,12 @@
+# frontend/.dockerignore
+node_modules
+.next
+.git
+.gitignore
+.env*.local
+.env
+npm-debug.log*
+Dockerfile
+.dockerignore
+README.md
+*.md
