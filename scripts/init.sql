@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     agent_id VARCHAR(64) NOT NULL,             -- agent_name, 全局唯一隔离键
     user_id VARCHAR(64) NOT NULL,              -- 用户隔离
     query TEXT,                                -- 原始研究请求 (允许空会话)
-    report_type VARCHAR(32) DEFAULT 'basic_report',  -- 空会话无报告类型
+    report_type VARCHAR(32) DEFAULT 'detailed_report',  -- 空会话无报告类型 (任务1: 默认详细报告)
     report_format VARCHAR(16) DEFAULT 'markdown',    -- 空会话无报告格式
     language VARCHAR(8) DEFAULT 'zh',               -- 报告语言 (zh/en)
     agent_role VARCHAR(256),                   -- LLM 动态生成的角色 persona

@@ -1,31 +1,33 @@
 // lib/agents.config.ts
 /**
- * 多 Agent 配置
+ * 多 Agent 配置 (方案B: Nginx 按 agent 路径分发)
  * - 当前仅 1 个 Agent (agentinsight-researcher)
  * - 未来添加新 Agent 只需在 agents 数组追加条目
- * - Agent API 地址从环境变量读取, 不可在前端修改
+ * - SSE/HTTP 通过 /api/proxy/{agentName}/* 路由, Next.js proxy 根据 agentName 选择后端
+ * - WebSocket 通过 /v1/ws/{agentName}/{sessionId} 路由, Nginx 根据 agentName 选择后端
  *
- * 重要: 环境变量必须使用 NEXT_PUBLIC_ 前缀, 否则客户端组件无法读取
- * (agents.config.ts 会在客户端组件中被引用)
- *
- * 扩展步骤:
- * 1. 在此数组追加 Agent 配置
+ * 扩展步骤 (多 Agent):
+ * 1. 在此数组追加 Agent 配置 (含 agentName 和 apiUrl)
  * 2. 在 docker-compose.yml 新增对应 Agent 服务
- * 3. 在 .env 新增对应 NEXT_PUBLIC_AGENT_<NAME>_API_URL
- * 4. 在 Dockerfile 构建时通过 ARG 注入新的 NEXT_PUBLIC_ 变量
+ * 3. 在 .env.frontend 新增对应 AGENT_<NAME>_API_URL 运行时变量
+ * 4. Nginx 配置新增对应 /v1/ws/<agentName>/ location 块
  */
 
 export interface AgentConfig {
-  /** Agent 唯一标识 (与后端 AGENT_NAME 一致) */
+  /** Agent 唯一标识 (与后端 AGENT_NAME 一致, 用于路由) */
   name: string;
   /** 前端显示名称 */
   displayName: string;
-  /** Agent API 地址 (从 NEXT_PUBLIC_ 环境变量读取, 客户端可见) */
-  apiUrl: string;
   /** Agent 描述 */
   description: string;
   /** 是否启用 (false 时不在切换器显示) */
   enabled: boolean;
+  /**
+   * 后端 API 地址 (Docker compose 网络内服务名 + 端口)
+   * 用于 Next.js /api/proxy route handler 路由到对应后端
+   * 若留空, 则使用环境变量 AGENT_<NAME_UPPER>_API_URL
+   */
+  apiUrl?: string;
 }
 
 export const AGENTS_CONFIG: {
@@ -35,24 +37,22 @@ export const AGENTS_CONFIG: {
   agents: [
     {
       name: "agentinsight-researcher",
-      displayName: "研究 Agent",
-      // 必须使用 NEXT_PUBLIC_ 前缀, 客户端组件可读取
-      apiUrl: process.env.NEXT_PUBLIC_AGENT_RESEARCHER_API_URL || "http://localhost:8066",
+      displayName: "研究分析智能体",
       description: "深度研究型 AI Agent",
       enabled: true,
+      // apiUrl 留空, 由 proxy route 从 AGENT_RESEARCHER_API_URL 环境变量读取
     },
-    // 未来扩展示例 (取消注释即启用, 需同步配置 .env 和 docker-compose.yml):
+    // 未来扩展示例 (取消注释即启用, 需同步配置 .env 和 docker-compose.yml 和 nginx.conf):
     // {
     //   name: "agentinsight-writer",
     //   displayName: "写作 Agent",
-    //   apiUrl: process.env.NEXT_PUBLIC_AGENT_WRITER_API_URL || "http://localhost:8067",
     //   description: "内容创作型 AI Agent",
     //   enabled: true,
+    //   // apiUrl: "http://agent-writer:8067",  // 或由 AGENT_WRITER_API_URL 环境变量提供
     // },
     // {
     //   name: "agentinsight-analyst",
     //   displayName: "分析 Agent",
-    //   apiUrl: process.env.NEXT_PUBLIC_AGENT_ANALYST_API_URL || "http://localhost:8068",
     //   description: "数据分析型 AI Agent",
     //   enabled: true,
     // },

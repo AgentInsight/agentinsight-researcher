@@ -186,7 +186,7 @@ curl http://localhost:8066/health
 | `STRATEGIC_LLM` | `deepseek/deepseek-v4-pro` | 战略决策 LLM |
 | `RERANK_ENABLED` | `false` | 是否启用 Rerank |
 | `WEBSOCKET_ENABLED` | `False` | 是否启用 WebSocket |
-| `HUMAN_REVIEW_ENABLED` | `False` | 是否启用人在回路审核 |
+| `HUMAN_REVIEW_ENABLED` | `True` | 是否启用人在回路审核 (WebSocket 未连接时自动通过) |
 | `MAX_UPLOAD_SIZE_MB` | `50` | 文件上传大小上限 |
 | `CORS_ALLOW_ORIGINS` | `http://localhost:8066` | CORS 白名单 |
 
@@ -532,7 +532,7 @@ curl http://localhost:8066/health
 | `STRATEGIC_LLM` | `deepseek/deepseek-v4-pro` | Strategic decision LLM |
 | `RERANK_ENABLED` | `false` | Enable Rerank |
 | `WEBSOCKET_ENABLED` | `False` | Enable WebSocket |
-| `HUMAN_REVIEW_ENABLED` | `False` | Enable human-in-the-loop review |
+| `HUMAN_REVIEW_ENABLED` | `True` | Enable human-in-the-loop review (auto-pass when WebSocket not connected) |
 | `MAX_UPLOAD_SIZE_MB` | `50` | File upload size limit |
 | `CORS_ALLOW_ORIGINS` | `http://localhost:8066` | CORS whitelist |
 

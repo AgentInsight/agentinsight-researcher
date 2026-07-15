@@ -259,7 +259,7 @@ async def get_report_config(session_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="会话不存在或无权访问")
     return {
         "session_id": session_id,
-        "report_type": session.get("report_type") or "basic_report",
+        "report_type": session.get("report_type") or "detailed_report",
         "report_format": session.get("report_format") or "markdown",
         "language": session.get("language") or "zh",
     }

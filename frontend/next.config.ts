@@ -1,13 +1,44 @@
 // next.config.ts
 import type { NextConfig } from "next";
 
+/**
+ * 安全响应头 (生产强制 HTTPS, 与 AGENTS.md 第 11 章安全合规红线一致)
+ * - X-Frame-Options: DENY 禁止点击劫持
+ * - X-Content-Type-Options: nosniff 禁止 MIME 嗅探
+ * - Referrer-Policy: strict-origin-when-cross-origin 限制 Referer 泄露
+ * - Strict-Transport-Security: HSTS 强制 HTTPS
+ * - Permissions-Policy: 禁用敏感设备能力
+ */
+async function headers() {
+  return [
+    {
+      source: "/(.*)",
+      headers: [
+        { key: "X-Frame-Options", value: "DENY" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+        { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+      ],
+    },
+  ];
+}
+
 const nextConfig: NextConfig = {
-  // 方案 B: 独立容器, 使用 standalone 输出
+  // standalone 输出 (独立容器, 仅复制最小化产物)
   output: "standalone",
   reactStrictMode: true,
-  // 注意: 不使用 rewrites 代理多 Agent API
-  // 多 Agent 时客户端直接调用各 Agent 的 apiUrl (通过 CORS 配置允许)
-  // 原因: rewrites 静态配置无法动态区分多 Agent, 客户端直接调用更灵活
+  // 关闭 X-Powered-By 响应头, 避免暴露技术栈 (P2-11)
+  poweredByHeader: false,
+  // 无需 rewrites/CORS 配置: 客户端通过 /api/proxy 同源代理访问后端
+  // 后端地址由 /api/proxy route 从运行时环境变量读取
+  headers,
+  // 注意 (P1-21): 未启用 React Compiler (reactCompiler: true)
+  //   React Compiler 仍是 RC 状态, 生产风险高, 待正式稳定后启用
+  // 注意 (P1-22): 未启用 Turbopack (--turbo)
+  //   Turbopack 在 Next.js 15.1 仍不稳定, 生产构建可能出错, 待社区验证后启用
+  // 注意: experimental.optimizePackageImports 和 compiler.removeConsole 暂时禁用
+  //   排查客户端 hydration 错误, 待确认根因后逐个启用
 };
 
 export default nextConfig;

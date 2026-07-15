@@ -75,7 +75,7 @@ else
 fi
 
 echo "========== 3. 构建并启动容器 (生产/离线模式) =========="
-docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" --env-file .env up --build -d
+docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up --build -d
 
 echo "========== 4. 清理悬空镜像 =========="
 # 用 docker image ls -f dangling=true 直接获取悬空镜像 ID, 避免列解析错位

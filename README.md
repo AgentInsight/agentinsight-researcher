@@ -2106,7 +2106,7 @@ All configurations are injected via `.env` + environment variables, no hardcodin
 | `WEBSOCKET_ENABLED` | `False` | Whether to enable WebSocket endpoint |
 | `WS_AUTH_REQUIRED` | `False` | WebSocket strict JWT (auto-on in prod) |
 | `WS_ORIGIN_CHECK` | `False` | WebSocket Origin validation (auto-on in prod) |
-| `HUMAN_REVIEW_ENABLED` | `False` | Whether to enable human-in-the-loop review |
+| `HUMAN_REVIEW_ENABLED` | `True` | Whether to enable human-in-the-loop review (auto-pass when WebSocket not connected) |
 | `DEFAULT_REPORT_TYPE` | `basic_report` | Default report type |
 | `DEFAULT_REPORT_FORMAT` | `markdown` | Default report format |
 | `MAX_UPLOAD_SIZE_MB` | `50` | File upload size limit |

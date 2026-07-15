@@ -77,8 +77,8 @@ class SessionStore:
             await conn.execute(
                 """
                 INSERT INTO research_sessions
-                    (session_id, agent_id, user_id, query, title, status, client_ip)
-                VALUES ($1, $2, $3, $4, $5, 'active', $6)
+                    (session_id, agent_id, user_id, query, title, status, client_ip, report_type, report_format, language)
+                VALUES ($1, $2, $3, $4, $5, 'active', $6, 'detailed_report', 'markdown', 'zh')
                 ON CONFLICT (session_id, agent_id, user_id) DO NOTHING
                 """,
                 session_id,

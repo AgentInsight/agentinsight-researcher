@@ -2,23 +2,26 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * SELF_HOST 路由守卫
- * - NEXT_PUBLIC_SELF_HOST=true: 跳过登录守卫, 所有路由直接放行
- * - NEXT_PUBLIC_SELF_HOST=false: 未登录(无 auth-token cookie)重定向到 /login
+ * SELF_HOST 路由守卫 (运行时读取环境变量, 不依赖构建时内联)
  *
- * 注意: NEXT_PUBLIC_ 前缀变量在客户端和服务端(含 Edge Runtime)都可见,
- *       middleware.ts 运行在 Edge Runtime, 可正确读取此变量。
+ * 使用 process.env.SELF_HOST (非 NEXT_PUBLIC_ 前缀, 运行时从容器环境变量读取):
+ * - SELF_HOST=true: 跳过登录守卫, 所有路由直接放行
+ * - SELF_HOST=false: 未登录(无 auth-token cookie)重定向到 /login
+ *
+ * 注意: 不使用 NEXT_PUBLIC_ 前缀, 避免变量被 Next.js 构建时内联为字面量,
+ *       导致运行时修改环境变量无效。middleware 运行在 Edge Runtime,
+ *       可直接读取容器进程环境变量 process.env.SELF_HOST。
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  // middleware 运行在 Edge Runtime, 可读取 NEXT_PUBLIC_ 前缀的环境变量
-  const selfHost = process.env.NEXT_PUBLIC_SELF_HOST === "true";
+  // 运行时读取容器环境变量 (非 NEXT_PUBLIC_ 前缀, 不会被构建时内联)
+  const selfHost = process.env.SELF_HOST?.toLowerCase() === "true";
 
   // SELF_HOST=true: 跳过所有登录守卫
   if (selfHost) {
-    // 根路径重定向到 /chat
+    // 根路径重定向到 /agent/researcher/chat
     if (pathname === "/") {
-      return NextResponse.redirect(new URL("/chat", request.url));
+      return NextResponse.redirect(new URL("/agent/researcher/chat", request.url));
     }
     return NextResponse.next();
   }
@@ -28,9 +31,9 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get("auth-token")?.value;
   const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/register");
 
-  // 已登录访问登录页 → 重定向 /chat
+  // 已登录访问登录页 → 重定向 /agent/researcher/chat
   if (isAuthRoute && token) {
-    return NextResponse.redirect(new URL("/chat", request.url));
+    return NextResponse.redirect(new URL("/agent/researcher/chat", request.url));
   }
 
   // 未登录访问受保护路由 → 重定向 /login
@@ -43,8 +46,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // matcher: 排除 API Routes (auth/health)、静态资源、图片
-  // /api/auth/* 和 /api/health 不走 middleware, 直接放行
-  // 注意: /api/agent/* 代理路由也不走 middleware (避免双重认证)
-  matcher: ["/((?!api/auth|api/health|api/agent|_next/static|_next/image|favicon.ico).*)"],
+  // matcher: 排除 API Routes (auth/health/agent/config/proxy/user-info)、静态资源、图片、data 路由
+  // /api/* 路径不走 middleware 登录守卫, 直接放行
+  // 注意: /login 和 /register 仍走 middleware (用于已登录用户重定向到首页)
+  // 注意: _next/data 排除 getStaticProps/getServerSideProps 的数据请求 (P2-14)
+  matcher: ["/((?!api|_next/static|_next/image|_next/data|favicon.ico).*)"],
 };

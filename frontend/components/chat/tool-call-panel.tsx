@@ -1,22 +1,29 @@
 // components/chat/tool-call-panel.tsx
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import type { ToolCall } from "@/lib/types";
 
 /**
- * 工具调用折叠面板
+ * 工具调用折叠面板 (Linear Indigo 设计风格)
  * 显示工具名 + 参数 + 结果
+ *
+ * P1-17: 用 React.memo 包裹, 默认浅比较 toolCalls 数组引用
+ * 父组件流式 setState 时若 toolCalls 引用未变, 则跳过重渲染
  */
-export function ToolCallPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
+export const ToolCallPanel = memo(function ToolCallPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="mt-2 border-t pt-2">
+    <div
+      className="mt-2 border-t pt-2"
+      style={{ borderColor: "var(--border-color)" }}
+    >
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+        className="flex items-center gap-1 text-xs transition-colors"
+        style={{ color: "var(--text-secondary)" }}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Wrench className="h-3 w-3" />
@@ -25,10 +32,36 @@ export function ToolCallPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
       {open && (
         <div className="mt-2 space-y-2">
           {toolCalls.map((tc, idx) => (
-            <div key={idx} className="text-xs bg-gray-50 rounded p-2">
-              <div className="font-medium">{tc.function.name}</div>
-              <div className="text-gray-600 mt-1">
-                参数: <code className="text-xs">{tc.function.arguments}</code>
+            <div
+              key={idx}
+              className="text-xs p-2"
+              style={{
+                backgroundColor: "var(--bg-muted)",
+                borderRadius: "var(--radius-sm)",
+              }}
+            >
+              <div
+                className="font-medium"
+                style={{ color: "var(--text-primary)" }}
+              >
+                {tc.function.name}
+              </div>
+              <div
+                className="mt-1"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                参数:{" "}
+                <code
+                  className="text-xs"
+                  style={{
+                    backgroundColor: "var(--bg-card)",
+                    color: "var(--text-primary)",
+                    padding: "0.1em 0.3em",
+                    borderRadius: "3px",
+                  }}
+                >
+                  {tc.function.arguments}
+                </code>
               </div>
             </div>
           ))}
@@ -36,4 +69,4 @@ export function ToolCallPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
       )}
     </div>
   );
-}
+});

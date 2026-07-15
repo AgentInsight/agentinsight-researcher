@@ -2,43 +2,347 @@
 /* Tailwind CSS 4 (CSS-first, 使用 @import 替代 @tailwind 指令) */
 @import "tailwindcss";
 
-/* 全局样式 */
-html, body {
+/* ========== 设计 Token (Linear Indigo 风格, 参考 Linear/Stripe/Vercel 设计系统) ========== */
+:root {
+  /* 主色 (Linear Indigo, 蓝紫色更有品牌识别度, 参考 Linear #5E6AD2) */
+  --brand-primary: #5E6AD2;
+  --brand-primary-hover: #4F5BC4;
+  --brand-primary-light: #EEF0FC;
+
+  /* 中性色 (Linear 风格, 统一背景层次, 减少色差营造整体感) */
+  --bg-page: #F8F8F8;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #FAFAFA;
+  --bg-hover: #F2F2F3;
+  --bg-muted: #F4F4F5;
+  --bg-active: #EEF0FC;
+
+  /* 文字色 (Linear 标志性灰阶) */
+  --text-primary: #1A1A1A;
+  --text-secondary: #62666D;
+  --text-tertiary: #9CA3AF;
+
+  /* 边框色 (极低对比度, 营造无边界的精致感) */
+  --border-color: #ECECEE;
+  --border-color-light: #F2F2F3;
+  --border-color-focus: rgba(94, 106, 210, 0.35);
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 阴影 (更柔和, 避免明显界限) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+  /* 输入框聚焦光环 (淡化边框, 一体化控件) */
+  --shadow-focus: 0 0 0 2px rgba(94, 106, 210, 0.12);
+
+  /* 语义色 (成功/警告/危险/信息, 参考 Radix Colors) */
+  --color-success: #16A34A;
+  --color-success-bg: #F0FDF4;
+  --color-success-border: #BBF7D0;
+  --color-warning: #D97706;
+  --color-warning-bg: #FFFBEB;
+  --color-warning-border: #FDE68A;
+  --color-danger: #DC2626;
+  --color-danger-bg: #FEF2F2;
+  --color-danger-border: #FECACA;
+  --color-info: #2563EB;
+  --color-info-bg: #EFF6FF;
+  --color-info-border: #BFDBFE;
+
+  /* 品牌色上的文字色 (按钮反白文字) */
+  --text-on-brand: #FFFFFF;
+
+  /* 遮罩层 */
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+
+  /* 滚动条 */
+  --scrollbar-thumb: #D1D5DB;
+  --scrollbar-thumb-hover: #9CA3AF;
+
+  /* 代码块 (Catppuccin 风格, 始终深色) */
+  --code-bg: #1E1E2E;
+  --code-text: #CDD6F4;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace;
+}
+
+/* 暗色模式 (Linear 暗色风格, 带轻微蓝调避免死黑) */
+.dark {
+  --brand-primary: #7B85E0;
+  --brand-primary-hover: #8B95E8;
+  --brand-primary-light: #1E2030;
+
+  --bg-page: #0F1011;
+  --bg-card: #161617;
+  --bg-sidebar: #0A0B0C;
+  --bg-hover: #1C1D1F;
+  --bg-muted: #1C1D1F;
+  --bg-active: #1E2030;
+
+  --text-primary: #F7F8F8;
+  --text-secondary: #8A8F98;
+  --text-tertiary: #62666D;
+
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-light: rgba(255, 255, 255, 0.04);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* 语义色暗色模式 */
+  --color-success: #4ADE80;
+  --color-success-bg: rgba(38, 189, 108, 0.1);
+  --color-success-border: rgba(38, 189, 108, 0.2);
+  --color-warning: #FBBF24;
+  --color-warning-bg: rgba(251, 191, 36, 0.1);
+  --color-warning-border: rgba(251, 191, 36, 0.2);
+  --color-danger: #F87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.1);
+  --color-danger-border: rgba(248, 113, 113, 0.2);
+  --color-info: #60A5FA;
+  --color-info-bg: rgba(96, 165, 250, 0.1);
+  --color-info-border: rgba(96, 165, 250, 0.2);
+
+  /* 品牌色上的文字色 (暗色模式保持白色) */
+  --text-on-brand: #FFFFFF;
+
+  /* 遮罩层 (暗色模式更深) */
+  --overlay-bg: rgba(0, 0, 0, 0.7);
+
+  /* 滚动条 (暗色模式) */
+  --scrollbar-thumb: #374151;
+  --scrollbar-thumb-hover: #4B5563;
+
+  /* 代码块 (暗色模式保持 Catppuccin 风格) */
+  --code-bg: #1E1E2E;
+  --code-text: #CDD6F4;
+}
+
+/* ========== 全局样式 ========== */
+html,
+body {
   height: 100%;
   margin: 0;
   padding: 0;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Markdown 渲染样式 */
+* {
+  box-sizing: border-box;
+}
+
+/* ========== 可点击元素光标 (Tailwind v4 不再默认为 button 添加 cursor:pointer) ========== */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+a,
+label[for],
+select:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"]:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+/* ========== 通用工具类 ========== */
+.bg-page { background-color: var(--bg-page); }
+.bg-card { background-color: var(--bg-card); }
+.bg-sidebar { background-color: var(--bg-sidebar); }
+.bg-hover { background-color: var(--bg-hover); }
+.bg-muted { background-color: var(--bg-muted); }
+.bg-brand { background-color: var(--brand-primary); }
+.bg-brand-light { background-color: var(--brand-primary-light); }
+
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-brand { color: var(--brand-primary); }
+
+.border-color { border-color: var(--border-color); }
+.border-color-light { border-color: var(--border-color-light); }
+
+.hover\:bg-hover:hover { background-color: var(--bg-hover); }
+.hover\:bg-brand:hover { background-color: var(--brand-primary); }
+.hover\:text-brand:hover { color: var(--brand-primary); }
+
+/* ========== Markdown 渲染样式 (.prose) ========== */
 .prose {
   max-width: none;
+  color: var(--text-primary);
+  line-height: 1.7;
+  font-size: 14px;
 }
 
-.prose pre {
-  background-color: #1e1e1e;
-  color: #d4d4d4;
-  padding: 1rem;
-  border-radius: 0.375rem;
-  overflow-x: auto;
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
+}
+
+.prose h1 { font-size: 1.6em; }
+.prose h2 { font-size: 1.4em; }
+.prose h3 { font-size: 1.2em; }
+.prose h4 { font-size: 1.05em; }
+
+.prose p {
+  margin: 0.6em 0;
+}
+
+.prose a {
+  color: var(--brand-primary);
+  text-decoration: none;
+}
+
+.prose a:hover {
+  text-decoration: underline;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0.6em 0;
+  padding-left: 1.8em;
+}
+
+.prose ul {
+  list-style-type: disc;
+}
+
+.prose ol {
+  list-style-type: decimal;
+}
+
+.prose li {
+  margin: 0.25em 0;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--brand-primary);
+  padding-left: 1em;
+  margin: 0.8em 0;
+  color: var(--text-secondary);
+  background-color: var(--bg-muted);
+  border-radius: 0 4px 4px 0;
+  padding: 0.5em 1em;
+}
+
+.prose blockquote p {
+  margin: 0.25em 0;
 }
 
 .prose code {
-  background-color: #f3f4f6;
-  padding: 0.125rem 0.25rem;
-  border-radius: 0.25rem;
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  background-color: var(--bg-muted);
+  color: var(--text-primary);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.prose pre {
+  background-color: var(--code-bg);
+  color: var(--code-text);
+  padding: 1em;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 0.8em 0;
+  font-size: 0.875em;
+  line-height: 1.5;
 }
 
 .prose pre code {
   background-color: transparent;
+  color: inherit;
   padding: 0;
+  border-radius: 0;
+  font-size: inherit;
 }
 
-/* 滚动条样式 */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.9em;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--border-color);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.prose th {
+  background-color: var(--bg-muted);
+  font-weight: 600;
+}
+
+.prose tr:nth-child(even) td {
+  background-color: var(--bg-muted);
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 1.5em 0;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin: 0.8em 0;
+}
+
+/* SVG 图表容器 */
+.prose svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1em auto;
+}
+
+/* 报告图片容器 (后端 <div class="report-image">) */
+.prose .report-image {
+  margin: 1em 0;
+  text-align: center;
+}
+
+.prose .report-image img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ========== 滚动条 ========== */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -49,10 +353,208 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: var(--scrollbar-thumb-hover);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ========== 动画 ========== */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.streaming-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--brand-primary);
+  animation: pulse-dot 1s ease-in-out infinite;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* ========== Markdown 流式光标 ========== */
+.streaming-cursor::after {
+  content: "▋";
+  color: var(--brand-primary);
+  animation: pulse-dot 1s ease-in-out infinite;
+  margin-left: 2px;
+}
+
+/* ========== UI/UX 优化 (参考 ChatGPT/Claude/Linear 设计原则) ========== */
+
+/* 按钮统一过渡效果 */
+button {
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* 输入框聚焦过渡 */
+input, textarea, select {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+/* 卡片悬浮效果 (用于列表项) */
+.card-hover {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* 链接过渡 */
+a {
+  transition: color 0.15s ease;
+}
+
+/* 图标按钮统一样式 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.icon-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+/* 列表项激活态左侧指示条 (参考 Linear) */
+.active-indicator {
+  position: relative;
+}
+
+.active-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background-color: var(--brand-primary);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Slide-in 面板动画优化 */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0.5; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.slide-in-panel {
+  animation: slideInRight 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 遮罩层动画 */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.overlay {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* 文字截断 (单行) */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 文字截断 (多行, 默认 2 行) */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 焦点轮廓 (无障碍) — 任务4: 移除 input/textarea 的 focus outline, 避免蓝色边框 */
+/* 保留 button/a/select 的 outline 用于键盘导航无障碍 */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* 任务4: input/textarea 激活态不显示任何 outline (无边框模式) */
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+/* ========== 输入框容器 focus-within (任务1: 激活态不显示边框) ========== */
+/* 聊天输入框容器: 聚焦时不显示任何边框变化 */
+.input-container {
+  border: 1px solid var(--border-color-light);
+  transition: background-color 0.2s ease;
+}
+
+.input-container:focus-within {
+  /* 激活态不显示边框, 不改变 border-color, 不添加 box-shadow */
+}
+
+/* ========== 消息列表分页加载 (任务5) ========== */
+.load-more-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  min-height: 36px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.load-more-trigger.loading {
+  color: var(--brand-primary);
+}
+
+/* ========== 整体视觉融合 (任务2-3: 消除明显界限) ========== */
+/* 顶部栏: 去除 boxShadow, 用极浅 border 替代 */
+.header-blend {
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+/* 面板分隔: 用渐变 border 替代硬 border */
+.panel-blend-left {
+  border-left: 1px solid var(--border-color-light);
+}
+
+.panel-blend-right {
+  border-right: 1px solid var(--border-color-light);
+}
+
+/* 统一过渡, 营造流畅感 */
+.unified-transition {
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.15s ease;
 }

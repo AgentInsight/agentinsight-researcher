@@ -192,9 +192,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        # 构建时注入 NEXT_PUBLIC_ 变量 (会被内联到产物)
-        NEXT_PUBLIC_SELF_HOST: ${NEXT_PUBLIC_SELF_HOST:-true}
-        NEXT_PUBLIC_AGENT_RESEARCHER_API_URL: ${NEXT_PUBLIC_AGENT_RESEARCHER_API_URL:-http://localhost:8066}
+        # 无 NEXT_PUBLIC_ 构建参数 (所有变量运行时注入, 不内联)
     image: agentinsight-frontend:latest
     restart: always
     env_file:

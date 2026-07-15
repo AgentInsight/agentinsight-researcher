@@ -8,8 +8,8 @@ import { AGENTS_CONFIG, getEnabledAgents, getAgentByName, type AgentConfig } fro
  * - 持久化到 localStorage (跨刷新保持)
  * - 当前仅 1 个 Agent 时, 选中固定为 defaultAgent
  *
- * 注意: 使用 skipHydration 避免水合不匹配
- * (Zustand persist 在 SSR 时无法读取 localStorage, 需客户端 hydrate)
+ * 注意: 使用默认 hydrate 行为 (skipHydration: false)
+ * Zustand persist 在 SSR 时无法读取 localStorage, 客户端 hydrate 后状态生效
  */
 interface AgentState {
   currentAgent: string;

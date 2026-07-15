@@ -1,5 +1,6 @@
 // app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { proxyJson } from "../_utils";
 
 /**
  * 登录代理 API Route (SELF_HOST=false 时使用)
@@ -9,21 +10,26 @@ import { NextRequest, NextResponse } from "next/server";
  *
  * 注意: AUTH_API_BASE 为服务端-only 环境变量 (无 NEXT_PUBLIC_ 前缀)
  */
-const API_BASE = process.env.AUTH_API_BASE || "https://agentinsight.goldebridge.com";
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const apiResponse = await fetch(`${API_BASE}/api/user/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await apiResponse.json();
+    const { data, status } = await proxyJson("/api/user/login", "POST", body);
+
+    // 网络错误/超时: data 为 null
+    if (data === null) {
+      return NextResponse.json(
+        { errorcode: -1, message: "登录代理请求失败" },
+        { status }
+      );
+    }
 
     // 登录成功: 设置 httpOnly cookie
-    if (data.errorcode === 0 && data.data?.[0]?.token) {
-      const token = data.data[0].token;
+    const responseData = data as {
+      errorcode?: number;
+      data?: Array<{ token?: string }>;
+    };
+    if (responseData?.errorcode === 0 && responseData.data?.[0]?.token) {
+      const token = responseData.data[0].token;
       const response = NextResponse.json(data, { status: 200 });
       // 设置 httpOnly cookie, 供 middleware.ts 路由守卫读取
       // maxAge: 30 天 (与 JWT 有效期一致)
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    return NextResponse.json(data, { status: apiResponse.status });
+    return NextResponse.json(data, { status });
   } catch {
     return NextResponse.json(
       { errorcode: -1, message: "登录代理请求失败" },

@@ -90,6 +90,32 @@ _SELECT_COLUMNS = (
 )
 
 
+def _mcp_row_to_dict(row: Any) -> dict[str, Any]:
+    """将 MCP 数据库行转换为 dict, 并反序列化 JSONB 字段.
+
+    asyncpg 默认将 JSONB 列返回为原始 JSON 字符串 (未注册 codec 时),
+    需手动反序列化 args (list[str]) 和 env_vars (dict[str, str]).
+
+    同时将 datetime 字段转为 ISO 字符串以便 JSON 序列化响应.
+    """
+    d: dict[str, Any] = dict(row)
+    # 反序列化 JSONB 字段 (asyncpg 未注册 codec 时返回字符串)
+    for k in ("args", "env_vars"):
+        v = d.get(k)
+        if isinstance(v, str):
+            try:
+                d[k] = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                # 保持原值, 前端有防御性处理
+                pass
+    # datetime → ISO 字符串 (FastAPI JSON 序列化兼容)
+    for k in ("created_at", "updated_at"):
+        v = d.get(k)
+        if v is not None and hasattr(v, "isoformat"):
+            d[k] = v.isoformat()
+    return d
+
+
 # ============================================================================
 # MCP 可用性测试 (复用 langchain-mcp-adapters MultiServerMCPClient)
 # ============================================================================
@@ -339,7 +365,7 @@ async def test_mcp_config_by_id(config_id: int) -> dict[str, Any]:
             if not row:
                 raise HTTPException(status_code=404, detail="MCP 配置不存在")
 
-    config_dict = dict(row)
+    config_dict = _mcp_row_to_dict(row)
     # 系统 MCP 可能含 <your-token> 占位符, 测试会失败但应给出明确提示
     return await _test_mcp_config(config_dict)
 
@@ -362,7 +388,7 @@ async def list_system_mcp_configs() -> list[dict[str, Any]]:
             f"SELECT {_SELECT_COLUMNS} FROM mcp_configs "
             "WHERE agent_id IS NULL AND is_system = TRUE ORDER BY name",
         )
-    return [dict(row) for row in rows]
+    return [_mcp_row_to_dict(row) for row in rows]
 
 
 @router.post("/system/{config_id}/clone")
@@ -425,7 +451,7 @@ async def clone_system_mcp_config(config_id: int) -> dict[str, Any]:
             src["env_vars"],
             src["description"],
         )
-    return dict(row)
+    return _mcp_row_to_dict(row)
 
 
 # ============================================================================
@@ -447,7 +473,7 @@ async def list_mcp_configs() -> list[dict[str, Any]]:
             agent_id,
             user_id,
         )
-    return [dict(row) for row in rows]
+    return [_mcp_row_to_dict(row) for row in rows]
 
 
 @router.post("")
@@ -485,7 +511,7 @@ async def create_mcp_config(config: MCPConfig) -> dict[str, Any]:
             config.enabled,
             config.description,
         )
-        saved = dict(row)
+        saved = _mcp_row_to_dict(row)
 
     # 2. 测试可用性 (不在数据库事务内, 避免长连接)
     test_result = await _test_mcp_config(saved)
@@ -560,7 +586,7 @@ async def update_mcp_config(
                     json.dumps(config.env_vars) if config.env_vars else None,
                     config.description,
                 )
-                saved = dict(row)
+                saved = _mcp_row_to_dict(row)
                 saved["test_result"] = test_result
                 # 返回 200 但 enabled=FALSE + test_result (前端据 test_result 展示失败原因)
                 # 不用 400, 因为 PUT 已成功更新其他字段, 只是 enabled 拒绝切换
@@ -584,7 +610,7 @@ async def update_mcp_config(
             config.enabled,
             config.description,
         )
-    return dict(row)
+    return _mcp_row_to_dict(row)
 
 
 @router.delete("/{config_id}")

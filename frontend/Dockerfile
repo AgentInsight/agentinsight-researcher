@@ -13,13 +13,7 @@ RUN npm ci
 # 复制源代码并构建
 COPY . .
 
-# 构建时需要 NEXT_PUBLIC_ 环境变量 (嵌入到客户端产物)
-# 这些变量在运行时不可修改, 必须构建时注入
-ARG NEXT_PUBLIC_SELF_HOST=true
-ARG NEXT_PUBLIC_AGENT_RESEARCHER_API_URL=http://localhost:8066
-ENV NEXT_PUBLIC_SELF_HOST=${NEXT_PUBLIC_SELF_HOST}
-ENV NEXT_PUBLIC_AGENT_RESEARCHER_API_URL=${NEXT_PUBLIC_AGENT_RESEARCHER_API_URL}
-
+# 无 NEXT_PUBLIC_ 构建参数 (所有变量运行时注入, 不内联)
 RUN npm run build
 
 # ---- runtime 阶段 ----
