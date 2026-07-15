@@ -103,3 +103,4 @@ tests/manual/
 /docs/OPEN_SOURCE_READINESS_ASSESSMENT.md
 /docs/TEST_REPORT_v1.1.md
 /.env.frontend
+/nginx.conf
