@@ -191,8 +191,6 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      args:
-        # 无 NEXT_PUBLIC_ 构建参数 (所有变量运行时注入, 不内联)
     image: agentinsight-frontend:latest
     restart: always
     env_file:
