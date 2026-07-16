@@ -125,9 +125,19 @@ export async function POST(request: NextRequest) {
       const response = NextResponse.json(data, { status: 200 });
       // 设置 httpOnly cookie, 供 middleware.ts 路由守卫读取
       // maxAge: 30 天 (与 JWT 有效期一致)
+      //
+      // secure 判断: 不能仅依赖 NODE_ENV=production
+      // 原因: 用户可能通过 Nginx 反代以 HTTP 访问 (如 http://43.139.209.145/),
+      //       此时 NODE_ENV=production 但实际协议是 HTTP,
+      //       secure cookie 不会被浏览器存储 → middleware 检测不到 token → 重定向回 /login
+      // 修复: 检查 X-Forwarded-Proto 头判断实际协议
+      const forwardedProto = request.headers.get("x-forwarded-proto");
+      const isHttps =
+        request.nextUrl.protocol === "https:" ||
+        forwardedProto === "https";
       response.cookies.set("auth-token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: isHttps,
         sameSite: "lax",
         maxAge: 30 * 24 * 60 * 60, // 30 天
         path: "/",
