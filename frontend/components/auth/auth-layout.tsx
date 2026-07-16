@@ -58,32 +58,25 @@ export function AuthLayout({
             <span style={{ color: "var(--brand-primary)" }}>A</span>
             gent
             <span style={{ color: "var(--brand-primary)" }}>I</span>
-            nsight
+            nsight 智能体演示平台
           </h1>
-
-          {/* 副标题 */}
-          <p
-            className="mt-4 text-sm text-left"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            专为中国企业设计的Agent智能观测与运维AI-Ops平台
-          </p>
 
           {/* 官网引导 */}
           <p
             className="mt-2 flex items-center gap-1 text-sm"
             style={{ color: "var(--text-secondary)" }}
           >
-            <span>新用户可先访问官网了解方案:</span>
-            <a
+            <span>新用户可先访问</span>
+			<a
               href="https://agentinsight.goldebridge.com"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:underline"
               style={{ color: "var(--brand-primary)" }}
-            >
-              AgentInsight 官网
+            >官网
             </a>
+			<span>了解详情</span>
+            
           </p>
 
           {/* 切换提示 */}

@@ -18,6 +18,7 @@ import { useStreamStore, MAX_BACKGROUND_STREAMS } from "@/lib/stream-store";
 import { WsClient } from "@/lib/ws-client";
 import { apiClient } from "@/lib/api-client";
 import type { ChatMessage } from "@/lib/types";
+import type { ToolCall, Source } from "@/lib/types";
 import {
   ClipboardList,
   Settings as SettingsIcon,
@@ -26,6 +27,18 @@ import {
   Bot,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+
+/**
+ * 模块级空数组常量 (引用稳定)
+ *
+ * 关键修复: useShallow 的 shallow() 对对象字段做 Object.is 比较,
+ * 内联 [] 字面量每次创建新引用, Object.is([], []) → false,
+ * 导致 shallow 认为对象变化, useSyncExternalStore 无限重渲染 → React #185.
+ * 用模块级常量确保引用稳定: Object.is(EMPTY_MESSAGES, EMPTY_MESSAGES) → true.
+ */
+const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_TOOL_CALLS: ToolCall[] = [];
+const EMPTY_SOURCES: Source[] = [];
 
 /**
  * 聊天主页 (主对话区域)
@@ -81,10 +94,10 @@ export default function ChatPage() {
     useShallow((s) => {
       const st = currentSessionId ? s.streams[currentSessionId] : undefined;
       return {
-        messages: st?.messages ?? [],
+        messages: st?.messages ?? EMPTY_MESSAGES,
         isStreaming: st?.isStreaming ?? false,
-        toolCalls: st?.toolCalls ?? [],
-        sources: st?.sources ?? [],
+        toolCalls: st?.toolCalls ?? EMPTY_TOOL_CALLS,
+        sources: st?.sources ?? EMPTY_SOURCES,
         progress: st?.progress ?? null,
         reportId: st?.reportId ?? null,
         reportFormat: st?.reportFormat ?? null,
@@ -510,8 +523,11 @@ export default function ChatPage() {
       {/* ===== 会话导航栏 (由顶部图标控制显示/隐藏, 默认隐藏) ===== */}
       {sessionNavVisible && <ChatSidebar />}
 
-      {/* ===== 主对话区 (3 区域 Flexbox 布局) ===== */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* ===== 主对话区 (3 区域 Flexbox 布局, 统一 --bg-card 白色消除割裂感) ===== */}
+      <div
+        className="flex-1 flex flex-col min-w-0"
+        style={{ backgroundColor: "var(--bg-card)" }}
+      >
         {/* ===== 顶部: 左侧菜单图标 + 居中标题 + 右侧历史/设置图标 (淡化边界, 融合整体) ===== */}
         <div
           className="header-blend flex-none flex items-center justify-between px-3 py-2.5"

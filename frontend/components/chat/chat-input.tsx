@@ -193,11 +193,12 @@ export function ChatInput({
           </div>
         )}
 
-        {/* 输入框容器 (包含 textarea + 附件按钮 + 发送/停止按钮) */}
+        {/* 输入框容器 (包含 textarea + 附件按钮 + 发送/停止按钮)
+            背景透明, 融入主对话区 --bg-card 白色, 靠 input-container 的极浅 border 维持边界 */}
         <div
           className="input-container flex items-end gap-2 px-3 py-2 rounded-lg"
           style={{
-            backgroundColor: "var(--bg-muted)",
+            backgroundColor: "transparent",
           }}
         >
           {/* 输入框 */}

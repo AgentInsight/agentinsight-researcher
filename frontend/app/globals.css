@@ -9,7 +9,15 @@
   --brand-primary-hover: #4F5BC4;
   --brand-primary-light: #EEF0FC;
 
-  /* 中性色 (Linear 风格, 统一背景层次, 减少色差营造整体感) */
+  /* 中性色 (Linear 风格, 统一背景层次, 减少色差营造整体感)
+     配色层次 (由浅到深, 参考 ChatGPT/Claude/Linear: 主区白 + 侧边栏浅灰):
+     - --bg-card:    #FFFFFF  主对话区 (header + 对话区 + 输入框) 统一白色, 消除割裂感
+     - --bg-sidebar: #FAFAFA  侧边栏 (agent-nav + agent-list-nav + chat-sidebar) 统一浅灰, 与主对话区形成层次
+     - --bg-page:    #F8F8F8  页面底色 (body / layout 根), 作为侧边栏与主对话区之外的兜底背景
+     - --bg-muted:   #F4F4F5  静音背景 (控件 / 搜索框 / 代码块等小区域)
+     - --bg-hover:   #F2F2F3  hover 态背景
+     - --bg-active:  #EEF0FC  激活态背景 (品牌浅色)
+  */
   --bg-page: #F8F8F8;
   --bg-card: #FFFFFF;
   --bg-sidebar: #FAFAFA;

@@ -13,10 +13,10 @@ import { useState, useRef, useCallback, ReactNode } from "react";
  * - 延迟显示 (500ms, 与原生 title 一致)
  *
  * 定位策略 (用户需求):
- * - 提示框出现在鼠标下方
- * - 鼠标所在位置 = 提示框的右上角
+ * - 提示框出现在鼠标正下方
+ * - 鼠标所在位置 = 提示框的左上角 (提示框左边缘对齐鼠标 x 坐标)
  * - 鼠标移动时实时跟踪, 保证提示始终紧贴鼠标
- * - 视口边界检测: 下方空间不足时翻转到上方; 左侧溢出时贴近视口左侧
+ * - 视口边界检测: 下方空间不足时翻转到上方; 右侧溢出时向左偏移
  *
  * 用法:
  * <Tooltip content="查看历史报告">
@@ -49,11 +49,15 @@ export function Tooltip({
       const gap = 8;
       const mouse = mousePosRef.current;
 
-      // 定位: 鼠标位置 = 提示框右上角
-      // x: 提示框右边缘对齐鼠标 x 坐标
+      // 定位: 鼠标位置 = 提示框左上角 (提示框在鼠标正下方)
+      // x: 提示框左边缘对齐鼠标 x 坐标
       // y: 提示框在鼠标下方 (top = mouse.y + gap)
-      let x = mouse.x - tooltipWidth;
-      // 左侧溢出检测: 若右对齐后溢出左侧, 则贴近视口左侧
+      let x = mouse.x;
+      // 右侧溢出检测: 若左对齐后右侧溢出视口, 则向左偏移使右边缘贴近视口右侧
+      if (x + tooltipWidth > window.innerWidth - 8) {
+        x = window.innerWidth - 8 - tooltipWidth;
+      }
+      // 左侧溢出兜底
       if (x < 8) x = 8;
 
       // 下方空间不足时翻转到上方
@@ -91,7 +95,11 @@ export function Tooltip({
       const tooltipHeight = 32;
       const gap = 8;
       const mouse = mousePosRef.current;
-      let x = mouse.x - tooltipWidth;
+      let x = mouse.x;
+      // 右侧溢出检测
+      if (x + tooltipWidth > window.innerWidth - 8) {
+        x = window.innerWidth - 8 - tooltipWidth;
+      }
       if (x < 8) x = 8;
       const actualSide: "top" | "bottom" =
         mouse.y + gap + tooltipHeight > window.innerHeight - 8 ? "top" : "bottom";

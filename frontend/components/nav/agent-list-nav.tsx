@@ -9,7 +9,8 @@ import { Search, Bot, Blocks } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /**
- * 智能体导航栏 (无硬边框, 用背景色差与左侧导航栏分隔)
+ * 智能体导航栏 (无硬边框, 与左侧导航栏 / 会话侧边栏统一 --bg-sidebar 浅灰,
+ * 共同作为侧边栏区域与主对话区 --bg-card 白色形成层次)
  *
  * 3 区域 Flexbox 布局:
  * - 顶部 (flex-none): 标题居中, 无子标题
@@ -42,7 +43,7 @@ export function AgentListNav() {
     <div
       className="flex flex-col h-full"
       style={{
-        backgroundColor: "var(--bg-card)",
+        backgroundColor: "var(--bg-sidebar)",
         width: 240,
       }}
     >

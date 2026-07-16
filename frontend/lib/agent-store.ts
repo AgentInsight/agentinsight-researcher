@@ -8,8 +8,10 @@ import { AGENTS_CONFIG, getEnabledAgents, getAgentByName, type AgentConfig } fro
  * - 持久化到 localStorage (跨刷新保持)
  * - 当前仅 1 个 Agent 时, 选中固定为 defaultAgent
  *
- * 注意: 使用默认 hydrate 行为 (skipHydration: false)
- * Zustand persist 在 SSR 时无法读取 localStorage, 客户端 hydrate 后状态生效
+ * 注意: 使用 skipHydration 避免水合不匹配
+ * (Zustand persist 在 SSR 时无法读取 localStorage, 需客户端 hydrate)
+ * 性能优化改动曾将其改为 false, 导致 SSR/客户端 hydration mismatch,
+ * 触发 useSyncExternalStore 无限重渲染 (React #185), 已回退.
  */
 interface AgentState {
   currentAgent: string;
@@ -35,7 +37,7 @@ export const useAgentStore = create<AgentState>()(
     {
       name: "agent-storage",
       // 仅在客户端 persist, 避免 SSR 水合问题
-      skipHydration: false,
+      skipHydration: true,
     }
   )
 );
