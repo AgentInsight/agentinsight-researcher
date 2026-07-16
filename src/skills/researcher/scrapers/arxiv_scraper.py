@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from src.skills.researcher.scrapers import BaseScraper
+from src.skills.researcher.scrapers import BaseScraper, get_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,11 @@ async def _download_pdf_with_retry(
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=request_timeout,
+                follow_redirects=True,
+                verify=get_ssl_context(),
+            ) as client:
                 async with client.stream("GET", pdf_url) as resp:
                     resp.raise_for_status()
                     with open(dest_path, "wb") as f:  # noqa: ASYNC230

@@ -16,9 +16,8 @@ import asyncio
 import logging
 from typing import Any
 
-import httpx
-
 from src.common.circuit_breaker import CircuitBreaker
+from src.common.http_client import get_http_client_pool
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
@@ -41,8 +40,6 @@ class SearXNGSearcher(BaseSearcher):
         super().__init__(settings)
         # 拼接完整搜索端点: {searx_url}/search (去除尾部斜杠避免双斜杠)
         self._api_url = f"{self.settings.searx_url.rstrip('/')}/search"
-        # 实例级连接池复用 (避免每次请求新建 client)
-        self._client = httpx.AsyncClient(timeout=self.settings.search_timeout)
         self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
         self._max_retries = 2  # 限制 2 次避免请求堆积
 
@@ -97,8 +94,10 @@ class SearXNGSearcher(BaseSearcher):
                     headers = {
                         "X-Forwarded-For": "127.0.0.1",
                     }
-                    # 实例级连接池复用 (不再每次新建 client)
-                    response = await self._client.get(self._api_url, params=params, headers=headers)
+                    # HttpClientPool 统一连接池 (跨搜索器复用 TCP 连接)
+                    pool = await get_http_client_pool()
+                    client = await pool.get_client(self.name)
+                    response = await client.get(self._api_url, params=params, headers=headers)
                     response.raise_for_status()
                     data = response.json()
 
@@ -132,5 +131,4 @@ class SearXNGSearcher(BaseSearcher):
                     return []
 
     async def close(self) -> None:
-        """释放实例级 httpx 客户端连接池."""
-        await self._client.aclose()
+        """无操作 (httpx 客户端由 HttpClientPool 统一管理生命周期)."""

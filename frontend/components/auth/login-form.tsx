@@ -5,6 +5,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import { Captcha } from "./captcha";
 import {
+  AUTH_API_BASE,
+  extractToken,
+  fetchWithTimeout,
+  setAuthTokenCookie,
+} from "@/lib/auth-api";
+import {
   Smartphone,
   Lock,
   Eye,
@@ -94,7 +100,10 @@ export function LoginForm() {
     setSmsSending(true);
     setError("");
     try {
-      const res = await fetch(`/api/auth/sms?phone=${mobile}`);
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/captcha/sms?phone=${encodeURIComponent(mobile)}`,
+        { method: "GET" }
+      );
       const data = await res.json();
       const item = Array.isArray(data.data) ? data.data[0] : data.data;
       if (item?.id) {
@@ -119,7 +128,10 @@ export function LoginForm() {
       return;
     }
     try {
-      const res = await fetch(`/api/auth/sms?phone=${resetMobile}`);
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/captcha/sms?phone=${encodeURIComponent(resetMobile)}`,
+        { method: "GET" }
+      );
       const data = await res.json();
       const item = Array.isArray(data.data) ? data.data[0] : data.data;
       if (item?.id) {
@@ -149,22 +161,29 @@ export function LoginForm() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mobile,
-          password,
-          captchaid: captchaId,
-          captchacode: captchaCode,
-          logintype: 1,
-        }),
-      });
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/user/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile,
+            password,
+            captchaid: captchaId,
+            captchacode: captchaCode,
+            logintype: 1,
+          }),
+        }
+      );
       const data = await res.json();
 
       if (data.errorcode === 0 && data.data?.[0]) {
         const u = data.data[0];
-        setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
+        // 多源容错提取 token (兼容后端不同返回格式)
+        const token = extractToken(data, res.headers) || u.token;
+        setUser({ id: u.id, name: u.name, mobile: u.mobile, token });
+        // 设置 httpOnly cookie (供 middleware.ts 服务端路由守卫)
+        await setAuthTokenCookie(token);
         // 使用硬跳转 (而非 router.push 客户端导航)
         // 确保 httpOnly cookie 已被浏览器应用, middleware 能读到 cookie 放行
         // router.push 是客户端导航, 可能在 cookie 设置前就触发路由守卫导致重定向回 /login
@@ -198,21 +217,28 @@ export function LoginForm() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mobile,
-          captchaid: smsCaptchaId,
-          captchacode: smsCode,
-          logintype: 2,
-        }),
-      });
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/user/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile,
+            captchaid: smsCaptchaId,
+            captchacode: smsCode,
+            logintype: 2,
+          }),
+        }
+      );
       const data = await res.json();
 
       if (data.errorcode === 0 && data.data?.[0]) {
         const u = data.data[0];
-        setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
+        // 多源容错提取 token (兼容后端不同返回格式)
+        const token = extractToken(data, res.headers) || u.token;
+        setUser({ id: u.id, name: u.name, mobile: u.mobile, token });
+        // 设置 httpOnly cookie (供 middleware.ts 服务端路由守卫)
+        await setAuthTokenCookie(token);
         // 使用硬跳转 (而非 router.push 客户端导航)
         // 确保 httpOnly cookie 已被浏览器应用, middleware 能读到 cookie 放行
         window.location.href = "/agent/researcher/chat";
@@ -254,16 +280,19 @@ export function LoginForm() {
     setResetLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/auth/resetpassword", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mobile: resetMobile,
-          captchaid: resetCaptchaId,
-          captchacode: resetCaptchaCode,
-          password: resetPassword,
-        }),
-      });
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/user/resetpassword`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile: resetMobile,
+            captchaid: resetCaptchaId,
+            captchacode: resetCaptchaCode,
+            password: resetPassword,
+          }),
+        }
+      );
       const data = await res.json();
       if (data.errorcode === 0) {
         setShowForgetDialog(false);

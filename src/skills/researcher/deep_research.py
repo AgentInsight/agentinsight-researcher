@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 from typing import Any
 
+from src.common.http_client import get_http_client_pool
 from src.common.json_utils import safe_json_parse
 from src.config.settings import Settings, get_settings
 from src.llm.client import LLMClient, LLMTier, get_llm_client
@@ -150,6 +152,36 @@ class DeepResearcher:
         """
         return get_mcp_coordinator()
 
+    def _cleanup_after_research(self, session_id: str | None) -> None:
+        """研究完成后清理会话级资源 (P2-20).
+
+        主动 GC + 清理 WrittenContentCompressor chunk cache + 清理 LLM 会话成本缓存.
+        仅在顶层调用 (非递归子查询) 执行, 避免递归中误清缓存.
+        失败不阻断返回结果.
+
+        Args:
+            session_id: 会话 ID, None 时跳过会话级缓存清理
+        """
+        # P2-20: 研究完成后主动 GC + 缓存清理
+        # 释放 ~200-300MB 未回收内存 (WrittenContentCompressor chunk cache + embeddings)
+        try:
+            gc.collect()  # 触发循环引用清理
+        except Exception as e:  # noqa: BLE001
+            logger.warning("gc.collect 失败 (不阻断): %s", e)
+        try:
+            # 清理 WrittenContentCompressor chunk cache
+            if hasattr(self._context_manager, "_written_compressor"):
+                self._context_manager._written_compressor.reset()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("WrittenContentCompressor reset 失败 (不阻断): %s", e)
+        try:
+            # 清理 LLM 会话成本缓存 (cleanup_session_cost 已在 P0-2 实现)
+            # 仅清理当前会话, 不影响其他并发会话
+            if session_id is not None:
+                self._llm.cleanup_session_cost(session_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("cleanup_session_cost 失败 (不阻断): %s", e)
+
     async def research(
         self,
         query: str,
@@ -218,6 +250,14 @@ class DeepResearcher:
             # 递归终止
             if _current_depth >= depth:
                 span.update(output={"terminated": True, "depth": _current_depth})
+                if _current_depth == 0:
+                    try:
+                        pool = await get_http_client_pool()
+                        await pool.close_all()
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("HttpClientPool close_all 失败 (不阻断): %s", e)
+                    # P2-20: 顶层研究完成 (终止分支) 主动 GC + 缓存清理
+                    self._cleanup_after_research(session_id)
                 return {
                     "query": query,
                     "context": _parent_context,
@@ -313,6 +353,14 @@ class DeepResearcher:
                     "learnings_count": len(self._learnings),
                 }
             )
+            if _current_depth == 0:
+                try:
+                    pool = await get_http_client_pool()
+                    await pool.close_all()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("HttpClientPool close_all 失败 (不阻断): %s", e)
+                # P2-20: 顶层研究完成 主动 GC + 缓存清理
+                self._cleanup_after_research(session_id)
             return {
                 "query": query,
                 "context": aggregated_context,

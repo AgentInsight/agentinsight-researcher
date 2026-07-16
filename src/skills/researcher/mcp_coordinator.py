@@ -135,6 +135,9 @@ async def conduct_mcp_if_enabled(
     两处原逻辑均为: if mcp_strategy != "disabled": try get_mcp + get_user_mcp_configs +
     conduct_research + 拼接 context, except 降级 warn.
 
+    E2R-03: 调用前过滤熔断中的 server (per-server 熔断器), 避免为已知失败的 server
+    创建新 client, 切断 "创建-失败-清理-重创建" 僵尸循环.
+
     Args:
         settings: 全局配置 (含 mcp_strategy / agent_name)
         sub_query: 子查询 (MCP 工具调用的输入)
@@ -153,10 +156,27 @@ async def conduct_mcp_if_enabled(
         if not mcp_configs:
             return []
 
+        # E2R-03: 过滤熔断中的 server (per-server 熔断器, 早期过滤 + 日志)
+        filtered_configs: list[dict[str, Any]] = []
+        for cfg in mcp_configs:
+            name = cfg.get("name", "")
+            if not name:
+                # 无 name 字段的配置不过滤 (兜底, 与 _execute_mcp 的 name 默认值一致)
+                filtered_configs.append(cfg)
+                continue
+            is_open, remaining = mcp.is_server_circuit_open(name)
+            if is_open:
+                logger.warning("MCP server %s 熔断中, 跳过 (剩余 %.0fs)", name, remaining)
+            else:
+                filtered_configs.append(cfg)
+        if not filtered_configs:
+            logger.warning("MCP 所有 server 均熔断中, 跳过本轮 MCP 调用")
+            return []
+
         contexts = await mcp.conduct_research(
             sub_query,
             strategy=settings.mcp_strategy,
-            mcp_configs=mcp_configs,
+            mcp_configs=filtered_configs,
             agent_id=settings.agent_name,
             user_id=user_id,
             session_id=session_id,
@@ -186,6 +206,11 @@ class MCPCoordinator:
     # A4: LRU 缓存上限 (评估: 32 足够多用户场景, 每用户约 1-2 个唯一配置 hash)
     _CLIENT_CACHE_MAX_SIZE = 32
 
+    # E2R-03: per-server 熔断器 (防止僵尸 client "创建-失败-清理-重创建" 循环)
+    # 连续 3 次失败熔断该 server, 熔断 5 分钟
+    _MCP_SERVER_FAILURE_THRESHOLD = 3
+    _MCP_SERVER_COOLDOWN_SECONDS = 300.0
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -199,6 +224,11 @@ class MCPCoordinator:
         self._client_cache = OrderedDict()
         # C1: asyncio.Lock 防止并发竞态
         self._client_cache_lock = asyncio.Lock()
+        # E2R-03: per-server 熔断器状态 (独立于 client 缓存, clear_cache 不重置)
+        # _server_failure_counts: server name -> 连续失败次数
+        # _server_circuit_open: server name -> 熔断开启的 monotonic 时间戳
+        self._server_failure_counts: dict[str, int] = {}
+        self._server_circuit_open: dict[str, float] = {}
 
     async def _get_or_create_client(self, server_configs: dict[str, Any]) -> Any | None:
         """缓存并复用 MultiServerMCPClient (C1: async + Lock + double-check).
@@ -212,16 +242,38 @@ class MCPCoordinator:
         A4 修复: LRU 淘汰策略, 超过 _CLIENT_CACHE_MAX_SIZE 时淘汰最久未使用的 client,
         淘汰时调用 aclose() 释放 stdio 子进程资源.
 
+        E2R-03 修复: 创建前过滤熔断中的 server (per-server 熔断器),
+        防止 A6 僵尸清理后形成 "创建-失败-清理-重创建" 循环.
+        全部 server 熔断时返回 None (不创建 client).
+
         Args:
             server_configs: MCP Server 配置字典 (name -> config)
 
         Returns:
-            MultiServerMCPClient 实例, langchain-mcp-adapters 未安装时返回 None.
+            MultiServerMCPClient 实例, langchain-mcp-adapters 未安装或全部 server 熔断时返回 None.
         """
         try:
             from langchain_mcp_adapters.client import MultiServerMCPClient
         except ImportError:
             return None
+
+        # E2R-03: 过滤熔断中的 server (per-server 熔断器, 防御性二次过滤)
+        # conduct_mcp_if_enabled 已做一次过滤, 此处为直接调用 conduct_research 的兜底
+        filtered_configs: dict[str, Any] = {}
+        for name, cfg in server_configs.items():
+            is_open, remaining = self.is_server_circuit_open(name)
+            if is_open:
+                logger.debug(
+                    "MCP server %s 熔断中, _get_or_create_client 跳过 (剩余 %.0fs)",
+                    name,
+                    remaining,
+                )
+            else:
+                filtered_configs[name] = cfg
+        if not filtered_configs:
+            logger.warning("MCP 所有 server 均熔断中, 跳过 client 创建")
+            return None
+        server_configs = filtered_configs
 
         try:
             key = hashlib.sha256(
@@ -269,6 +321,81 @@ class MCPCoordinator:
                     await result
         except Exception as e:  # noqa: BLE001
             logger.debug("MCP client 关闭失败 (忽略): %s", e)
+
+    # ========== E2R-03: per-server 熔断器 ==========
+    # 防止 A6 僵尸清理后形成 "创建-失败-清理-重创建" 循环:
+    # 连续失败达阈值的 server 被熔断, 5 分钟内不再为其创建 client.
+
+    def is_server_circuit_open(self, name: str) -> tuple[bool, float]:
+        """检查 server 是否熔断中 (E2R-03).
+
+        使用 time.monotonic() 避免时钟跳变.
+
+        冷却结束自动清除熔断标记 (但保留失败计数, 实现半开试探:
+        下次失败会因计数已达阈值而立即重新熔断, 下次成功则重置计数).
+
+        Args:
+            name: MCP server 名称
+
+        Returns:
+            (is_open, remaining_seconds): is_open=True 表示熔断中,
+            remaining_seconds 为剩余冷却秒数 (is_open=False 时为 0.0).
+        """
+        open_time = self._server_circuit_open.get(name)
+        if open_time is None:
+            return (False, 0.0)
+        elapsed = time.monotonic() - open_time
+        if elapsed >= self._MCP_SERVER_COOLDOWN_SECONDS:
+            # 冷却结束: 清除熔断标记, 保留失败计数 (半开模式)
+            del self._server_circuit_open[name]
+            return (False, 0.0)
+        return (True, self._MCP_SERVER_COOLDOWN_SECONDS - elapsed)
+
+    def _record_server_failure(self, server_names: list[str]) -> None:
+        """记录 server 连续失败, 达到阈值时开启熔断 (E2R-03).
+
+        per-server 失败计数: MultiServerMCPClient.get_tools() 失败时,
+        该 client 包含的所有 server 均计一次失败
+        (TaskGroup 异常无法隔离具体是哪个 server 报错, 粗粒度计所有 server).
+        熔断后该 server 在冷却期内不再被纳入新 client, 切断僵尸循环.
+        """
+        now = time.monotonic()
+        for name in server_names:
+            count = self._server_failure_counts.get(name, 0) + 1
+            self._server_failure_counts[name] = count
+            if (
+                count >= self._MCP_SERVER_FAILURE_THRESHOLD
+                and name not in self._server_circuit_open
+            ):
+                self._server_circuit_open[name] = now
+                logger.warning(
+                    "MCP server %s 连续失败 %d 次, 开启熔断 %.0fs",
+                    name,
+                    count,
+                    self._MCP_SERVER_COOLDOWN_SECONDS,
+                )
+
+    def _record_server_success(self, server_names: list[str]) -> None:
+        """记录 server 成功, 重置失败计数与熔断状态 (E2R-03).
+
+        get_tools() 成功表示 client 初始化正常, 该 client 包含的所有 server
+        均视为健康, 清除其失败计数与熔断标记.
+        """
+        for name in server_names:
+            self._server_failure_counts.pop(name, None)
+            self._server_circuit_open.pop(name, None)
+
+    def reset_server_circuit(self, server_name: str) -> None:
+        """手动重置指定 server 的熔断状态 (E2R-03).
+
+        清除失败计数与熔断标记, 供运维/手动恢复使用.
+        clear_cache 不调用此方法 (熔断状态独立于缓存).
+        """
+        self._server_failure_counts.pop(server_name, None)
+        self._server_circuit_open.pop(server_name, None)
+        logger.info("MCP server %s 熔断状态已手动重置", server_name)
+
+    # ========== E2R-03 熔断器结束 ==========
 
     async def conduct_research(
         self,
@@ -392,9 +519,12 @@ class MCPCoordinator:
 
             # 复用缓存的 MultiServerMCPClient (相同配置不重复构建)
             # C1: _get_or_create_client 已改为 async (含 Lock + double-check)
+            # E2R-03: _get_or_create_client 内部过滤熔断 server, 全部熔断时返回 None
             client = await self._get_or_create_client(server_configs)
             if client is None:
-                logger.warning("langchain-mcp-adapters 未安装, MCP 数据源不可用")
+                logger.warning(
+                    "MCP client 不可用 (langchain-mcp-adapters 未安装或所有 server 熔断中)"
+                )
                 return []
             # A6: get_tools() 失败时 (TaskGroup 异常), 移除缓存中的僵尸 client 并 aclose
             # 避免后续请求复用必失败的 client, 导致永久性资源泄漏
@@ -402,9 +532,9 @@ class MCPCoordinator:
                 tools = await client.get_tools()
             except Exception as get_tools_err:
                 # A6: 从 _client_cache 移除并关闭僵尸 client
-                logger.warning(
-                    "MCP get_tools() 失败, 移除僵尸 client: %s", get_tools_err
-                )
+                logger.warning("MCP get_tools() 失败, 移除僵尸 client: %s", get_tools_err)
+                # E2R-03: 记录 server 连续失败 (TaskGroup 异常影响 client 内所有 server)
+                self._record_server_failure(list(server_configs.keys()))
                 # 计算 key 用于从缓存移除
                 try:
                     failed_key = hashlib.sha256(
@@ -416,6 +546,9 @@ class MCPCoordinator:
                     pass  # 序列化失败时无法计算 key, 跳过移除
                 await self._safe_close_client(client)
                 raise
+
+            # E2R-03: get_tools() 成功, 重置 server 失败计数 (client 初始化正常)
+            self._record_server_success(list(server_configs.keys()))
 
             if not tools:
                 logger.warning("MCP 未返回任何工具")
@@ -456,7 +589,7 @@ class MCPCoordinator:
             return contexts
         except Exception as e:  # noqa: BLE001
             # E01: 记录失败的 server_configs 名称, 便于定位是哪个 MCP 报错 (JSONRPC 解析错误等)
-            failed_names = list(server_configs.keys()) if 'server_configs' in locals() else []
+            failed_names = list(server_configs.keys()) if "server_configs" in locals() else []
             logger.warning("MCP 执行失败 (servers=%s): %s", failed_names, e)
             return []
 
@@ -694,6 +827,11 @@ class MCPCoordinator:
         A4: 清空 _client_cache 时调用 aclose() 释放 stdio 子进程资源,
         避免配置变更后旧 client 被孤立成为僵尸进程.
 
+        E2R-03: 熔断器状态 (_server_failure_counts / _server_circuit_open) 独立于缓存,
+        本方法不重置熔断状态. 理由: 清缓存后若立即重置熔断, 下一请求会为已知失败的
+        server 创建新 client, 重新陷入 "创建-失败-清理-重创建" 僵尸循环.
+        手动重置熔断使用 reset_server_circuit().
+
         调用时机:
         - mcp_routes.create_mcp_config 后
         - mcp_routes.update_mcp_config 后 (含 enabled 切换)
@@ -714,6 +852,7 @@ class MCPCoordinator:
             self._client_cache.clear()
         # 模块级 TTL 缓存 (工具调用结果, 全量清空)
         _MCP_CACHE.clear()
+        # E2R-03: 不重置 _server_failure_counts / _server_circuit_open (熔断独立于缓存)
 
     async def close(self) -> None:
         """关闭 MCPCoordinator, 释放所有资源 (A5: lifespan shutdown 调用).

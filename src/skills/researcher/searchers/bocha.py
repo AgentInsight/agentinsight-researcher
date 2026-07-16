@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from src.common.http_client import get_http_client_pool
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
@@ -34,7 +35,6 @@ class BochaSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.bocha_api_key
-        self._client = httpx.AsyncClient(timeout=30.0)
 
     async def search(
         self,
@@ -68,7 +68,9 @@ class BochaSearcher(BaseSearcher):
                     "summary": True,
                     "count": max_results,
                 }
-                response = await self._client.post(
+                pool = await get_http_client_pool()
+                client = await pool.get_client(self.name)
+                response = await client.post(
                     self._api_url,
                     headers=headers,
                     json=payload,
@@ -118,4 +120,4 @@ class BochaSearcher(BaseSearcher):
         return now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
 
     async def close(self) -> None:
-        await self._client.aclose()
+        """无操作 (httpx 客户端由 HttpClientPool 统一管理生命周期)."""

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from src.common.circuit_breaker import CircuitBreaker
+from src.common.http_client import get_http_client_pool
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion
@@ -35,7 +36,6 @@ class ExaSearcher(BaseSearcher):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)
         self._api_key = self.settings.exa_api_key
-        self._client = httpx.AsyncClient(timeout=10.0)  # 超时 10s, 消除 >10s 离群点
         self._circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
         self._max_retries = 2  # 限制 2 次避免 API 成本激增
 
@@ -78,7 +78,9 @@ class ExaSearcher(BaseSearcher):
                             "text": {"maxCharacters": 1000},
                         },
                     }
-                    response = await self._client.post(self._api_url, headers=headers, json=payload)
+                    pool = await get_http_client_pool()
+                    client = await pool.get_client(self.name)
+                    response = await client.post(self._api_url, headers=headers, json=payload)
                     if response.status_code == 429:
                         reset_at = self._calc_quota_reset(response)
                         raise QuotaExceededError(
@@ -129,4 +131,4 @@ class ExaSearcher(BaseSearcher):
         return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
 
     async def close(self) -> None:
-        await self._client.aclose()
+        """无操作 (httpx 客户端由 HttpClientPool 统一管理生命周期)."""

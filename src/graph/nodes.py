@@ -314,11 +314,23 @@ async def publisher_node(
         elif result_format == "json":
             new_formats["json"] = result["content"]
 
+        # P2-21: LLM 响应消息分块保留
+        # 完整报告已写入 research_reports 表 (由 routes.py 调用 save_report),
+        # State 同时保留摘要字段; 后续追问场景可优先读 report_summary 降低内存占用,
+        # 完整报告从 research_reports 表读取 (避免每次 aget_state 加载 30K+ 字符).
+        # 不删除 report_md: routes.py 在 graph.ainvoke 完成后仍需读取它构造响应与持久化,
+        # publisher_node 本身也依赖 report_md 输出最终结果.
+        if len(report_md) > 2000:
+            report_summary = report_md[:500] + "..."
+        else:
+            report_summary = report_md
+
         delta: dict[str, Any] = {
             "status": "completed",
             "report_format": result_format,
             "report_formats": new_formats,
             "report_md": report_md,  # 兼容字段
+            "report_summary": report_summary,  # P2-21: 报告摘要, 降低追问场景内存占用
         }
         # 报告持久化由 API 层 (routes.py) 在 graph 完成后调用 report_store.save_report,
         # 节点不直接写 DB (节点纯函数无副作用约束).

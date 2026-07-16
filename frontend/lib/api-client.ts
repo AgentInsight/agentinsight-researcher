@@ -10,14 +10,20 @@ import type {
   Source,
 } from "./types";
 import { useAgentStore } from "./agent-store";
+import { DEPLOYMENT_MODE, getAgentByName } from "./agents.config";
 
 /**
- * API 客户端 (通过 /api/proxy 同源代理访问后端)
+ * API 客户端 (支持双模式: 服务器Nginx / 本地直连)
  *
- * 方案B: Nginx 按 agent 路径分发
- * - baseUrl 格式: /api/proxy/{agentName} (agentName 从 agent-store 获取)
- * - Next.js /api/proxy route handler 根据 agentName 路径段选择对应后端
- * - 支持解析 OpenAI SSE 格式 + 自定义 delta 扩展字段
+ * 部署模式 (由 NEXT_PUBLIC_DEPLOYMENT_MODE 环境变量控制):
+ *   - server (默认): 通过 Nginx 按 agentName 路径分发
+ *       baseUrl: /agent/{agentName} (相对路径, 浏览器同源访问 Nginx)
+ *       示例: /agent/agentinsight-researcher/v1/sessions
+ *   - local: 本地开发无 Nginx, 浏览器直连后端端口
+ *       baseUrl: http://localhost:{localPort} (从 agents.config.ts 读取端口)
+ *       示例: http://localhost:8066/v1/sessions
+ *
+ * 支持解析 OpenAI SSE 格式 + 自定义 delta 扩展字段
  *
  * 后端约定 (详见 src/api/routes.py):
  * - SSE 使用 OpenAI data: 行格式 (无 event: 命名事件)
@@ -25,13 +31,25 @@ import { useAgentStore } from "./agent-store";
  */
 export class ApiClient {
   /**
-   * 获取 baseUrl (同源代理路径, 含 agentName 路径段)
-   * 方案B: /api/proxy/{agentName} — Next.js proxy 根据 agentName 路由到不同后端
+   * 获取 baseUrl (双模式)
+   * - server 模式: /agent/{agentName} (Nginx 按 agentName 路径分发)
+   * - local 模式: http://localhost:{localPort} (浏览器直连后端端口)
+   *
    * agentName 从 agent-store 运行时获取, 默认 "agentinsight-researcher"
+   * localPort 从 agents.config.ts 的 AgentConfig 读取
    */
   private getBaseUrl(): string {
     const agentName = this.getCurrentAgentName();
-    return `/api/proxy/${agentName}`;
+
+    if (DEPLOYMENT_MODE === "local") {
+      // 本地开发模式: 浏览器直连后端端口 (无 Nginx)
+      const agent = getAgentByName(agentName);
+      const port = agent?.localPort ?? 8066;
+      return `http://localhost:${port}`;
+    }
+
+    // 服务器模式: 通过 Nginx 按 agentName 路径分发
+    return `/agent/${agentName}`;
   }
 
   /** 从 agent-store 获取当前 agent name (运行时) */

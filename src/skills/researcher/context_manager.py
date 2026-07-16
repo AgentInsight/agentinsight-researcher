@@ -363,25 +363,12 @@ class ContextManager:
                 query_emb = all_embs[0]
                 doc_embs = all_embs[1:]
 
-                # 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
-                # 拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
-                from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
- 
-                for doc_text, doc_emb in zip(documents, doc_embs, strict=False):
-                    # 缓存 doc 级 (单 chunk 场景命中)
-                    doc_cache_key = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
-                    self._written_compressor._cache_set(doc_cache_key, doc_emb)
-                    # 拆分为 chunk 级, 与 compute_embedding_batch 查询 key 对齐 (多 chunk 场景命中)
-                    doc_chunks = recursive_split(
-                        doc_text,
-                        separators=DEFAULT_SEPARATORS,
-                        chunk_size=self.settings.embeddings_filter_chunk_size,
-                        chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
-                    ) or [doc_text]
-                    for chunk_text in doc_chunks:
-                        chunk_cache_key = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                        self._written_compressor._cache_set(chunk_cache_key, doc_emb)
- 
+                # 注意: 不在此处预填充 WrittenContentCompressor._chunk_cache.
+                # 之前的实现把 doc_emb (文档级 embedding) 错误地缓存为每个 chunk 的 embedding,
+                # 导致后续 compute_embedding 命中缓存时返回错误的 embedding (doc_emb ≠ chunk_emb),
+                # 使 check_and_update_partial 误判多个子主题为"高度相似"而整篇丢弃,
+                # 最终报告目录只剩 1 个子主题.
+                # compute_embedding 已有自己的 chunk 级缓存 (计算后正确缓存), 无需此处预填充.
                 similarities: list[tuple[float, str]] = []
                 for doc, emb in zip(documents, doc_embs, strict=False):
                     sim = self._cosine_similarity(query_emb, emb)

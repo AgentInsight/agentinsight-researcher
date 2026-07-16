@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from src.common.http_client import get_http_client_pool
 from src.config.settings import Settings
 from src.observability.tracing import trace_tool
 from src.skills.researcher.searchers import BaseSearcher, SearchRegion, register_searcher
@@ -42,7 +43,6 @@ class MetasoSearcher(BaseSearcher):
         super().__init__(settings)
         self.base_url = "https://metaso.cn/api/v1/search"
         self.api_key = settings.metaso_api_key or ""
-        self._client = httpx.AsyncClient(timeout=30.0)
 
     async def search(
         self,
@@ -80,7 +80,9 @@ class MetasoSearcher(BaseSearcher):
             }
 
             try:
-                resp = await self._client.post(self.base_url, headers=headers, json=payload)
+                pool = await get_http_client_pool()
+                client = await pool.get_client(self.name)
+                resp = await client.post(self.base_url, headers=headers, json=payload)
             except Exception as e:
                 logger.warning(f"metaso 调用失败: {e}")
                 span.update(metadata={"tool_name": "metaso", "success": False, "error": str(e)})
@@ -164,7 +166,7 @@ class MetasoSearcher(BaseSearcher):
             return results
 
     async def close(self) -> None:
-        await self._client.aclose()
+        """无操作 (httpx 客户端由 HttpClientPool 统一管理生命周期)."""
 
     def _calc_quota_reset(self, resp: httpx.Response) -> datetime:
         """额度重置时间: 优先 Retry-After 头, 默认 24 小时 (按日配额)."""

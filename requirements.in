@@ -57,8 +57,10 @@ opentelemetry-sdk>=1.42  # 仅作 agentinsight-sdk 底层依赖, 业务代码禁
 opentelemetry-exporter-otlp-proto-http>=1.42
 
 # === 搜索引擎 (中文优先, 用户需求 5) ===
+arxiv>=2.1.0  # Arxiv 学术论文元数据/PDF 抓取 (arxiv_scraper.py)
 ddgs>=9.0  # 无需 Key 兜底 (duckduckgo_search v8+ 已重命名为 ddgs)
 httpx>=0.28  # 博查/Tavily/Exa/秘塔/CrossRef/GDELT/HackerNews/GitHub/Arxiv 通用 HTTP
+certifi>=2024.2.2  # 显式 CA 包, 解决 Windows/容器 SSL CERTIFICATE_VERIFY_FAILED
 
 # === 网页抓取 (用户需求 12) ===
 beautifulsoup4>=4.12

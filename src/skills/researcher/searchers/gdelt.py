@@ -63,7 +63,7 @@ class GDELTSearcher(BaseSearcher):
             "sort": "DateDesc",
         }
 
-        # E11: 全局限流, 确保至少 5 秒间隔
+        # E11: 全局限流, 确保至少 5 秒间隔 (HTTP 请求在锁内执行, 避免并发突破)
         global _GDELT_LAST_REQUEST_TIME
         async with _GDELT_LOCK:
             now = time.monotonic()
@@ -74,12 +74,12 @@ class GDELTSearcher(BaseSearcher):
                 await asyncio.sleep(wait_time)
             _GDELT_LAST_REQUEST_TIME = time.monotonic()
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(self.base_url, params=params)
-        except Exception as e:
-            logger.warning(f"gdelt 调用失败: {e}")
-            return []
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(self.base_url, params=params)
+            except Exception as e:
+                logger.warning(f"gdelt 调用失败: {e}")
+                return []
 
         if resp.status_code == 429:
             logger.warning("gdelt HTTP 429: 请求过于频繁, 已触发限流 (间隔需 ≥5 秒)")

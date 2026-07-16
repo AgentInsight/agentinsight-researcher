@@ -7,7 +7,7 @@ import { persist } from "zustand/middleware";
  * - SELF_HOST=true: user 为 null, isAuthed() 始终返回 true; 显示客户端 IP
  * - SELF_HOST=false: user 存储 token + 用户信息, 持久化到 localStorage; 显示手机/邮箱
  *
- * 注意: token 同时存储在 httpOnly cookie (由 /api/auth/login 设置) 和 localStorage 中
+ * 注意: token 同时存储在 httpOnly cookie (由 /api/auth/cookie 设置) 和 localStorage 中
  *       - httpOnly cookie: 供 middleware.ts 路由守卫读取 (服务端)
  *       - localStorage: 供客户端 API 调用读取 (Authorization Bearer 头)
  *
@@ -75,8 +75,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         // 清除 localStorage 状态
         set({ user: null });
-        // 清除 httpOnly cookie (通过 API Route)
-        fetch("/api/auth/logout", { method: "POST" }).catch(() => {
+        // 清除 httpOnly cookie (通过极简 cookie route, 不转发网络)
+        fetch("/api/auth/cookie", { method: "DELETE" }).catch(() => {
           // 忽略错误, 客户端状态已清除
         });
       },

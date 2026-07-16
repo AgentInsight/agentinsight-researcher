@@ -3,13 +3,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Tooltip } from "@/components/ui/tooltip";
+import { AUTH_API_BASE, fetchWithTimeout } from "@/lib/auth-api";
 
 /**
  * 图片验证码组件
  * - 仅在页面加载时请求一次验证码
  * - 用户点击验证码图片时刷新
  * - 其他时候不请求 (手机号变化不触发刷新)
- * - 从 /api/auth/captcha?mobile={mobile} 获取验证码图片 (base64)
+ * - 前端直连 AgentInsightService /api/captcha?mobile={mobile} 获取验证码图片 (base64)
  * - 验证码 ID 通过 onCaptchaId 回调传递给父组件
  * - 半透明样式适配光晕背景
  */
@@ -25,9 +26,9 @@ export function Captcha({
   const refreshCaptcha = useCallback(async (currentMobile: string) => {
     try {
       const url = currentMobile
-        ? `/api/auth/captcha?mobile=${encodeURIComponent(currentMobile)}`
-        : `/api/auth/captcha`;
-      const res = await fetch(url);
+        ? `${AUTH_API_BASE}/api/captcha?mobile=${encodeURIComponent(currentMobile)}`
+        : `${AUTH_API_BASE}/api/captcha`;
+      const res = await fetchWithTimeout(url, { method: "GET" });
       const data = await res.json();
       // API 返回 data 为数组格式: [{ id, image }]
       const item = Array.isArray(data.data) ? data.data[0] : data.data;

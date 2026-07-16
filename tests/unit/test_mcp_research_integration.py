@@ -327,6 +327,8 @@ async def test_conduct_mcp_if_enabled_injects_contexts_into_research() -> None:
 
     mock_mcp = MagicMock()
     mock_mcp.conduct_research = AsyncMock(return_value=mcp_contexts)
+    # E2R-03: 熔断器检查需返回 (is_open, remaining) tuple, 默认未熔断
+    mock_mcp.is_server_circuit_open = MagicMock(return_value=(False, 0.0))
 
     with (
         patch(

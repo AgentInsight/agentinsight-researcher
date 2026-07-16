@@ -2,24 +2,26 @@
 "use client";
 
 import type { WsMessage } from "./types";
+import { DEPLOYMENT_MODE, getAgentByName } from "./agents.config";
 
 /**
  * WebSocket 客户端 (人在回路)
- * - 连接 URL 基于当前页面 host 构建 (通过 Nginx 反向代理)
+ * - 支持两种部署模式 (由 NEXT_PUBLIC_DEPLOYMENT_MODE 环境变量控制)
  * - 支持 8 类结构化消息接收
  * - 支持发送 ping / human_feedback 消息
  * - 心跳保活 (30s) + 指数退避重连 (最多 5 次) + RAF 消息批量处理
  *
- * 架构 (方案B: Nginx 按 agent 路径分发):
- *   浏览器 → Nginx (同源同端口) → /v1/ws/{agentName}/{sessionId} → 对应 Agent 后端
+ * 架构 (双模式):
+ *   server 模式 (默认, 有 Nginx):
+ *     浏览器 → Nginx (同源同端口) → /v1/ws/{agentName}/{sessionId} → 对应 Agent 后端
+ *     Nginx 根据 {agentName} 段路由到不同后端, 重写路径去掉 agentName 段
  *
- * Nginx 根据 URL 中的 {agentName} 段路由到不同后端:
- *   /v1/ws/agentinsight-researcher/{sessionId} → agent-researcher:8066
- *   /v1/ws/agentinsight-writer/{sessionId}     → agent-writer:8067
+ *   local 模式 (本地开发, 无 Nginx):
+ *     浏览器 → ws://localhost:{localPort}/v1/ws/{sessionId} (直连后端, 不含 agentName 段)
+ *     localPort 从 agents.config.ts 的 AgentConfig 读取
  *
  * Next.js App Router route handler 不支持 WebSocket 升级,
- * 因此 WebSocket 由 Nginx 直接代理到后端 (绕过 Next.js)。
- * 浏览器只需连接与页面同源的 Nginx 地址, 无需知道后端端口。
+ * 因此 WebSocket 必须直连后端 (server 模式由 Nginx 代理, local 模式浏览器直连)。
  */
 export class WsClient {
   private ws: WebSocket | null = null;
@@ -51,14 +53,25 @@ export class WsClient {
     this.agentName = agentName;
   }
 
-  /** 连接 WebSocket (通过 Nginx 同源同端口访问, 按 agentName 路由) */
+  /** 连接 WebSocket (双模式: 服务器Nginx / 本地直连) */
   connect() {
-    // 使用与页面相同的 host:port (Nginx 地址), Nginx 按 agentName 路由到对应后端
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host; // 含端口, 如 localhost:80 或者 example.com
-    // URL 格式: /v1/ws/{agentName}/{sessionId}
-    // Nginx 通过 location ~ ^/v1/ws/([^/]+)/ 捕获 agentName 并路由到对应后端
-    const wsUrl = `${protocol}//${host}/v1/ws/${this.agentName}/${this.sessionId}`;
+    let wsUrl: string;
+
+    if (DEPLOYMENT_MODE === "local") {
+      // 本地开发模式: 浏览器直连后端端口 (无 Nginx)
+      // URL 格式: ws://localhost:{localPort}/v1/ws/{sessionId} (不含 agentName 段)
+      const agent = getAgentByName(this.agentName);
+      const port = agent?.localPort ?? 8066;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      wsUrl = `${protocol}//localhost:${port}/v1/ws/${this.sessionId}`;
+    } else {
+      // 服务器模式: 通过 Nginx 同源同端口访问, 按 agentName 路由
+      // URL 格式: ws://{host}/v1/ws/{agentName}/{sessionId}
+      // Nginx 通过 location ~ ^/v1/ws/([^/]+)/ 捕获 agentName 并路由到对应后端
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host; // 含端口, 如 localhost:80 或者 example.com
+      wsUrl = `${protocol}//${host}/v1/ws/${this.agentName}/${this.sessionId}`;
+    }
 
     this.ws = new WebSocket(wsUrl);
 

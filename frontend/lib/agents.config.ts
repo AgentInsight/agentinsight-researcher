@@ -1,16 +1,20 @@
 // lib/agents.config.ts
 /**
- * 多 Agent 配置 (方案B: Nginx 按 agent 路径分发)
- * - 当前仅 1 个 Agent (agentinsight-researcher)
- * - 未来添加新 Agent 只需在 agents 数组追加条目
- * - SSE/HTTP 通过 /api/proxy/{agentName}/* 路由, Next.js proxy 根据 agentName 选择后端
- * - WebSocket 通过 /v1/ws/{agentName}/{sessionId} 路由, Nginx 根据 agentName 选择后端
+ * 多 Agent 配置 (支持两种部署模式)
+ *
+ * 部署模式 (由 NEXT_PUBLIC_DEPLOYMENT_MODE 环境变量控制):
+ *   - server (默认): 服务器模式, 通过 Nginx 按 agentName 路径分发
+ *       HTTP/SSE: /agent/{agentName}/* → Nginx → 对应后端
+ *       WebSocket: /v1/ws/{agentName}/{sessionId} → Nginx → 对应后端
+ *   - local: 本地开发模式, 浏览器直连后端端口 (无 Nginx)
+ *       HTTP/SSE: http://localhost:{localPort}/*
+ *       WebSocket: ws://localhost:{localPort}/v1/ws/{sessionId} (不含 agentName 段)
  *
  * 扩展步骤 (多 Agent):
- * 1. 在此数组追加 Agent 配置 (含 agentName 和 apiUrl)
+ * 1. 在此数组追加 Agent 配置 (含 agentName + localPort)
  * 2. 在 docker-compose.yml 新增对应 Agent 服务
- * 3. 在 .env.frontend 新增对应 AGENT_<NAME>_API_URL 运行时变量
- * 4. Nginx 配置新增对应 /v1/ws/<agentName>/ location 块
+ * 3. 服务器: Nginx 配置在 map $agent_backend 新增对应端口映射
+ * 4. 本地: 确保对应端口已映射到宿主机
  */
 
 export interface AgentConfig {
@@ -23,11 +27,11 @@ export interface AgentConfig {
   /** 是否启用 (false 时不在切换器显示) */
   enabled: boolean;
   /**
-   * 后端 API 地址 (Docker compose 网络内服务名 + 端口)
-   * 用于 Next.js /api/proxy route handler 路由到对应后端
-   * 若留空, 则使用环境变量 AGENT_<NAME_UPPER>_API_URL
+   * 本地开发模式直连端口 (DEPLOYMENT_MODE=local 时使用)
+   * 浏览器直接访问 http://localhost:{localPort}
+   * 多 Agent 各自独立端口 (如 8066, 8067, 8068)
    */
-  apiUrl?: string;
+  localPort: number;
 }
 
 export const AGENTS_CONFIG: {
@@ -40,25 +44,27 @@ export const AGENTS_CONFIG: {
       displayName: "研究分析智能体",
       description: "深度研究型 AI Agent",
       enabled: true,
-      // apiUrl 留空, 由 proxy route 从 AGENT_RESEARCHER_API_URL 环境变量读取
+      localPort: 8066,
     },
-    // 未来扩展示例 (取消注释即启用, 需同步配置 .env 和 docker-compose.yml 和 nginx.conf):
+    // 未来扩展示例 (取消注释即启用, 需同步配置 docker-compose.yml 和 nginx.conf):
     // {
-    //   name: "agentinsight-writer",
-    //   displayName: "写作 Agent",
-    //   description: "内容创作型 AI Agent",
+    //   name: "agentinsight-asksql",
+    //   displayName: "SQL 查询智能体",
+    //   description: "自然语言转 SQL 查询型 AI Agent",
     //   enabled: true,
-    //   // apiUrl: "http://agent-writer:8067",  // 或由 AGENT_WRITER_API_URL 环境变量提供
-    // },
-    // {
-    //   name: "agentinsight-analyst",
-    //   displayName: "分析 Agent",
-    //   description: "数据分析型 AI Agent",
-    //   enabled: true,
+    //   localPort: 8067,
     // },
   ],
   defaultAgent: "agentinsight-researcher",
 };
+
+/**
+ * 部署模式 (构建时内联, 由 NEXT_PUBLIC_DEPLOYMENT_MODE 环境变量控制)
+ * - server: 服务器模式, 通过 Nginx 按 agentName 路径分发
+ * - local: 本地开发模式, 浏览器直连后端端口
+ */
+export const DEPLOYMENT_MODE: "server" | "local" =
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === "local" ? "local" : "server";
 
 /** 获取启用的 Agent 列表 */
 export const getEnabledAgents = (): AgentConfig[] =>

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.skills.researcher.scrapers import BaseScraper
+from src.skills.researcher.scrapers import BaseScraper, get_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,11 @@ class MarkItDownScraper(BaseScraper):
         tmp_path: str | None = None
         try:
             # 下载文档到临时文件 (同步写入用 to_thread 包装避免 ASYNC230)
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                follow_redirects=True,
+                verify=get_ssl_context(),
+            ) as client:
                 r = await client.get(self.url)
                 r.raise_for_status()
 

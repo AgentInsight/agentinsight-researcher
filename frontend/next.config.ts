@@ -30,8 +30,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // 关闭 X-Powered-By 响应头, 避免暴露技术栈 (P2-11)
   poweredByHeader: false,
-  // 无需 rewrites/CORS 配置: 客户端通过 /api/proxy 同源代理访问后端
-  // 后端地址由 /api/proxy route 从运行时环境变量读取
+  // 无需 rewrites 配置:
+  // - Agent API: server 模式通过 Nginx 按 agentName 路径分发 (/agent/{agentName}/*)
+  //              local 模式浏览器直连 http://localhost:{port}/*
+  // - Auth API: 浏览器跨域直连 https://agentinsight.goldebridge.com (需后端配置 CORS)
   headers,
   // 注意 (P1-21): 未启用 React Compiler (reactCompiler: true)
   //   React Compiler 仍是 RC 状态, 生产风险高, 待正式稳定后启用

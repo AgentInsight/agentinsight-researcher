@@ -5,6 +5,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import {
+  AUTH_API_BASE,
+  extractToken,
+  fetchWithTimeout,
+  setAuthTokenCookie,
+} from "@/lib/auth-api";
+import {
   User,
   Smartphone,
   Lock,
@@ -157,7 +163,10 @@ export function RegisterForm() {
     setSmsSending(true);
     setError("");
     try {
-      const res = await fetch(`/api/auth/sms?phone=${mobile}`);
+      const res = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/captcha/sms?phone=${encodeURIComponent(mobile)}`,
+        { method: "GET" }
+      );
       const data = await res.json();
       const item = Array.isArray(data.data) ? data.data[0] : data.data;
       if (item?.id) {
@@ -207,18 +216,21 @@ export function RegisterForm() {
     setLoading(true);
     setError("");
     try {
-      // 1. 注册
-      const regRes = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          mobile,
-          password,
-          captchaid: smsCaptchaId,
-          captchacode: verifyCode,
-        }),
-      });
+      // 1. 注册 (前端直连 AgentInsightService)
+      const regRes = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/user`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            mobile,
+            password,
+            captchaid: smsCaptchaId,
+            captchacode: verifyCode,
+          }),
+        }
+      );
       const regData = await regRes.json();
 
       if (regData.errorcode !== 0) {
@@ -226,23 +238,30 @@ export function RegisterForm() {
         return;
       }
 
-      // 2. 自动登录
-      const loginRes = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mobile,
-          password,
-          captchaid: smsCaptchaId,
-          captchacode: verifyCode,
-          logintype: 1,
-        }),
-      });
+      // 2. 自动登录 (前端直连 AgentInsightService)
+      const loginRes = await fetchWithTimeout(
+        `${AUTH_API_BASE}/api/user/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile,
+            password,
+            captchaid: smsCaptchaId,
+            captchacode: verifyCode,
+            logintype: 1,
+          }),
+        }
+      );
       const loginData = await loginRes.json();
 
       if (loginData.errorcode === 0 && loginData.data?.[0]) {
         const u = loginData.data[0];
-        setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
+        // 多源容错提取 token (兼容后端不同返回格式)
+        const token = extractToken(loginData, loginRes.headers) || u.token;
+        setUser({ id: u.id, name: u.name, mobile: u.mobile, token });
+        // 设置 httpOnly cookie (供 middleware.ts 服务端路由守卫)
+        await setAuthTokenCookie(token);
         // 使用硬跳转确保 cookie 生效后再触发 middleware 守卫
         window.location.href = "/agent/researcher/chat";
         return;

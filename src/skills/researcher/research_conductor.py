@@ -20,11 +20,13 @@ planner prompt 经 PromptFamily 策略注入 (支持中英多语言切换).
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import json
 import logging
 from typing import Any, cast
 
+from src.common.http_client import get_http_client_pool
 from src.common.json_utils import safe_json_parse
 from src.common.redis_client import get_redis_client
 from src.config.settings import Settings, get_settings
@@ -117,6 +119,37 @@ class ResearchConductor:
 
             self._retriever = get_retriever()
         return self._retriever
+
+    def _cleanup_after_research(self, session_id: str | None) -> None:
+        """研究完成后清理会话级资源 (P2-20).
+
+        主动 GC + 清理 WrittenContentCompressor chunk cache + 清理 LLM 会话成本缓存.
+        conduct_research 非递归, 始终在顶层调用.
+        失败不阻断返回结果.
+
+        Args:
+            session_id: 会话 ID, None 时跳过会话级缓存清理
+        """
+        # P2-20: 研究完成后主动 GC + 缓存清理
+        # 释放 ~200-300MB 未回收内存 (WrittenContentCompressor chunk cache + embeddings)
+        try:
+            gc.collect()  # 触发循环引用清理
+        except Exception as e:  # noqa: BLE001
+            logger.warning("gc.collect 失败 (不阻断): %s", e)
+        try:
+            # 清理 WrittenContentCompressor chunk cache
+            # (会话开始时已 reset, 此处再次 reset 释放研究过程中累积的 chunk 缓存)
+            if hasattr(self._context_manager, "_written_compressor"):
+                self._context_manager._written_compressor.reset()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("WrittenContentCompressor reset 失败 (不阻断): %s", e)
+        try:
+            # 清理 LLM 会话成本缓存 (cleanup_session_cost 已在 P0-2 实现)
+            # 仅清理当前会话, 不影响其他并发会话
+            if session_id is not None:
+                self._llm.cleanup_session_cost(session_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("cleanup_session_cost 失败 (不阻断): %s", e)
 
     async def _retrieve_private_data(
         self,
@@ -318,6 +351,13 @@ class ResearchConductor:
                         "private_contexts_count": len(private_contexts),
                     },
                 )
+                try:
+                    pool = await get_http_client_pool()
+                    await pool.close_all()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("HttpClientPool close_all 失败 (不阻断): %s", e)
+                # P2-20: 研究完成 主动 GC + 缓存清理 (summary 模式)
+                self._cleanup_after_research(session_id)
                 return result
 
             # 子主题模式路由 (与私有数据检索并行)
@@ -347,6 +387,13 @@ class ResearchConductor:
                         "private_contexts_count": len(private_contexts),
                     },
                 )
+                try:
+                    pool = await get_http_client_pool()
+                    await pool.close_all()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("HttpClientPool close_all 失败 (不阻断): %s", e)
+                # P2-20: 研究完成 主动 GC + 缓存清理 (subtopics 模式)
+                self._cleanup_after_research(session_id)
                 return result
 
             # 1. Planner: 拆解子查询 (与私有数据检索并行, 无数据依赖)
@@ -410,6 +457,13 @@ class ResearchConductor:
                     "private_contexts_count": len(private_contexts),
                 },
             )
+            try:
+                pool = await get_http_client_pool()
+                await pool.close_all()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("HttpClientPool close_all 失败 (不阻断): %s", e)
+            # P2-20: 研究完成 主动 GC + 缓存清理 (basic 模式)
+            self._cleanup_after_research(session_id)
             return {
                 "contexts": contexts,
                 "sources": sources,

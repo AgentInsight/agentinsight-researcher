@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 
 from src.config.settings import get_settings
-from src.skills.researcher.scrapers import BaseScraper
+from src.skills.researcher.scrapers import BaseScraper, get_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class TavilyExtractScraper(BaseScraper):
             if isinstance(self.session, httpx.AsyncClient):
                 client = self.session
             else:
-                client = httpx.AsyncClient(timeout=60.0)
+                client = httpx.AsyncClient(timeout=60.0, verify=get_ssl_context())
                 client_owner = True
 
             try:

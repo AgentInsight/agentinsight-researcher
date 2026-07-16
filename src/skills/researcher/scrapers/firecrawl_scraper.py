@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from src.config.settings import get_settings
-from src.skills.researcher.scrapers import BaseScraper
+from src.skills.researcher.scrapers import BaseScraper, get_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ class FirecrawlScraper(BaseScraper):
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
+            verify=get_ssl_context(),
         ) as client:
             resp = await client.post(
                 f"{self.api_url.rstrip('/')}/v1/scrape",

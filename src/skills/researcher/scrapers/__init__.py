@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -32,6 +33,8 @@ from src.config.settings import Settings as Settings
 from src.config.settings import get_settings as get_settings
 
 if TYPE_CHECKING:
+    import ssl
+
     import httpx
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,60 @@ def _is_fast_fail(result: dict[str, Any]) -> bool:
     """
     status = result.get("_http_status")
     return isinstance(status, int) and status in _FAST_FAIL_STATUS_CODES
+
+
+# ========== PDF URL 检测 (URL 模式 + Content-Type 双重判定) ==========
+# E2R-10: 修复 PDF 被传入 HTML 解析器 (trafilatura) 的问题.
+# 场景: https://pdf.dfcfw.com/pdf/H3_AP202604051821025917_1.pdf?1775381155000.pdf=
+# 此类 URL 不以 .pdf 结尾 (末尾为 .pdf=), 旧逻辑仅检查 endswith(".pdf") 漏判,
+# 导致 trafilatura 将 PDF 二进制当作 HTML 解析, 报
+# "parsed tree length: 1, wrong data type or not valid HTML".
+#
+# 检测策略 (三重):
+# 1. URL 模式: .pdf 后缀 (含查询参数, 如 file.pdf?param=value) → \.pdf($|\?)
+# 2. URL 模式: URL 路径段含 PDF/ (如 https://...PDF/10.xxx/...) → /pdf/
+# 3. 响应头: Content-Type: application/pdf (L1 失败后 HEAD 请求检测, 见 _is_pdf_content_type)
+_PDF_URL_PATTERN = re.compile(r"(\.pdf($|\?)|/pdf/)", re.IGNORECASE)
+
+
+def _is_pdf_url(url: str) -> bool:
+    """检测 URL 是否匹配 PDF 模式 (无网络请求, 仅 URL 字符串判定).
+
+    检测规则:
+    - .pdf 后缀 (含查询参数, 如 file.pdf?param=value)
+    - URL 路径段含 PDF/ (如 https://...PDF/10.xxx/..., 大小写不敏感)
+
+    Args:
+        url: 待检测的 URL.
+
+    Returns:
+        True 表示 URL 模式匹配 PDF.
+    """
+    return _PDF_URL_PATTERN.search(url) is not None
+
+
+async def _is_pdf_content_type(session: Any | None, url: str) -> bool:
+    """通过 HEAD 请求检测响应 Content-Type 是否为 PDF.
+
+    L1 trafilatura 失败后调用, 用于捕获 URL 模式未命中但实际响应为 PDF 的情况
+    (如 .pdf= 结尾、无扩展名 PDF、动态重定向至 PDF 等).
+
+    Args:
+        session: httpx.AsyncClient 实例 (为 None 时直接返回 False).
+        url: 待检测的 URL.
+
+    Returns:
+        True 表示响应 Content-Type 含 application/pdf.
+    """
+    if session is None:
+        return False
+    try:
+        resp = await session.head(url, timeout=10.0, follow_redirects=True)
+        content_type = resp.headers.get("content-type", "").lower()
+        return "application/pdf" in content_type
+    except Exception as e:  # noqa: BLE001
+        logger.debug("HEAD 请求检测 Content-Type 失败 %s: %s", url, e)
+        return False
 
 
 # ========== 全局速率限制器 (单例, 跨所有 WorkerPool 实例) ==========
@@ -279,17 +336,18 @@ def get_scraper(
     """根据 URL 与类型选择抓取器.
 
     get_scraper 路由逻辑:
-    - URL 以 .pdf 结尾 → PyMuPDFScraper
+    - URL 匹配 PDF 模式 (含 .pdf 后缀/查询参数/路径段 PDF/) → PyMuPDFScraper
     - URL 含 arxiv.org → ArxivScraper
     - URL 以 Office 文档后缀结尾 → MarkItDownScraper
     - 否则 → 按配置 (bs/playwright/firecrawl/nodriver/tavily_extract)
     """
-    url_lower = url.lower()
-
-    if url_lower.endswith(".pdf"):
+    # E2R-10: PDF 路由使用正则同时检测 .pdf 后缀(含查询参数) 与路径段 PDF/
+    if _is_pdf_url(url):
         from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
 
         return PyMuPDFScraper(url, session)
+
+    url_lower = url.lower()
 
     if "arxiv.org" in url_lower:
         from src.skills.researcher.scrapers.arxiv_scraper import ArxivScraper
@@ -379,12 +437,14 @@ async def scrape_with_fallback(
     settings = get_settings()
     scraper_mode = settings.scraper_mode
 
-    url_lower = url.lower()
-
-    if url_lower.endswith(".pdf"):
+    # E2R-10: PDF 路由使用正则同时检测 .pdf 后缀(含查询参数) 与路径段 PDF/,
+    # 命中则直接走 PyMuPDFScraper, 不进 L1 降级链 (避免 PDF 被传入 HTML 解析器).
+    if _is_pdf_url(url):
         from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
 
         return await _safe_scrape(PyMuPDFScraper(url, session))
+
+    url_lower = url.lower()
 
     if "arxiv.org" in url_lower:
         from src.skills.researcher.scrapers.arxiv_scraper import ArxivScraper
@@ -416,6 +476,22 @@ async def scrape_with_fallback(
 
     if scraper_mode == "lightweight":
         return tf_result
+
+    # E2R-10: L1 trafilatura 失败后, 检查响应头 Content-Type 是否为 application/pdf.
+    # 捕获 URL 模式未命中但实际响应为 PDF 的情况 (如 .pdf= 结尾、无扩展名 PDF、
+    # 动态重定向至 PDF). 命中则路由到 PyMuPDFScraper, 避免后续 BS/Playwright
+    # 将 PDF 二进制当作 HTML 解析 (报 "parsed tree length: 1, wrong data type").
+    if await _is_pdf_content_type(session, url):
+        logger.info(
+            "L1 Trafilatura 失败且 Content-Type 为 application/pdf, "
+            "路由 PyMuPDFScraper: %s",
+            url,
+        )
+        # 失败不驻留: 释放 L1 结果后再路由 PDF 抓取器
+        del tf_result, tf_content
+        from src.skills.researcher.scrapers.pymupdf_scraper import PyMuPDFScraper
+
+        return await _safe_scrape(PyMuPDFScraper(url, session))
 
     # 第二级: BS+markdownify (HTML→Markdown, 纯本地)
     logger.info(
@@ -473,6 +549,49 @@ _shared_http_client: httpx.AsyncClient | None = None
 _shared_http_client_lock: asyncio.Lock | None = None
 
 
+# ========== SSL 上下文 (certifi CA 包, 解决 CERTIFICATE_VERIFY_FAILED) ==========
+
+# 模块级单例 (惰性创建, 首次调用 get_ssl_context 时初始化)
+# ssl.SSLContext 类型注解由 from __future__ import annotations 守卫为字符串, 运行时不求值
+_ssl_context: ssl.SSLContext | None = None
+
+
+def get_ssl_context() -> ssl.SSLContext:
+    """获取共享 SSL 上下文 (惰性创建, 使用 certifi CA 包).
+
+    解决 Windows/容器环境系统 CA 存缺失或不完整导致的
+    ``[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed:
+    unable to get local issuer certificate`` 错误.
+
+    使用 ``certifi.where()`` 显式指定 Mozilla 维护的 CA 包, 不依赖系统
+    CA 存储. 上下文为模块级单例, 复用避免重复加载 CA 包.
+
+    降级策略: certifi 未安装时回退到 ``ssl.create_default_context()``
+    (使用系统 CA 存), 并告警; 不推荐 ``verify=False`` (安全硬约束).
+
+    Returns:
+        配置了 certifi CA 的默认 SSL 上下文.
+    """
+    global _ssl_context
+
+    if _ssl_context is not None:
+        return _ssl_context
+
+    import ssl
+
+    try:
+        import certifi
+
+        _ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        logger.warning(
+            "certifi 未安装, 回退系统 CA 存 (可能触发 CERTIFICATE_VERIFY_FAILED); "
+            "建议 pip install certifi>=2024.2.2",
+        )
+        _ssl_context = ssl.create_default_context()
+    return _ssl_context
+
+
 async def get_shared_http_client(user_agent: str = "") -> httpx.AsyncClient:
     """获取共享 httpx.AsyncClient 单例 (惰性创建).
 
@@ -517,6 +636,7 @@ async def get_shared_http_client(user_agent: str = "") -> httpx.AsyncClient:
                 "User-Agent": user_agent or "agentinsight-researcher/0.1",
             },
             follow_redirects=True,
+            verify=get_ssl_context(),
         )
     return _shared_http_client
 

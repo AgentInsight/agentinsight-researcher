@@ -1,5 +1,6 @@
 """scraper 公共工具函数.
 
+- temp_recursion_limit: 临时提升 Python 递归深度上限的上下文管理器
 - get_relevant_images_from_soup: 从 BeautifulSoup 提取图片并评分排序
 - get_relevant_images_from_html: 从 HTML 字符串提取图片并评分排序
 - parse_dimension: 解析尺寸值 (支持 px 后缀)
@@ -18,10 +19,37 @@
 from __future__ import annotations
 
 import logging
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def temp_recursion_limit(limit: int = 2000) -> Iterator[None]:
+    """临时提升 Python 递归深度上限的上下文管理器.
+
+    markdownify / BeautifulSoup.get_text() 等在 Python 层递归遍历深层嵌套
+    HTML 时可能触发 RecursionError (CPython 默认 sys.getrecursionlimit()=1000).
+    本上下文管理器在 with 块内临时提升上限, 退出时 (含异常) 恢复原值,
+    避免污染进程级全局状态.
+
+    Args:
+        limit: 临时上限 (默认 2000, 应对深层嵌套 HTML).
+    """
+    original_limit = sys.getrecursionlimit()
+    if limit <= original_limit:
+        # 已有上限更高时无需提升 (避免误降)
+        yield
+        return
+    sys.setrecursionlimit(limit)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(original_limit)
 
 
 def parse_dimension(value: str | None) -> int | None:

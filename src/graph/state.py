@@ -96,6 +96,11 @@ class ResearcherState(TypedDict, total=False):
     # report_md 为兼容字段, 新代码应使用 report_formats["md"].
     report_md: str  # 兼容字段: 使用 report_formats["md"]
     report_formats: dict[str, str]  # {md|html|pdf|docx|json: 内容或路径}
+    # P2-21: LLM 响应消息分块保留
+    # 完整报告已写入 research_reports 表 (由 routes.py 调用 save_report),
+    # State 同时保留摘要字段; 后续追问场景可优先读 report_summary 降低内存占用,
+    # 完整报告从 research_reports 表读取 (避免每次 aget_state 加载 30K+ 字符).
+    report_summary: str  # 报告摘要 (report_md 前 500 字符 + "...", 短报告则为全文)
     report_image_url: str  # 报告配图 URL (deepseek-v4-flash 生成)
     report_image_b64: str  # 报告配图 base64 (与 url 二选一)
     report_id: str  # 报告主键 UUID (publisher 写入, routes/cli 读取用于下载链接)

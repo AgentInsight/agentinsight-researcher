@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import os
 import random
@@ -140,20 +141,40 @@ class _PooledBrowser:
         return sem
 
     async def stop(self) -> None:
-        """关闭浏览器 + playwright (幂等)."""
+        """关闭浏览器 + playwright (幂等).
+
+        P2-19 修复: close 后强制 gc.collect() 触发 Playwright 内部对象 finalizer,
+        确保 Chromium 子进程不残留 (避免 ~200-300 MB 内存泄漏).
+        """
         if self.stopping:
             return
         self.stopping = True
-        if self.browser is not None:
-            try:
-                await self.browser.close()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("池化 browser.close 失败: %s", e)
-        if self.playwright is not None:
-            try:
-                await self.playwright.stop()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("池化 playwright.stop 失败: %s", e)
+        try:
+            if self.browser is not None:
+                try:
+                    await self.browser.close()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("池化 browser.close 失败: %s", e)
+            if self.playwright is not None:
+                try:
+                    await self.playwright.stop()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("池化 playwright.stop 失败: %s", e)
+        finally:
+            # P2-19: 强制 GC 触发 Playwright 内部对象 finalizer,
+            # 清理 Chromium 子进程残留 (避免 ~200-300 MB 内存泄漏)
+            gc.collect()
+
+    def __del__(self) -> None:
+        """P2-19 安全网: 析构时若未显式 stop(), 触发 GC 清理残留 Playwright 对象.
+
+        注意: __del__ 无法调用 async stop(), 仅作最后兜底;
+        正常清理路径应通过 _PlaywrightPool.shutdown() -> stop() 完成.
+        """
+        if not self.stopping:
+            logger.warning("_PooledBrowser 未显式 stop(), 可能遗留 Chromium 子进程")
+        # 触发 Playwright 内部对象 finalizer, 兜底清理子进程
+        gc.collect()
 
 
 class _PlaywrightPool:
@@ -280,29 +301,35 @@ class _PlaywrightPool:
 
         v3: 遍历池中所有 _PooledBrowser 逐一关闭.
         v2: 先置 _instance=None 再清理, 防止重入; 异常时记录但不阻断.
+        P2-19 修复: 关闭所有 browser 后强制 gc.collect(), 确保所有 Chromium 子进程被回收.
         """
         instance = cls._instance
         cls._instance = None  # 先置 None 防止重入
         if instance is None:
             return
-        # v3: 关闭池中所有 browser
-        for pooled in list(cls._pooled_browsers):
-            try:
-                await pooled.stop()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("池化 browser 关闭失败: %s", e)
-        cls._pooled_browsers.clear()
-        # v2 兼容: 旧字段清理
-        if instance._browser is not None:
-            try:
-                await instance._browser.close()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Playwright browser 关闭失败 (可能遗留 zombie 进程): %s", e)
-        if instance._playwright is not None:
-            try:
-                await instance._playwright.stop()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Playwright playwright 关闭失败: %s", e)
+        try:
+            # v3: 关闭池中所有 browser
+            for pooled in list(cls._pooled_browsers):
+                try:
+                    await pooled.stop()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("池化 browser 关闭失败: %s", e)
+            cls._pooled_browsers.clear()
+            # v2 兼容: 旧字段清理
+            if instance._browser is not None:
+                try:
+                    await instance._browser.close()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Playwright browser 关闭失败 (可能遗留 zombie 进程): %s", e)
+            if instance._playwright is not None:
+                try:
+                    await instance._playwright.stop()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Playwright playwright 关闭失败: %s", e)
+        finally:
+            # P2-19: 强制 GC 触发所有 Playwright 内部对象 finalizer,
+            # 确保所有 Chromium 子进程被回收 (避免 ~200-300 MB 内存泄漏)
+            gc.collect()
 
 
 class PlaywrightScraper(BaseScraper):
@@ -375,8 +402,8 @@ class PlaywrightScraper(BaseScraper):
                     # v2: BrowserContext 隔离, context.close 一次性释放 page+storage
                     context = await browser.new_context()
                     page = await context.new_page()
-                    # domcontentloaded 替代 networkidle
-                    await page.goto(self.url, wait_until="domcontentloaded", timeout=15000)
+                    # domcontentloaded 替代 networkidle (E2R: 15s→30s, 避免跨境网站超时)
+                    await page.goto(self.url, wait_until="domcontentloaded", timeout=30000)
 
                     # 短等待 + 智能检测
                     try:

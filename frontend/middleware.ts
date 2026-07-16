@@ -27,7 +27,7 @@ export function middleware(request: NextRequest) {
   }
 
   // SELF_HOST=false: 走登录守卫
-  // 从 httpOnly cookie 读取 auth-token (由 /api/auth/login 设置)
+  // 从 httpOnly cookie 读取 auth-token (由 /api/auth/cookie 设置)
   const token = request.cookies.get("auth-token")?.value;
   const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/register");
 

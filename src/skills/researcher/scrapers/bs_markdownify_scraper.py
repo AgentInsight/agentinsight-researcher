@@ -48,6 +48,11 @@ class BSMarkdownifyScraper(BaseScraper):
             from bs4 import BeautifulSoup
             from markdownify import markdownify as md
 
+            from src.skills.researcher.scrapers.utils import (
+                get_relevant_images_from_soup,
+                temp_recursion_limit,
+            )
+
             # 复用 BeautifulSoupScraper 的 HTTP 抓取 + 清理逻辑
             response = await self.session.get(self.url, timeout=15.0)
             response.raise_for_status()
@@ -63,37 +68,45 @@ class BSMarkdownifyScraper(BaseScraper):
                 raw = raw[:max_html_size]
             html = raw.decode(response.encoding or "utf-8", errors="replace")
 
-            # str (Unicode) 输入时不应传 from_encoding, 否则 bs4 发出 UserWarning
-            # 仅当 html 为 bytes 时 from_encoding 才有意义 (本路径 html 已是 str)
-            soup = BeautifulSoup(html, "lxml")
+            # E2R-11: markdownify 递归遍历 BeautifulSoup DOM 树转换 HTML→Markdown,
+            # 深层嵌套 HTML 会触发 Python 默认 recursionlimit=1000 的 RecursionError.
+            # 用 temp_recursion_limit 临时提升至 2000, try/finally 自动恢复原值,
+            # 不污染进程级全局状态. 包裹整个解析+转换流程, 兼顾 bs4 解析与 md 调用.
+            with temp_recursion_limit(2000):
+                # str (Unicode) 输入时不应传 from_encoding, 否则 bs4 发出 UserWarning
+                # 仅当 html 为 bytes 时 from_encoding 才有意义 (本路径 html 已是 str)
+                soup = BeautifulSoup(html, "lxml")
 
-            # 提取标题
-            title = ""
-            if soup.title:
-                title = soup.title.string or ""
+                # 提取标题
+                title = ""
+                if soup.title:
+                    title = soup.title.string or ""
 
-            # 清理脚本/样式/导航/页脚/页眉 (参考 BeautifulSoupScraper)
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.decompose()
+                # 清理脚本/样式/导航/页脚/页眉 (参考 BeautifulSoupScraper)
+                for tag in soup(["script", "style", "nav", "footer", "header"]):
+                    tag.decompose()
 
-            # 提取正文 HTML (优先 article/main/body)
-            content_html = ""
-            for selector in ["article", "main", "body"]:
-                element = soup.find(selector)
-                if element:
-                    content_html = str(element)
-                    break
+                # 提取正文 HTML (优先 article/main/body)
+                content_html = ""
+                for selector in ["article", "main", "body"]:
+                    element = soup.find(selector)
+                    if element:
+                        content_html = str(element)
+                        break
 
-            if not content_html:
-                content_html = str(soup)
+                if not content_html:
+                    content_html = str(soup)
 
-            # HTML → Markdown 转换 (markdownify 核心能力)
-            markdown = md(
-                content_html,
-                heading_style="ATX",  # # 风格标题
-                bullets="-",  # 列表符号
-                strip=["img"],  # 暂不保留图片 (避免 Markdown 图片噪声)
-            )
+                # HTML → Markdown 转换 (markdownify 核心能力, 递归遍历 DOM)
+                markdown = md(
+                    content_html,
+                    heading_style="ATX",  # # 风格标题
+                    bullets="-",  # 列表符号
+                    strip=["img"],  # 暂不保留图片 (避免 Markdown 图片噪声)
+                )
+
+                # 提取图片 (v3: 按尺寸/class 评分排序, 取 Top-4)
+                image_urls = get_relevant_images_from_soup(soup, self.url, top_k=4)
 
             # 清理多余空行 (markdownify 可能产生连续空行)
             lines = [line.rstrip() for line in markdown.split("\n")]
@@ -101,13 +114,6 @@ class BSMarkdownifyScraper(BaseScraper):
             # 合并连续 3+ 空行为 2 空行
             while "\n\n\n" in markdown:
                 markdown = markdown.replace("\n\n\n", "\n\n")
-
-            # 提取图片 (v3: 按尺寸/class 评分排序, 取 Top-4)
-            from src.skills.researcher.scrapers.utils import (
-                get_relevant_images_from_soup,
-            )
-
-            image_urls = get_relevant_images_from_soup(soup, self.url, top_k=4)
 
             # 显式释放大对象 (省 500MB-1GB):
             # - html: 原始 HTML 字符串 (上限 5MB)
