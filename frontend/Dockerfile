@@ -14,7 +14,8 @@ RUN npm ci
 COPY . .
 
 # 无 NEXT_PUBLIC_ 构建参数 (所有变量运行时注入, 不内联)
-RUN npm run build
+# 确保 .bin 执行权限 (某些环境下 npm ci 后 .bin 权限丢失)
+RUN chmod -R +x node_modules/.bin && npm run build
 
 # ---- runtime 阶段 ----
 FROM node:20-alpine AS runtime
