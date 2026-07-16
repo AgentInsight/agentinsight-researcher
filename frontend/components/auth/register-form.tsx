@@ -243,7 +243,9 @@ export function RegisterForm() {
       if (loginData.errorcode === 0 && loginData.data?.[0]) {
         const u = loginData.data[0];
         setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
-        router.push("/agent/researcher/chat");
+        // 使用硬跳转确保 cookie 生效后再触发 middleware 守卫
+        window.location.href = "/agent/researcher/chat";
+        return;
       } else {
         // 注册成功但自动登录失败，跳转到登录页
         setError(loginData.message || "注册成功，但自动登录失败，请手动登录");

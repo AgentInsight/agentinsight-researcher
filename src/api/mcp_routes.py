@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.api.middleware import get_request_agent_id, get_request_user_id
 from src.memory.db_initializer import get_pool
+from src.skills.researcher.mcp_coordinator import get_mcp_coordinator
 
 logger = logging.getLogger(__name__)
 
@@ -234,21 +235,13 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
         }
 
     # 测试连接 + 列工具 (30s 超时)
+    # A3: 用 try/finally 统一清理 client, 确保所有路径 (成功/超时/异常) 都关闭 client
+    client = None
     try:
         client = MultiServerMCPClient(server_configs)
         try:
             tools = await asyncio.wait_for(client.get_tools(), timeout=_MCP_TEST_TIMEOUT)
         except TimeoutError:
-            # 超时后清理子进程
-            try:
-                # MultiServerMCPClient 可能有 close/aclose 方法
-                close_fn = getattr(client, "aclose", None) or getattr(client, "close", None)
-                if close_fn:
-                    result = close_fn()
-                    if hasattr(result, "__await__"):
-                        await result
-            except Exception as cleanup_err:  # noqa: BLE001
-                logger.debug("MCP client cleanup after timeout failed: %s", cleanup_err)
             return {
                 "success": False,
                 "message": f"测试超时 ({_MCP_TEST_TIMEOUT}s), MCP 服务未响应",
@@ -310,6 +303,17 @@ async def _test_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
             "tools": [],
             "latency_ms": int((time.time() - start) * 1000),
         }
+    finally:
+        # A3: 所有路径统一清理 client (释放 stdio 子进程, 避免资源泄漏)
+        if client is not None:
+            try:
+                close_fn = getattr(client, "aclose", None) or getattr(client, "close", None)
+                if close_fn:
+                    result = close_fn()
+                    if hasattr(result, "__await__"):
+                        await result
+            except Exception as cleanup_err:  # noqa: BLE001
+                logger.debug("MCP client cleanup failed: %s", cleanup_err)
 
 
 # ============================================================================
@@ -451,6 +455,8 @@ async def clone_system_mcp_config(config_id: int) -> dict[str, Any]:
             src["env_vars"],
             src["description"],
         )
+    # A2: 克隆后清空 MCPCoordinator 缓存, 确保下次 conduct_research 重新加载
+    await get_mcp_coordinator().clear_cache()
     return _mcp_row_to_dict(row)
 
 
@@ -526,6 +532,8 @@ async def create_mcp_config(config: MCPConfig) -> dict[str, Any]:
             saved["enabled"] = False
 
     saved["test_result"] = test_result
+    # A2: 创建后清空 MCPCoordinator 缓存, 确保下次 conduct_research 重新加载
+    await get_mcp_coordinator().clear_cache()
     return saved
 
 
@@ -590,6 +598,8 @@ async def update_mcp_config(
                 saved["test_result"] = test_result
                 # 返回 200 但 enabled=FALSE + test_result (前端据 test_result 展示失败原因)
                 # 不用 400, 因为 PUT 已成功更新其他字段, 只是 enabled 拒绝切换
+                # A2: 更新后清空 MCPCoordinator 缓存
+                await get_mcp_coordinator().clear_cache()
                 return saved
 
         # 3. 正常 UPDATE (enabled=FALSE 或 enabled 不变 或 enabled=TRUE 且测试通过)
@@ -610,6 +620,8 @@ async def update_mcp_config(
             config.enabled,
             config.description,
         )
+    # A2: 更新后清空 MCPCoordinator 缓存, 确保下次 conduct_research 重新加载
+    await get_mcp_coordinator().clear_cache()
     return _mcp_row_to_dict(row)
 
 
@@ -629,4 +641,6 @@ async def delete_mcp_config(config_id: int) -> dict[str, Any]:
         )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="MCP 配置不存在或为系统配置 (不可删除)")
+    # A2: 删除后清空 MCPCoordinator 缓存, 确保下次 conduct_research 重新加载
+    await get_mcp_coordinator().clear_cache()
     return {"deleted": True}

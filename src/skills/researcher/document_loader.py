@@ -221,8 +221,11 @@ class LocalDocumentLoader(DocumentLoader):
         except ImportError:
             logger.warning("pypdf 未安装, 无法解析 PDF: %s", path)
             return ""
-        reader = PdfReader(path)
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+        # PdfReader 接受文件对象, 用 with 确保文件句柄在异常路径也正确关闭
+        # (pypdf 惰性读取页面, extract_text 期间文件必须保持打开)
+        with open(path, "rb") as f:
+            reader = PdfReader(f)
+            return "\n\n".join(page.extract_text() or "" for page in reader.pages)
 
     @staticmethod
     def _extract_docx(path: str) -> str:
@@ -232,8 +235,10 @@ class LocalDocumentLoader(DocumentLoader):
         except ImportError:
             logger.warning("python-docx 未安装, 无法解析 DOCX: %s", path)
             return ""
-        doc = DocxDocument(path)
-        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        # DocxDocument 接受文件对象, 用 with 确保文件句柄在异常路径也正确关闭
+        with open(path, "rb") as f:
+            doc = DocxDocument(f)
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
     @staticmethod
     def _extract_xlsx(path: str) -> str:
@@ -261,13 +266,15 @@ class LocalDocumentLoader(DocumentLoader):
         except ImportError:
             logger.warning("python-pptx 未安装, 无法解析 PPTX: %s", path)
             return ""
-        prs = Presentation(path)
-        parts: list[str] = []
-        for slide in prs.slides:
-            for shape in slide.shapes:
-                if hasattr(shape, "text") and shape.text:
-                    parts.append(shape.text)
-        return "\n".join(parts)
+        # Presentation 接受文件对象, 用 with 确保文件句柄在异常路径也正确关闭
+        with open(path, "rb") as f:
+            prs = Presentation(f)
+            parts: list[str] = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text:
+                        parts.append(shape.text)
+            return "\n".join(parts)
 
     @staticmethod
     def _extract_html(path: str) -> str:

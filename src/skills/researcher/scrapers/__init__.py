@@ -100,6 +100,9 @@ def get_global_rate_limiter() -> GlobalRateLimiter:
 
 # ========== 域名级限流器 (单例) ==========
 
+# 域名信号量空闲淘汰阈值 (30 分钟无获取请求则淘汰, 防止 _semaphores 字典无限增长)
+_DOMAIN_IDLE_TIMEOUT_SECONDS: float = 1800.0
+
 
 class DomainRateLimiter:
     """域名级限流器 (单例).
@@ -111,6 +114,12 @@ class DomainRateLimiter:
     - GlobalRateLimiter: 全局速率 (跨所有域名, 控总 QPS)
     - DomainRateLimiter: 域名级串行 (同域名 1 并发, 避免被封)
 
+    内存保护:
+    - _semaphores 存 (semaphore, last_access_time) 二元组, 记录最后获取时间.
+    - 惰性清理: 超过 _DOMAIN_IDLE_TIMEOUT_SECONDS (30 分钟) 未获取请求的域名
+      在 _get_semaphore 创建新条目前被淘汰, 防止字典无限增长.
+    - 被锁定 (sem.locked()) 的域名不淘汰, 防止删除正在持有的协程上下文.
+
     使用方式:
         limiter = get_domain_rate_limiter()
         async with limiter.throttle(url):
@@ -119,7 +128,7 @@ class DomainRateLimiter:
     """
 
     _instance: DomainRateLimiter | None = None
-    _semaphores: dict[str, asyncio.Semaphore]
+    _semaphores: dict[str, tuple[asyncio.Semaphore, float]]
     _lock: asyncio.Lock
 
     def __new__(cls) -> DomainRateLimiter:
@@ -139,17 +148,44 @@ class DomainRateLimiter:
             domain = ".".join(parts[-2:])
         return domain
 
+    def _cleanup_idle(self) -> None:
+        """惰性清理空闲域名信号量 (超过阈值未访问且未被锁定).
+
+        在 _get_semaphore 创建新条目前调用, 避免后台任务.
+        asyncio 单线程模型, 字典遍历+删除无需额外锁.
+        """
+        now = time.monotonic()
+        idle_domains = [
+            domain
+            for domain, (sem, last_access) in self._semaphores.items()
+            if now - last_access > _DOMAIN_IDLE_TIMEOUT_SECONDS and not sem.locked()
+        ]
+        for domain in idle_domains:
+            del self._semaphores[domain]
+
     async def _get_semaphore(self, domain: str) -> asyncio.Semaphore:
-        """获取域名 Semaphore (惰性创建, 加锁防并发创建)."""
-        sem = self._semaphores.get(domain)
-        if sem is not None:
+        """获取域名 Semaphore (惰性创建 + 空闲清理).
+
+        命中时更新最后访问时间; 未命中时加锁双重检查并触发惰性清理.
+        """
+        now = time.monotonic()
+        entry = self._semaphores.get(domain)
+        if entry is not None:
+            sem, _ = entry
+            # 更新最后访问时间 (tuple 不可变, 重新赋值)
+            self._semaphores[domain] = (sem, now)
             return sem
         async with self._lock:
             # 双重检查, 防并发创建
-            sem = self._semaphores.get(domain)
-            if sem is None:
-                sem = asyncio.Semaphore(1)
-                self._semaphores[domain] = sem
+            entry = self._semaphores.get(domain)
+            if entry is not None:
+                sem, _ = entry
+                self._semaphores[domain] = (sem, now)
+                return sem
+            # 惰性清理: 创建新条目前淘汰空闲域名
+            self._cleanup_idle()
+            sem = asyncio.Semaphore(1)
+            self._semaphores[domain] = (sem, now)
             return sem
 
     @asynccontextmanager
@@ -551,7 +587,19 @@ async def scrape_urls(
                 logger.warning("抓取失败 %s: %s", url, e)
                 return {"url": url, "content": None, "title": "", "image_urls": []}
 
-    results = await asyncio.gather(*[_scrape_one(u) for u in unique_urls])
+    # P1-17: 用 as_completed 增量处理, 失败结果立即丢弃不驻留
+    # (原 gather 全量收集所有结果再过滤, 大批量抓取时峰值内存高)
+    # 通过 _scrape_with_idx 包装返回 (idx, result) 保序, 与原 gather 输出顺序一致.
+    async def _scrape_with_idx(idx: int, url: str) -> tuple[int, dict[str, Any]]:
+        return idx, await _scrape_one(url)
 
-    # 过滤失败结果
-    return [r for r in results if r.get("content")]
+    results: list[dict[str, Any] | None] = [None] * len(unique_urls)
+    aws = [_scrape_with_idx(i, u) for i, u in enumerate(unique_urls)]
+    for completed in asyncio.as_completed(aws):
+        idx, result = await completed
+        # 失败结果 (content 为空/None) 立即丢弃, 不驻留到返回列表
+        if result.get("content"):
+            results[idx] = result
+
+    # 过滤 None (失败项), 返回成功结果列表 (保持输入 URL 顺序)
+    return [r for r in results if r is not None]

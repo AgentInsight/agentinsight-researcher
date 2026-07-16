@@ -49,16 +49,17 @@ class TrafilaturaScraper(BaseScraper):
 
             downloaded = await self.session.get(self.url, timeout=15.0)
             downloaded.raise_for_status()
-            html = downloaded.text
-
+            # P1-16: 用 bytes 截断避免全量 str 解码 (节省内存峰值)
             max_html_size = 5 * 1024 * 1024
-            if len(html) > max_html_size:
+            raw = downloaded.content  # bytes, 不触发解码
+            if len(raw) > max_html_size:
                 logger.warning(
                     "HTML 内容过大 (%.2fMB), 截断至 5MB: %s",
-                    len(html) / (1024 * 1024),
+                    len(raw) / (1024 * 1024),
                     self.url,
                 )
-                html = html[:max_html_size]
+                raw = raw[:max_html_size]
+            html = raw.decode(downloaded.encoding or "utf-8", errors="replace")
 
             result = trafilatura.extract(
                 html,

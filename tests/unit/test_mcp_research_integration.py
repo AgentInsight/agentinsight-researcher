@@ -462,15 +462,20 @@ async def test_mcp_cache_lru_eviction_when_exceeds_max_size(
     assert "key0" not in _MCP_CACHE
 
 
-def test_clear_cache_clears_all_three_layers(coordinator: MCPCoordinator) -> None:
-    """clear_cache 清空三层缓存: 实例级 + client_cache + 模块级 TTL."""
+@pytest.mark.asyncio
+async def test_clear_cache_clears_all_three_layers(coordinator: MCPCoordinator) -> None:
+    """clear_cache 清空三层缓存: 实例级 + client_cache + 模块级 TTL.
+
+    A4/A5 修复: clear_cache 改为 async, 内部会 await _safe_close_client
+    释放每个缓存 client 的 stdio 子进程资源.
+    """
     # 准备数据
     coordinator._cache = ["cached"]
     coordinator._cache_query = "q"
     coordinator._client_cache["k"] = MagicMock()
     _MCP_CACHE["ttl_key"] = ("val", time.time() + 100)
 
-    coordinator.clear_cache()
+    await coordinator.clear_cache()
 
     assert coordinator._cache is None
     assert coordinator._cache_query is None
@@ -478,10 +483,11 @@ def test_clear_cache_clears_all_three_layers(coordinator: MCPCoordinator) -> Non
     assert len(_MCP_CACHE) == 0
 
 
-def test_clear_cache_idempotent_when_empty(coordinator: MCPCoordinator) -> None:
+@pytest.mark.asyncio
+async def test_clear_cache_idempotent_when_empty(coordinator: MCPCoordinator) -> None:
     """clear_cache 在缓存已空时仍安全 (幂等)."""
-    coordinator.clear_cache()
-    coordinator.clear_cache()  # 二次调用不抛异常
+    await coordinator.clear_cache()
+    await coordinator.clear_cache()  # 二次调用不抛异常
 
     assert coordinator._cache is None
     assert len(_MCP_CACHE) == 0
@@ -683,10 +689,15 @@ def test_get_mcp_coordinator_returns_singleton() -> None:
 # ========== MultiServerMCPClient 缓存 ==========
 
 
-def test_get_or_create_client_caches_by_config_hash(
+@pytest.mark.asyncio
+async def test_get_or_create_client_caches_by_config_hash(
     coordinator: MCPCoordinator,
 ) -> None:
-    """相同 server_configs 复用同一 MultiServerMCPClient (按 sha256 缓存)."""
+    """相同 server_configs 复用同一 MultiServerMCPClient (按 sha256 缓存).
+
+    A4 修复: _get_or_create_client 改为 async + asyncio.Lock + 双重检查,
+    相同 config 应复用同一 client 实例 (LRU move_to_end).
+    """
     configs = {"server1": {"url": "http://x", "transport": "sse"}}
     fake_client_cls = MagicMock()
 
@@ -703,17 +714,22 @@ def test_get_or_create_client_caches_by_config_hash(
             "langchain_mcp_adapters.client": fake_client_mod,
         },
     ):
-        client1 = coordinator._get_or_create_client(configs)
-        client2 = coordinator._get_or_create_client(configs)
+        client1 = await coordinator._get_or_create_client(configs)
+        client2 = await coordinator._get_or_create_client(configs)
 
     assert client1 is client2
     fake_client_cls.assert_called_once_with(configs)
 
 
-def test_get_or_create_client_different_configs_different_instance(
+@pytest.mark.asyncio
+async def test_get_or_create_client_different_configs_different_instance(
     coordinator: MCPCoordinator,
 ) -> None:
-    """不同 server_configs → 不同 client 实例."""
+    """不同 server_configs → 不同 client 实例.
+
+    A4 修复: _get_or_create_client 改为 async, 不同 config 生成不同 cache key,
+    返回不同 client 实例.
+    """
     cfg1 = {"s1": {"url": "http://1", "transport": "sse"}}
     cfg2 = {"s2": {"url": "http://2", "transport": "sse"}}
     fake_client_cls = MagicMock(side_effect=lambda x: MagicMock())
@@ -731,8 +747,8 @@ def test_get_or_create_client_different_configs_different_instance(
             "langchain_mcp_adapters.client": fake_client_mod,
         },
     ):
-        c1 = coordinator._get_or_create_client(cfg1)
-        c2 = coordinator._get_or_create_client(cfg2)
+        c1 = await coordinator._get_or_create_client(cfg1)
+        c2 = await coordinator._get_or_create_client(cfg2)
 
     assert c1 is not c2
     assert fake_client_cls.call_count == 2

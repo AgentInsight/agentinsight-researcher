@@ -29,7 +29,34 @@ logger = logging.getLogger(__name__)
 # 缓存 namespace -> has_data 的布尔结果, TTL 10 分钟
 # 避免每次请求都调 Qdrant count (即使 exact=False 也有网络 RTT)
 _NAMESPACE_CACHE_TTL: int = 600  # 10 分钟 (秒)
+# P0-6: 缓存上限, 防止用户量增长时无限增长
+# 单条记录 < 100 字节, 4096 条 < 400KB, 完全可接受
+_NAMESPACE_CACHE_MAX_SIZE: int = 4096
 _namespace_cache: dict[str, tuple[bool, float]] = {}  # key=namespace, value=(has_data, timestamp)
+
+
+def _cleanup_namespace_cache() -> None:
+    """P0-6: 清理过期的 namespace 缓存项.
+
+    懒清理策略: 仅在缓存项数超过 _NAMESPACE_CACHE_MAX_SIZE 时触发.
+    扫描所有项, 移除超过 TTL 的过期项.
+    单次扫描 O(n), 但触发频率低 (仅超阈值时), 对性能影响可忽略.
+    """
+    if len(_namespace_cache) < _NAMESPACE_CACHE_MAX_SIZE:
+        return
+    now = time.time()
+    # 一次性扫描, 移除所有过期项
+    expired_keys = [
+        ns for ns, (_, ts) in _namespace_cache.items()
+        if now - ts >= _NAMESPACE_CACHE_TTL
+    ]
+    for key in expired_keys:
+        _namespace_cache.pop(key, None)
+    logger.debug(
+        "namespace 缓存清理: 移除 %d 条过期项, 剩余 %d 条",
+        len(expired_keys),
+        len(_namespace_cache),
+    )
 
 
 class QdrantManager:
@@ -239,6 +266,8 @@ class QdrantManager:
         如果缓存命中且结果为 True (有数据), 直接返回, 不调 Qdrant.
         缓存过期或未命中时才调 Qdrant count.
         """
+        # P0-6: 懒清理, 防止缓存无限增长 (仅超阈值时触发)
+        _cleanup_namespace_cache()
         # 检查内存缓存
         cached = _namespace_cache.get(namespace)
         if cached is not None:

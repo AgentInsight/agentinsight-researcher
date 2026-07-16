@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse
 
@@ -76,33 +77,66 @@ def _get_domain(url: str) -> str:
     return domain
 
 
+# 域名信号量空闲淘汰阈值 (30 分钟无获取请求则淘汰, 防止 domain_semaphores 字典无限增长)
+_DOMAIN_IDLE_TIMEOUT_SECONDS: float = 1800.0
+
+
 class _PooledBrowser:
     """池化浏览器包装.
 
     封装 Playwright browser 实例 + 负载计数 + 域名级 Semaphore.
     - processing_count: 当前并发处理数, 用于负载均衡 (min 选择)
     - domain_semaphores: 每域名一个 Semaphore(1), 同域名串行化
+
+    内存保护:
+    - domain_semaphores 存 (semaphore, last_access_time) 二元组, 记录最后获取时间.
+    - 惰性清理: 超过 _DOMAIN_IDLE_TIMEOUT_SECONDS (30 分钟) 未获取请求的域名
+      在 acquire_domain 创建新条目前被淘汰, 防止字典无限增长.
+    - 被锁定 (sem.locked()) 的域名不淘汰, 防止删除正在持有的协程上下文.
     """
 
     def __init__(self, browser: Any, playwright: Any) -> None:
         self.browser = browser
         self.playwright = playwright
         self.processing_count: int = 0
-        self.domain_semaphores: dict[str, asyncio.Semaphore] = {}
+        self.domain_semaphores: dict[str, tuple[asyncio.Semaphore, float]] = {}
         self.stopping: bool = False
+
+    def _cleanup_idle_domains(self) -> None:
+        """惰性清理空闲域名信号量 (超过阈值未访问且未被锁定).
+
+        在 acquire_domain 创建新条目前调用, 避免后台任务.
+        asyncio 单线程模型, 字典遍历+删除无需额外锁.
+        """
+        now = time.monotonic()
+        idle_domains = [
+            domain
+            for domain, (sem, last_access) in self.domain_semaphores.items()
+            if now - last_access > _DOMAIN_IDLE_TIMEOUT_SECONDS and not sem.locked()
+        ]
+        for domain in idle_domains:
+            del self.domain_semaphores[domain]
 
     async def acquire_domain(self, url: str) -> asyncio.Semaphore | None:
         """获取域名级 Semaphore (同域名串行化, 加锁时随机延迟 0.6-1.2s).
 
         返回 Semaphore 供调用方 async with 使用; None 表示无 URL (不限流).
+        命中时更新最后访问时间; 未命中时创建并触发惰性清理.
         """
         if not url:
             return None
         domain = _get_domain(url)
-        sem = self.domain_semaphores.get(domain)
-        if sem is None:
-            sem = asyncio.Semaphore(1)
-            self.domain_semaphores[domain] = sem
+        now = time.monotonic()
+        entry = self.domain_semaphores.get(domain)
+        if entry is not None:
+            sem, _ = entry
+            # 更新最后访问时间 (tuple 不可变, 重新赋值)
+            self.domain_semaphores[domain] = (sem, now)
+            return sem
+        # 惰性清理: 创建新条目前淘汰空闲域名
+        self._cleanup_idle_domains()
+        sem = asyncio.Semaphore(1)
+        self.domain_semaphores[domain] = (sem, now)
         return sem
 
     async def stop(self) -> None:

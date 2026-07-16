@@ -1,15 +1,16 @@
 // components/auth/captcha.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /**
- * 图片验证码组件 (复制自 traceability-platform)
- * - 接受 mobile prop, 当手机号变化时自动刷新验证码
+ * 图片验证码组件
+ * - 仅在页面加载时请求一次验证码
+ * - 用户点击验证码图片时刷新
+ * - 其他时候不请求 (手机号变化不触发刷新)
  * - 从 /api/auth/captcha?mobile={mobile} 获取验证码图片 (base64)
  * - 验证码 ID 通过 onCaptchaId 回调传递给父组件
- * - 点击图片可手动刷新
  * - 半透明样式适配光晕背景
  */
 export function Captcha({
@@ -20,9 +21,8 @@ export function Captcha({
   mobile?: string;
 }) {
   const [captchaImg, setCaptchaImg] = useState("");
-  const lastMobileRef = useRef<string | null>(null);
 
-  const refreshCaptcha = async (currentMobile: string) => {
+  const refreshCaptcha = useCallback(async (currentMobile: string) => {
     try {
       const url = currentMobile
         ? `/api/auth/captcha?mobile=${encodeURIComponent(currentMobile)}`
@@ -47,21 +47,13 @@ export function Captcha({
       onCaptchaId("");
       setCaptchaImg("");
     }
-  };
+  }, [onCaptchaId]);
 
-  // 首次加载时刷新
+  // 仅在页面加载时请求一次 (不传 mobile, 避免依赖 mobile 变化)
   useEffect(() => {
-    refreshCaptcha(mobile || "");
+    refreshCaptcha("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // mobile 变化时自动刷新
-  useEffect(() => {
-    if (mobile === lastMobileRef.current) return;
-    lastMobileRef.current = mobile || "";
-    refreshCaptcha(mobile || "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mobile]);
 
   return (
     <Tooltip content="点击刷新验证码">

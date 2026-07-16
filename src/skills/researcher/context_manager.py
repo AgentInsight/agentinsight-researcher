@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from collections import OrderedDict
 from typing import Any
 
 import numpy as np
@@ -362,25 +363,12 @@ class ContextManager:
                 query_emb = all_embs[0]
                 doc_embs = all_embs[1:]
 
-                # 缓存 rerank 结果的 embedding, 供后续 _post_filter_compress 复用
-                # 拆分为 chunk 级缓存, 与 compute_embedding_batch 查询 key 对齐 (覆盖多 chunk 场景)
-                from src.rag.embeddings_filter import DEFAULT_SEPARATORS, recursive_split
-
-                for doc_text, doc_emb in zip(documents, doc_embs, strict=False):
-                    # 缓存 doc 级 (单 chunk 场景命中)
-                    doc_cache_key = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
-                    self._written_compressor._chunk_cache[doc_cache_key] = doc_emb
-                    # 拆分为 chunk 级, 与 compute_embedding_batch 查询 key 对齐 (多 chunk 场景命中)
-                    doc_chunks = recursive_split(
-                        doc_text,
-                        separators=DEFAULT_SEPARATORS,
-                        chunk_size=self.settings.embeddings_filter_chunk_size,
-                        chunk_overlap=self.settings.embeddings_filter_chunk_overlap,
-                    ) or [doc_text]
-                    for chunk_text in doc_chunks:
-                        chunk_cache_key = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                        self._written_compressor._chunk_cache[chunk_cache_key] = doc_emb
-
+                # 注意: 不在此处预填充 WrittenContentCompressor._chunk_cache.
+                # 之前的实现把 doc_emb (文档级 embedding) 错误地缓存为每个 chunk 的 embedding,
+                # 导致后续 compute_embedding 命中缓存时返回错误的 embedding (doc_emb ≠ chunk_emb),
+                # 使 check_and_update_partial 误判多个子主题为"高度相似"而整篇丢弃,
+                # 最终报告目录只剩 1 个子主题.
+                # compute_embedding 已有自己的 chunk 级缓存 (计算后正确缓存), 无需此处预填充.
                 similarities: list[tuple[float, str]] = []
                 for doc, emb in zip(documents, doc_embs, strict=False):
                     sim = self._cosine_similarity(query_emb, emb)
@@ -712,8 +700,14 @@ class WrittenContentCompressor:
     _written_embeddings: list[list[float]]
     _written_chunks: list[str]
     # 单条 chunk embedding 缓存 (key=chunk sha256), 避免同一 chunk
-    # 在不同 content 中重复嵌入; reset() 时一并清空.
-    _chunk_cache: dict[str, list[float]]
+    # 在不同 content 中重复嵌入; reset() 时一并清空. 使用 OrderedDict 实现
+    # LRU 淘汰, 防止多会话并发下无限增长导致内存泄漏.
+    _chunk_cache: OrderedDict[str, list[float]]
+
+    # LRU 上限: 单会话 deep_research L9-L10 最大 ~1050 项, 5 并发会话共享场景
+    # 约 5250 项. 提升至 8192 覆盖极端并发场景, 内存 ≈17MB (8192 × 2.1KB),
+    # 相对容器峰值内存可忽略, 确保 LRU 不淘汰活跃 chunk.
+    CHUNK_CACHE_MAX_SIZE: int = 8192
 
     def __init__(
         self,
@@ -730,7 +724,23 @@ class WrittenContentCompressor:
         )
         self._written_embeddings = []
         self._written_chunks = []
-        self._chunk_cache = {}
+        self._chunk_cache = OrderedDict()
+
+    def _cache_get(self, key: str) -> list[float] | None:
+        """LRU 读取: 命中时 move_to_end 标记为最近使用."""
+        value = self._chunk_cache.get(key)
+        if value is not None:
+            self._chunk_cache.move_to_end(key)
+        return value
+
+    def _cache_set(self, key: str, value: list[float]) -> None:
+        """LRU 写入: 超过上限时淘汰最久未使用项, 写入后标记为最近使用."""
+        if key in self._chunk_cache:
+            self._chunk_cache.move_to_end(key)
+        self._chunk_cache[key] = value
+        self._chunk_cache.move_to_end(key)
+        while len(self._chunk_cache) > self.CHUNK_CACHE_MAX_SIZE:
+            self._chunk_cache.popitem(last=False)
 
     async def compute_embedding(
         self,
@@ -779,7 +789,7 @@ class WrittenContentCompressor:
         miss_chunks: list[str] = []
         for i, chunk in enumerate(chunks):
             cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-            cached = self._chunk_cache.get(cache_key)
+            cached = self._cache_get(cache_key)
             if cached is not None:
                 content_embs[i] = cached
             else:
@@ -807,7 +817,7 @@ class WrittenContentCompressor:
                 for idx, chunk, emb in zip(miss_indices, miss_chunks, miss_embs, strict=True):
                     content_embs[idx] = emb
                     cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                    self._chunk_cache[cache_key] = emb
+                    self._cache_set(cache_key, emb)
                 # 估算 token 数 (粗略: 字符数 / 3, 与 FastEmbedClient 内部一致)
                 token_count = sum(len(t) for t in miss_chunks) // 3
                 span.update(
@@ -991,7 +1001,7 @@ class WrittenContentCompressor:
             content_embs: list[list[float]] = [[] for _ in chunks]
             for i, chunk in enumerate(chunks):
                 cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                cached = self._chunk_cache.get(cache_key)
+                cached = self._cache_get(cache_key)
                 if cached is not None:
                     content_embs[i] = cached
                 else:
@@ -1020,7 +1030,7 @@ class WrittenContentCompressor:
                 ):
                     all_embs_list[content_idx][chunk_idx] = emb
                     cache_key = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                    self._chunk_cache[cache_key] = emb
+                    self._cache_set(cache_key, emb)
                 token_count = sum(len(t) for t in miss_chunks) // 3
                 span.update(
                     output={"vector_count": len(miss_embs)},

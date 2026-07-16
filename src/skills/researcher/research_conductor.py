@@ -34,6 +34,7 @@ from src.skills.researcher.context_manager import ContextManager
 from src.skills.researcher.mcp_coordinator import (
     MCPCoordinator,
     conduct_mcp_if_enabled,
+    get_mcp_coordinator,
 )
 from src.skills.researcher.prompts import PromptFamily, get_prompt_family
 from src.skills.researcher.scrapers import scrape_urls
@@ -89,13 +90,15 @@ class ResearchConductor:
         self._retriever = None
 
     def _get_mcp(self) -> MCPCoordinator:
-        """惰性初始化 MCPCoordinator.
+        """获取全局 MCPCoordinator 单例 (A1: 避免多实例导致缓存隔离失效).
 
-        复用 self._llm 单例, 避免重复构造 LLMClient 导致 step_costs 累计丢失.
+        A1 修复: 改用 get_mcp_coordinator() 全局单例, 不再自建实例.
+        原实现 self._mcp = MCPCoordinator(self.settings, self._llm) 导致:
+        - deep_research 和 research_conductor 各自构造实例
+        - _client_cache 相互独立, stdio 进程倍增
+        - clear_cache() 只清当前实例, 另一实例缓存仍残留
         """
-        if self._mcp is None:
-            self._mcp = MCPCoordinator(self.settings, self._llm)
-        return self._mcp
+        return get_mcp_coordinator()
 
     def _get_retriever(self) -> Any:
         """惰性初始化 HybridRetriever (用户需求: 私有数据 RAG 检索).

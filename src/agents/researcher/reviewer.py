@@ -19,8 +19,9 @@ Reviewer 职责:
   评分规则: 任何维度 score < 6 → revise; 全部 >= 6 → accept
 
 评分缓存.
-- 模块级 _REVIEW_CACHE 跨 Reviewer 实例共享, TTL 30 分钟.
-- 缓存键 md5(report_content + review_criteria), 报告变化则不命中.
+- 优先用 Redis (key 格式 reviewer:review_cache:{session_id}:{content_hash}), TTL 30 分钟.
+- Redis 不可用时降级到模块级 _REVIEW_CACHE 内存字典 (兜底, 同样 30 分钟 TTL).
+- 缓存键含报告内容 hash, 报告变化 (如 revise 后) 不会命中.
 - 缓存命中跳过 LLM 调用; miss 时正常评审后写入缓存.
 - 缓存读写异常时静默降级, 不影响评审主流程.
 """
@@ -28,11 +29,13 @@ Reviewer 职责:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from typing import Any
 
 from src.common.json_utils import safe_json_parse
+from src.common.redis_client import get_redis_client
 from src.config.settings import Settings, get_settings
 from src.graph.state import ResearcherState
 from src.llm.client import LLMClient, LLMTier, get_llm_client
@@ -52,9 +55,9 @@ _DIM_LABELS = {
     "completeness": "完整性",
 }
 
-# Reviewer 评分缓存 (模块级, 跨 Reviewer 实例共享).
-# 缓存键: md5(report_content + review_criteria); 缓存值: 评审结果 + 时间戳.
-# TTL: 30 分钟, 避免同一报告重复评审时浪费 LLM 调用.
+# Reviewer 评分缓存降级兜底 (模块级内存字典, 仅 Redis 不可用时启用).
+# 优先走 Redis (key: reviewer:review_cache:{session_id}:{content_hash}, TTL 1800s);
+# Redis 不可用时降级到此内存字典, 同样 30 分钟 TTL, 惰性删除.
 _REVIEW_CACHE: dict[str, dict[str, Any]] = {}
 _REVIEW_CACHE_TTL = 1800  # 秒 (30 分钟)
 
@@ -131,8 +134,8 @@ class Reviewer:
 
             # 评分缓存检查 — 同一报告重复评审时跳过 LLM 调用.
             # 缓存键含报告内容 hash, 报告变化 (如 revise 后) 不会命中.
-            cache_key = self._get_review_cache_key(state)
-            cached = self._get_cached_review(cache_key)
+            cache_key = self._get_review_cache_key(state, session_id)
+            cached = await self._get_cached_review(cache_key)
             if cached is not None:
                 logger.info(
                     "Reviewer 缓存命中, 跳过 LLM 评审 (key=%s, decision=%s)",
@@ -248,7 +251,7 @@ class Reviewer:
                 "review_scores": review_scores,
             }
             # 写入缓存, 供后续相同报告重复评审复用.
-            self._set_review_cache(cache_key, result_payload)
+            await self._set_review_cache(cache_key, result_payload)
             return result_payload
 
     @staticmethod
@@ -352,33 +355,36 @@ class Reviewer:
 
     # ===== 评分缓存 =====
 
-    def _get_review_cache_key(self, state: ResearcherState) -> str:
-        """生成评审缓存键.
+    def _get_review_cache_key(self, state: ResearcherState, session_id: str | None) -> str:
+        """生成评审缓存键 (Redis 与内存降级共用).
 
-        缓存键 = md5(report_content + review_criteria).
+        格式: reviewer:review_cache:{session_id}:{content_hash}
+        content_hash = sha256(report_content + review_criteria).
         review_criteria 由影响评审结果的输入组成: agent_role (persona) +
         query (问题) + contexts (检索上下文). 任一变化则缓存不命中,
         保证缓存正确性; 报告内容变化 (如 revise 后) 必然不命中.
 
         Args:
             state: 研究状态.
+            session_id: 会话 ID (隔离键, None 时用 "default").
 
         Returns:
-            64 字符 sha256 十六进制摘要字符串.
+            Redis/内存缓存键字符串.
         """
         report_md = state.get("report_md", "")
         role_persona = state.get("agent_role") or ""
         query = state.get("query", "")
         contexts_text = self._format_contexts(state.get("contexts", []))
         raw = f"{report_md}\x1f{role_persona}\x1f{query}\x1f{contexts_text}"
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        sid = session_id or "default"
+        return f"reviewer:review_cache:{sid}:{content_hash}"
 
-    @staticmethod
-    def _get_cached_review(key: str) -> dict[str, Any] | None:
-        """查询评审缓存.
+    async def _get_cached_review(self, key: str) -> dict[str, Any] | None:
+        """查询评审缓存 (Redis 优先, 降级内存字典).
 
-        命中且未过期时返回缓存结果; 未命中/过期/异常时返回 None (降级为正常评审).
-        过期条目惰性删除.
+        Redis 命中时直接返回; Redis 不可用/未命中时降级查询模块级内存字典
+        (命中且未过期返回, 过期惰性删除); 全部异常返回 None (降级为正常评审).
 
         Args:
             key: _get_review_cache_key 生成的缓存键.
@@ -386,6 +392,20 @@ class Reviewer:
         Returns:
             缓存的评审结果 dict, 或 None.
         """
+        # 1. 优先走 Redis
+        try:
+            client = await get_redis_client(self.settings)
+            if client is not None:
+                raw = await client.get(key)
+                if raw is not None:
+                    scores = json.loads(raw)
+                    # isinstance 校验: 收窄 Any → dict, 满足 --warn-return-any
+                    if isinstance(scores, dict):
+                        return scores
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Reviewer Redis 缓存读取失败, 降级内存 (key=%s): %s", key[:8], e)
+
+        # 2. 降级到内存字典
         try:
             entry = _REVIEW_CACHE.get(key)
         except Exception:  # noqa: BLE001
@@ -404,18 +424,32 @@ class Reviewer:
             return None
         return scores
 
-    @staticmethod
-    def _set_review_cache(key: str, scores: dict[str, Any]) -> None:
-        """写入评审缓存.
+    async def _set_review_cache(self, key: str, scores: dict[str, Any]) -> None:
+        """写入评审缓存 (Redis 优先, 降级内存字典).
 
-        记录写入时间戳用于 TTL 检查. 写入异常时静默降级 (不影响评审结果).
+        Redis 可用时写入并设置 TTL; 不可用时降级写入内存字典 (记录时间戳
+        供 TTL 检查). 写入异常时静默降级 (不影响评审结果).
 
         Args:
             key: _get_review_cache_key 生成的缓存键.
             scores: 评审结果 dict (review_decision / review_feedback / review_scores).
         """
+        # 1. 优先走 Redis
+        try:
+            client = await get_redis_client(self.settings)
+            if client is not None:
+                await client.set(
+                    key,
+                    json.dumps(scores, ensure_ascii=False),
+                    ex=_REVIEW_CACHE_TTL,
+                )
+                return
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Reviewer Redis 缓存写入失败, 降级内存 (key=%s): %s", key[:8], e)
+
+        # 2. 降级到内存字典
         try:
             _REVIEW_CACHE[key] = {"ts": time.time(), "scores": scores}
         except Exception:  # noqa: BLE001
             # 缓存写入异常时降级, 不影响评审主流程
-            logger.debug("Reviewer 缓存写入失败 (key=%s), 跳过缓存", key[:8])
+            logger.debug("Reviewer 内存缓存写入失败 (key=%s), 跳过缓存", key[:8])

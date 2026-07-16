@@ -189,6 +189,9 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     1. chat_messages 表 (SessionStore.delete_session 事务内清理)
     2. research_sessions 表 (SessionStore.delete_session 事务内清理)
     3. LangGraph Checkpointer (checkpoints 表, 按 thread_id 删除)
+    4. Redis 缓存 (no-op, 依赖 TTL 自然过期)
+    5. 会话级内存数据结构 (LLMClient._session_costs / token_budget._allocators /
+       QueryIntentClassifier._inflight_locks, 防止内存泄漏 P0-2/P0-3/P0-4)
 
     注: Redis 键不含 session_id 维度, 依赖 TTL 自然过期, 无需按 session 清理.
 
@@ -213,6 +216,9 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     # 4: Redis 缓存 — 当前 Redis 键不含 session_id 维度, 依赖 TTL 自然过期, 无需按 session 清理.
     #    保留 _cleanup_redis_cache 调用为 no-op, 仅为兼容测试 mock; 实际不执行任何删除.
     await _cleanup_redis_cache(agent_id, user_id, session_id)
+
+    # 5: 清理会话级内存数据结构 (per-session 字典/锁, 防止内存泄漏 P0-2/P0-3/P0-4)
+    await _cleanup_session_memory(session_id)
 
     logger.info(
         "会话已级联删除: session_id=%s, agent_id=%s, user_id=%s",
@@ -352,6 +358,35 @@ async def _cleanup_redis_cache(agent_id: str, user_id: str, session_id: str) -> 
         "Redis 清理跳过 (键不含 session_id 维度, 依赖 TTL 自然过期): session_id=%s",
         session_id,
     )
+
+
+async def _cleanup_session_memory(session_id: str) -> None:
+    """清理会话级内存数据结构 (per-session 字典/锁, 防止内存泄漏).
+
+    清理三处会话级内存 (修复 P0-2/P0-3/P0-4 内存泄漏):
+    1. LLMClient._session_costs — per-session 成本追踪字典 (cleanup_session_cost)
+    2. token_budget._allocators — per-session TokenBudgetAllocator 实例 (cleanup_token_budget_allocator)
+    3. QueryIntentClassifier._inflight_locks — singleflight 互斥锁字典 (cleanup_inflight_locks)
+
+    失败仅告警, 不阻断删除流程 (业务表+Checkpointer 已清理).
+    """
+    try:
+        from src.llm.client import get_llm_client
+        from src.llm.token_budget import cleanup_token_budget_allocator
+        from src.skills.researcher.query_classifier import get_query_intent_classifier
+
+        # P0-2: 清理 per-session 成本追踪字典
+        get_llm_client().cleanup_session_cost(session_id)
+        # P0-3: 清理 per-session TokenBudgetAllocator 字典
+        await cleanup_token_budget_allocator(session_id)
+        # P0-4: 清理 singleflight 互斥锁字典
+        get_query_intent_classifier().cleanup_inflight_locks(session_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "清理会话级内存失败 (不阻断, session=%s): %s",
+            session_id,
+            e,
+        )
 
 
 __all__ = ["router"]

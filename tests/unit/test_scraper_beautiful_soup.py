@@ -31,9 +31,12 @@ def _make_mock_response(html: str, encoding: str = "utf-8") -> AsyncMock:
 
     注: httpx.Response.raise_for_status() 是同步方法, 用 MagicMock (非 AsyncMock)
     避免 'coroutine never awaited' RuntimeWarning.
+    P1-16 修复后源码访问 response.content (bytes) 而非 response.text (str),
+    故 mock 需同时设置 content (bytes) 和 encoding 以支持 .decode() 调用.
     """
     resp = AsyncMock()
     resp.text = html
+    resp.content = html.encode(encoding)
     resp.encoding = encoding
     resp.raise_for_status = MagicMock()
     return resp

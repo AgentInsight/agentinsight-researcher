@@ -65,12 +65,14 @@ class TavilySearcher(BaseSearcher):
                 if query_domains:
                     payload["include_domains"] = query_domains
                 response = await self._client.post(self._api_url, json=payload)
-                if response.status_code == 429:
+                # E10: 432 状态码表示配额耗尽或 API Key 无效 (Tavily 自定义状态码)
+                # 与 429 同等处理, 触发 QuotaExceededError 降级
+                if response.status_code in (429, 432):
                     reset_at = self._calc_quota_reset(response)
                     raise QuotaExceededError(
                         engine="tavily",
                         reset_at=reset_at,
-                        message="Tavily 月度额度已满",
+                        message=f"Tavily 搜索失败 (HTTP {response.status_code}): 月度额度已满或 API Key 无效",
                     )
                 response.raise_for_status()
                 data = response.json()

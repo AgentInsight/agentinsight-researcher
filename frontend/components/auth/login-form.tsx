@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { Captcha } from "./captcha";
 import {
@@ -24,7 +23,6 @@ import {
 type LoginMode = "password" | "phone";
 
 export function LoginForm() {
-  const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
 
   // 表单状态
@@ -167,7 +165,11 @@ export function LoginForm() {
       if (data.errorcode === 0 && data.data?.[0]) {
         const u = data.data[0];
         setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
-        router.push("/agent/researcher/chat");
+        // 使用硬跳转 (而非 router.push 客户端导航)
+        // 确保 httpOnly cookie 已被浏览器应用, middleware 能读到 cookie 放行
+        // router.push 是客户端导航, 可能在 cookie 设置前就触发路由守卫导致重定向回 /login
+        window.location.href = "/agent/researcher/chat";
+        return;
       } else {
         setError(data.message || "登录失败, 请检查账号密码");
       }
@@ -211,7 +213,10 @@ export function LoginForm() {
       if (data.errorcode === 0 && data.data?.[0]) {
         const u = data.data[0];
         setUser({ id: u.id, name: u.name, mobile: u.mobile, token: u.token });
-        router.push("/agent/researcher/chat");
+        // 使用硬跳转 (而非 router.push 客户端导航)
+        // 确保 httpOnly cookie 已被浏览器应用, middleware 能读到 cookie 放行
+        window.location.href = "/agent/researcher/chat";
+        return;
       } else {
         setError(data.message || "登录失败");
       }

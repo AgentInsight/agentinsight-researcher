@@ -67,9 +67,14 @@ def _make_mock_response(
     encoding: str = "utf-8",
     status_code: int = 200,
 ) -> MagicMock:
-    """构造 mock httpx 响应 (BeautifulSoupScraper 使用)."""
+    """构造 mock httpx 响应 (BeautifulSoupScraper 使用).
+
+    P1-16 修复后源码访问 response.content (bytes) 而非 response.text (str),
+    故 mock 需同时设置 content (bytes) 以支持 .decode() 调用.
+    """
     response = MagicMock()
     response.text = text
+    response.content = text.encode(encoding)
     response.encoding = encoding
     response.status_code = status_code
     response.raise_for_status = MagicMock()

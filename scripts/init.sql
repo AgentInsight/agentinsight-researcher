@@ -247,26 +247,37 @@ DROP INDEX IF EXISTS idx_mcp_configs_unique_name;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_configs_unique_name
     ON mcp_configs (COALESCE(agent_id, ''), user_id, name);
 
--- 清理已移除的系统 MCP (从 130 精简至 23, 仅保留包名真实存在的核心+推荐档)
+-- 清理已移除的系统 MCP (从 130 精简至 21, 仅保留包名真实存在的核心+推荐档)
+-- E04/E05: 移除 sequential-thinking (npm 包损坏) 和 supabase (npm 包依赖缺陷)
 -- 用户私有克隆 (is_system=FALSE) 不受影响
 DELETE FROM mcp_configs
 WHERE is_system = TRUE
   AND user_id = 'system'
   AND name NOT IN (
-    -- ===== 核心保留 12 个 =====
-    'fetch', 'filesystem', 'sequential-thinking', 'github',
+    -- ===== 核心保留 11 个 (移除 sequential-thinking) =====
+    'fetch', 'filesystem', 'github',
     'notion', 'obsidian', 'confluence', 'elasticsearch',
     'wikipedia', 'hackernews',
     'neo4j', 'deepl',
-    -- ===== 推荐 11 个 =====
+    -- ===== 推荐 10 个 (移除 supabase) =====
     'git', 'pdf-tools',
     'google-drive', 'youtube', 'twitter',
-    'gitlab', 'supabase', 'mongodb', 'clickhouse',
+    'gitlab', 'mongodb', 'clickhouse',
     'chrome-mcp', 'aws-kb-retrieval'
   );
 
--- 预置系统公用 MCP 服务 (v3=2026-07-06 MCP 修复版, 修正 wikipedia 可执行文件名)
--- 修复内容: 替换 8 个 npm 失效包为 PyPI/社区包 (官方已迁移 npm → PyPI)
+-- 预置系统公用 MCP 服务 (v4=2026-07-16 MCP 修复版, 修正占位符/损坏包/缺失依赖)
+-- v3→v4 修复内容 (E01-E08, E14):
+--   E04: 移除 sequential-thinking (npm 包 @modelcontextprotocol/sdk 路径变更, ERR_MODULE_NOT_FOUND)
+--   E05: 移除 supabase (npm 包 @supabase/mcp-utils 未声明依赖, ERR_MODULE_NOT_FOUND)
+--   E02: obsidian enabled=FALSE (args 含占位符 /path/to/vault, 启动失败)
+--   E03: git enabled=FALSE (args 含占位符 /path/to/git/repo, 需克隆后配置; Dockerfile 已安装 git)
+--   E06: filesystem 改默认路径 /tmp/uploads + enabled=FALSE (args 含占位符 /path/to/allowed/files)
+--   E07: twitter enabled=FALSE (env_vars 含占位符 <your-*>)
+--   E08: deepl enabled=FALSE (env_vars 含占位符 <your-key>, 鉴权 401)
+--   E14: confluence 加 --toolsets=confluence + enabled=FALSE (消除 TOOLSETS 警告)
+--   所有含占位符的 MCP 统一 enabled=FALSE, 由前端引导用户克隆后填写真实值再启用
+-- v3 修复内容 (保留): 替换 8 个 npm 失效包为 PyPI/社区包 (官方已迁移 npm → PyPI)
 --   fetch:        @modelcontextprotocol/server-fetch (npm 404) → mcp-server-fetch (PyPI, uvx)
 --   git:          @modelcontextprotocol/server-git (npm 404) → mcp-server-git (PyPI, uvx, 需系统 git)
 --   wikipedia:    @phuongcao/mcp-server-wikipedia (npm 404) → mcp-server-wikipedia (PyPI, uvx, 可执行文件名 wikipedia-mcp-server)
@@ -275,104 +286,97 @@ WHERE is_system = TRUE
 --   chrome-mcp:   @anthropic-ai/chrome-mcp (npm 404) → chrome-devtools-mcp (npm 社区替代)
 --   clickhouse:   @clickhouse/mcp-server (npm 404) → clickhouse-mcp-server (npm 社区替代)
 --   github:       保留 npx (npm 200, 超时为网络问题)
--- version=3: 触发 ON CONFLICT DO UPDATE 更新已部署的 v1/v2 配置 (v2 wikipedia 可执行文件名错误)
+-- version=4: 触发 ON CONFLICT DO UPDATE 更新已部署的 v1/v2/v3 配置
 INSERT INTO mcp_configs (agent_id, user_id, name, server_url, transport_type, command, args, env_vars, enabled, is_system, version, description) VALUES
-    -- ===== 核心保留 12 个 (研究场景高价值、无冗余、合规无冲突) =====
-    -- 1. Web 抓取与文件操作 (3 个)
+    -- ===== 核心保留 11 个 (移除 sequential-thinking, 研究场景高价值、无冗余、合规无冲突) =====
+    -- 1. Web 抓取与文件操作 (2 个, filesystem 因含占位符禁用)
     (NULL, 'system', 'fetch', NULL, 'stdio', 'uvx',
      '["mcp-server-fetch"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
+     TRUE, TRUE, 4,'Web 内容抓取与转换, 适合 LLM 使用 (官方 PyPI 实现 mcp-server-fetch, uvx 运行)'),
     (NULL, 'system', 'filesystem', NULL, 'stdio', 'npx',
-     '["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'安全文件操作, 可配置访问路径 (官方 npm 实现, 核心保留)'),
-    (NULL, 'system', 'sequential-thinking', NULL, 'stdio', 'npx',
-     '["-y", "@modelcontextprotocol/server-sequential-thinking"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'通过思维序列进行动态反思式问题求解 (官方 npm 实现, 核心保留)'),
-    -- 2. 代码与知识库 (5 个)
+     '["-y", "@modelcontextprotocol/server-filesystem", "/tmp/uploads"]'::jsonb, NULL,
+     FALSE, TRUE, 4,'安全文件操作, 默认访问 /tmp/uploads (官方 npm 实现, 需克隆后配置访问路径)'),
+    -- 2. 代码与知识库 (5 个, 全部因含占位符禁用)
     (NULL, 'system', 'github', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-github"]'::jsonb,
      '{"GITHUB_PERSONAL_ACCESS_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 3,'GitHub API: 仓库管理/文件操作 (核心保留, 需配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
+     FALSE, TRUE, 4,'GitHub API: 仓库管理/文件操作 (核心保留, 需克隆后配置 GITHUB_PERSONAL_ACCESS_TOKEN)'),
     (NULL, 'system', 'notion', NULL, 'stdio', 'npx',
      '["-y", "@notionhq/notion-mcp-server"]'::jsonb,
      '{"OPENAPI_MCP_HEADERS": "{\"Authorization\":\"Bearer <your-token>\",\"Notion-Version\":\"2022-06-28\"}"}'::jsonb,
-     TRUE, TRUE, 3,'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需配置 Notion Integration Token)'),
+     FALSE, TRUE, 4,'Notion: 数据库/页面/协作工作空间管理 (核心保留, 需克隆后配置 Notion Integration Token)'),
     (NULL, 'system', 'obsidian', NULL, 'stdio', 'npx',
      '["-y", "mcp-obsidian", "--vault-path=/path/to/vault"]'::jsonb, NULL,
-     TRUE, TRUE, 3, 'Obsidian 知识库: Markdown 解析/双向链接/语义搜索 (核心保留, 需配置 vault 路径)'),
+     FALSE, TRUE, 4, 'Obsidian 知识库: Markdown 解析/双向链接/语义搜索 (核心保留, 需克隆后配置 vault 路径)'),
     (NULL, 'system', 'confluence', NULL, 'stdio', 'uvx',
-     '["mcp-atlassian", "--confluence-url", "<your-confluence-url>", "--confluence-username", "<your-email>", "--confluence-token", "<your-token>"]'::jsonb,
+     '["mcp-atlassian", "--toolsets=confluence", "--confluence-url", "<your-confluence-url>", "--confluence-username", "<your-email>", "--confluence-token", "<your-token>"]'::jsonb,
      '{"ATLASSIAN_SITE_NAME": "<your-site>", "ATLASSIAN_USER_EMAIL": "<your-email>", "ATLASSIAN_API_TOKEN": "<your-token>"}'::jsonb,
-     TRUE, TRUE, 3, 'Confluence: 维基内容/空间/页面管理 (PyPI 实现 mcp-atlassian, 需配置 ATLASSIAN_API_TOKEN)'),
+     FALSE, TRUE, 4, 'Confluence: 维基内容/空间/页面管理 (PyPI 实现 mcp-atlassian, 需克隆后配置 ATLASSIAN_API_TOKEN; E14: 加 --toolsets=confluence 消除 TOOLSETS 警告)'),
     (NULL, 'system', 'elasticsearch', NULL, 'stdio', 'npx',
      '["-y", "@elastic/mcp-server-elasticsearch"]'::jsonb,
      '{"ES_URL": "http://localhost:9200", "ES_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 3,'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需配置 ES_URL 与 ES_API_KEY)'),
-    -- 3. 搜索与新闻信源 (2 个)
+     FALSE, TRUE, 4,'Elasticsearch: 全文搜索/日志分析/实时索引 (核心保留, 需克隆后配置 ES_URL 与 ES_API_KEY)'),
+    -- 3. 搜索与新闻信源 (2 个, 无需凭据, 保持启用)
     (NULL, 'system', 'wikipedia', NULL, 'stdio', 'uvx',
      '["--from", "mcp-server-wikipedia", "wikipedia-mcp-server"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia, 可执行文件名 wikipedia-mcp-server)'),
+     TRUE, TRUE, 4,'Wikipedia 维基百科: 多语言百科全书检索 (PyPI 实现 mcp-server-wikipedia, 可执行文件名 wikipedia-mcp-server)'),
     (NULL, 'system', 'hackernews', NULL, 'stdio', 'npx',
      '["-y", "mcp-hacker-news"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
-    -- 4. 数据库 (1 个)
+     TRUE, TRUE, 4,'Hacker News: YC 科技新闻与讨论区检索 (核心保留, 原生未覆盖)'),
+    -- 4. 数据库 (1 个, neo4j 因含占位符禁用)
     (NULL, 'system', 'neo4j', NULL, 'stdio', 'uvx',
      '["mcp-server-neo4j"]'::jsonb,
      '{"NEO4J_URL": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 3,'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需配置连接凭据)'),
-    -- 5. 翻译 (1 个)
+     FALSE, TRUE, 4,'Neo4j: 图数据库查询与图算法 (PyPI 实现 mcp-server-neo4j, 需克隆后配置连接凭据)'),
+    -- 5. 翻译 (1 个, deepl 因含占位符禁用)
     (NULL, 'system', 'deepl', NULL, 'stdio', 'npx',
      '["-y", "deepl-mcp-server"]'::jsonb,
      '{"DEEPL_API_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 3,'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需配置 DEEPL_API_KEY)'),
-    -- ===== 推荐 11 个 (有价值但需用户按需配置 Key 或验证场景) =====
-    -- 6. 开发与代码工具 (3 个)
+     FALSE, TRUE, 4,'DeepL: 高质量机器翻译, 支持 30+ 语言 (核心保留, 需克隆后配置 DEEPL_API_KEY)'),
+    -- ===== 推荐 10 个 (移除 supabase, 有价值但需用户按需配置 Key 或验证场景) =====
+    -- 6. 开发与代码工具 (3 个, git/gitlab 因含占位符禁用)
     (NULL, 'system', 'git', NULL, 'stdio', 'uvx',
      '["mcp-server-git", "--repository", "/path/to/git/repo"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行)'),
+     FALSE, TRUE, 4,'Git 仓库读取/搜索/操作 (PyPI 实现 mcp-server-git, uvx 运行, 需克隆后配置仓库路径; Dockerfile 已安装 git)'),
     (NULL, 'system', 'gitlab', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gitlab"]'::jsonb,
      '{"GITLAB_PERSONAL_ACCESS_TOKEN": "<your-token>", "GITLAB_API_URL": "https://gitlab.com/api/v4"}'::jsonb,
-     TRUE, TRUE, 3,'GitLab: 仓库管理/项目/合并请求 (推荐, 需配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
+     FALSE, TRUE, 4,'GitLab: 仓库管理/项目/合并请求 (推荐, 需克隆后配置 GITLAB_PERSONAL_ACCESS_TOKEN)'),
     (NULL, 'system', 'chrome-mcp', NULL, 'stdio', 'npx',
      '["-y", "chrome-devtools-mcp"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
-    -- 7. 知识库与协作 (1 个)
+     TRUE, TRUE, 4,'Chrome 浏览器控制: 通过 CDP 协议操控本地 Chrome (社区实现 chrome-devtools-mcp)'),
+    -- 7. 知识库与协作 (1 个, google-drive 因含占位符禁用)
     (NULL, 'system', 'google-drive', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-gdrive"]'::jsonb,
      '{"GDRIVE_CLIENT_ID": "<your-client-id>", "GDRIVE_CLIENT_SECRET": "<your-client-secret>"}'::jsonb,
-     TRUE, TRUE, 3,'Google Drive: 文件访问与搜索 (推荐, 需配置 OAuth 凭据)'),
-    -- 8. 社交媒体与视频 (2 个)
+     FALSE, TRUE, 4,'Google Drive: 文件访问与搜索 (推荐, 需克隆后配置 OAuth 凭据)'),
+    -- 8. 社交媒体与视频 (2 个, youtube/twitter 因含占位符禁用)
     (NULL, 'system', 'youtube', NULL, 'stdio', 'npx',
      '["-y", "@anaisbetts/mcp-youtube"]'::jsonb,
      '{"YOUTUBE_API_KEY": "<your-api-key>"}'::jsonb,
-     TRUE, TRUE, 3,'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需配置 YOUTUBE_API_KEY)'),
+     FALSE, TRUE, 4,'YouTube: 视频管理/字幕提取/数据分析 (推荐, 需克隆后配置 YOUTUBE_API_KEY)'),
     (NULL, 'system', 'twitter', NULL, 'stdio', 'npx',
      '["-y", "@enescinar/twitter-mcp"]'::jsonb,
      '{"TWITTER_API_KEY": "<your-api-key>", "TWITTER_API_SECRET": "<your-secret>", "TWITTER_ACCESS_TOKEN": "<your-token>", "TWITTER_ACCESS_SECRET": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 3,'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需配置 Twitter API 凭据)'),
-    -- 9. 数据库 (3 个)
+     FALSE, TRUE, 4,'Twitter/X: 推文发布/搜索/互动管理 (推荐, 需克隆后配置 Twitter API 凭据)'),
+    -- 9. 数据库 (2 个, 移除 supabase; mongodb 无占位符保持启用; clickhouse 因含占位符禁用)
     (NULL, 'system', 'mongodb', NULL, 'stdio', 'npx',
      '["-y", "mongodb-mcp-server", "mongodb://localhost:27017/mydb"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
-    (NULL, 'system', 'supabase', NULL, 'stdio', 'npx',
-     '["-y", "@supabase/mcp-server-supabase"]'::jsonb,
-     '{"SUPABASE_URL": "<your-url>", "SUPABASE_KEY": "<your-key>"}'::jsonb,
-     TRUE, TRUE, 3,'Supabase: Postgres + Auth + Storage 一体化后端 (推荐, 需配置 SUPABASE_URL)'),
+     TRUE, TRUE, 4,'MongoDB: NoSQL 数据库交互与查询 (推荐, 需配置连接字符串)'),
     (NULL, 'system', 'clickhouse', NULL, 'stdio', 'npx',
      '["-y", "clickhouse-mcp-server"]'::jsonb,
      '{"CLICKHOUSE_HOST": "localhost", "CLICKHOUSE_PORT": "8123", "CLICKHOUSE_USER": "default", "CLICKHOUSE_PASSWORD": "<your-password>"}'::jsonb,
-     TRUE, TRUE, 3,'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需配置连接凭据)'),
-    -- 10. AWS (1 个)
+     FALSE, TRUE, 4,'ClickHouse: 列式数据库, 实时分析 (社区实现 clickhouse-mcp-server, 需克隆后配置连接凭据)'),
+    -- 10. AWS (1 个, aws-kb-retrieval 因含占位符禁用)
     (NULL, 'system', 'aws-kb-retrieval', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-aws-kb-retrieval"]'::jsonb,
      '{"AWS_REGION": "<your-region>", "AWS_ACCESS_KEY_ID": "<your-key>", "AWS_SECRET_ACCESS_KEY": "<your-secret>"}'::jsonb,
-     TRUE, TRUE, 3,'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现)'),
-    -- 11. 文档工具 (1 个)
+     FALSE, TRUE, 4,'AWS Knowledge Base 检索: 使用 Bedrock Agent Runtime (推荐, 官方归档实现, 需克隆后配置 AWS 凭据)'),
+    -- 11. 文档工具 (1 个, 无需凭据, 保持启用)
     (NULL, 'system', 'pdf-tools', NULL, 'stdio', 'npx',
      '["-y", "@modelcontextprotocol/server-pdf"]'::jsonb, NULL,
-     TRUE, TRUE, 3,'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
--- v3 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
+     TRUE, TRUE, 4,'PDF 工具: 合并/拆分/水印/元数据编辑 (推荐, 无需 API Key)')
+-- v4 版本更新策略: ON CONFLICT DO UPDATE 仅当新 version > 旧 version 时更新配置字段
 -- 避免每次启动都 UPDATE (旧 v1 DO NOTHING 无法更新已部署配置)
 -- 避免覆盖用户克隆后的定制 (仅系统 MCP is_system=TRUE 且 version 落后时更新)
 -- 注意: 用户私有克隆 (is_system=FALSE) 不受此 UPSERT 影响 (user_id 不同)

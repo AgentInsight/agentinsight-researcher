@@ -40,6 +40,8 @@ WORKDIR /app
 #       "apt-get update && apt-get install -y --download-only fonts-noto-cjk fonts-wqy-microhei && cp /var/cache/apt/archives/*.deb /out/"
 COPY packages/debs/ /tmp/debs/
 # 循环 dpkg -i 解决依赖顺序 (离线安装标准技巧)
+# 任务 E03: 需预下载 git .deb 到 packages/debs/ (mcp-server-git 依赖系统 git):
+#   预下载命令 (宿主机执行, 需联网): apt-get download git git-man liberror-perl perl-modules-5.36
 RUN dpkg -i /tmp/debs/*.deb 2>/dev/null; \
     dpkg -i /tmp/debs/*.deb 2>/dev/null; \
     dpkg -i /tmp/debs/*.deb; \
@@ -47,6 +49,10 @@ RUN dpkg -i /tmp/debs/*.deb 2>/dev/null; \
     # 任务1: 验证中文字体已安装 (PDF/DOCX 报告需要)
     if ! fc-list | grep -qi "noto sans cjk\|wenquanyi"; then \
         echo "[WARNING] 中文字体未安装 (fonts-noto-cjk/fonts-wqy-*), PDF/DOCX 报告将乱码. 请预下载字体 .deb 到 packages/debs/"; \
+    fi; \
+    # E03: 验证 git 已安装 (mcp-server-git 依赖系统 git 可执行文件)
+    if ! command -v git >/dev/null 2>&1; then \
+        echo "[WARNING] git 未安装 (mcp-server-git 将不可用). 请预下载 git .deb 到 packages/debs/"; \
     fi
 
 # 离线安装 Node.js 22 LTS + 预装 MCP npm 包 (方案 C)

@@ -13,7 +13,8 @@ Reviewer 不强制 max_iterations (由图级守卫负责),
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from collections.abc import Iterator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,9 +34,19 @@ def settings() -> Settings:
 
 
 @pytest.fixture(autouse=True)
-def clear_review_cache() -> None:
-    """每个用例前清空模块级 _REVIEW_CACHE, 避免跨用例污染."""
+def clear_review_cache() -> Iterator[None]:
+    """每个用例前清空模块级 _REVIEW_CACHE 并 mock Redis, 避免跨用例污染.
+
+    mock get_redis_client 返回 None, 强制走内存降级路径 (单元测试不依赖外部 Redis,
+    遵循 test_cached_search.py 既有模式, 确保测试隔离与速度).
+    """
     reviewer_module._REVIEW_CACHE.clear()
+    with patch(
+        "src.agents.researcher.reviewer.get_redis_client",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        yield
 
 
 @pytest.fixture()

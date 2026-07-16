@@ -177,8 +177,14 @@ class MCPCoordinator:
     _llm: LLMClient
     _cache: list[str] | None
     _cache_query: str | None
-    # MultiServerMCPClient 缓存, key = hash(server_configs)
-    _client_cache: dict[str, Any]
+    # MultiServerMCPClient LRU 缓存, key = hash(server_configs)
+    # A4: 使用 OrderedDict 实现 LRU 淘汰, 避免无限增长
+    _client_cache: OrderedDict[str, Any]
+    # C1: 并发锁, 防止并发请求各自构造 client 导致 stdio 进程倍增
+    _client_cache_lock: asyncio.Lock
+
+    # A4: LRU 缓存上限 (评估: 32 足够多用户场景, 每用户约 1-2 个唯一配置 hash)
+    _CLIENT_CACHE_MAX_SIZE = 32
 
     def __init__(
         self,
@@ -189,13 +195,22 @@ class MCPCoordinator:
         self._llm = llm or get_llm_client()
         self._cache = None
         self._cache_query = None
-        self._client_cache = {}
+        # A4: OrderedDict 实现 LRU 缓存
+        self._client_cache = OrderedDict()
+        # C1: asyncio.Lock 防止并发竞态
+        self._client_cache_lock = asyncio.Lock()
 
-    def _get_or_create_client(self, server_configs: dict[str, Any]) -> Any | None:
-        """缓存并复用 MultiServerMCPClient.
+    async def _get_or_create_client(self, server_configs: dict[str, Any]) -> Any | None:
+        """缓存并复用 MultiServerMCPClient (C1: async + Lock + double-check).
 
         避免每次 conduct_research 都重新构建客户端 (含连接初始化).
         key = hash(server_configs JSON 序列化), 相同配置复用客户端.
+
+        C1 修复: 改为 async 方法 + asyncio.Lock + double-check 模式,
+        防止并发请求各自构造 client 导致 stdio 进程倍增.
+
+        A4 修复: LRU 淘汰策略, 超过 _CLIENT_CACHE_MAX_SIZE 时淘汰最久未使用的 client,
+        淘汰时调用 aclose() 释放 stdio 子进程资源.
 
         Args:
             server_configs: MCP Server 配置字典 (name -> config)
@@ -216,9 +231,44 @@ class MCPCoordinator:
             # 序列化失败时直接构建 (无缓存)
             return MultiServerMCPClient(server_configs)
 
-        if key not in self._client_cache:
-            self._client_cache[key] = MultiServerMCPClient(server_configs)
-        return self._client_cache[key]
+        # C1: double-check 模式 — 先无锁检查 (快速路径), 再加锁检查 (慢速路径)
+        if key in self._client_cache:
+            # A4: LRU 更新 — 移到末尾 (最近使用)
+            self._client_cache.move_to_end(key)
+            return self._client_cache[key]
+
+        async with self._client_cache_lock:
+            # double-check: 可能在等待锁期间已被其他协程创建
+            if key in self._client_cache:
+                self._client_cache.move_to_end(key)
+                return self._client_cache[key]
+
+            # A4: LRU 淘汰 — 超过上限时淘汰最久未使用的 client
+            while len(self._client_cache) >= self._CLIENT_CACHE_MAX_SIZE:
+                evicted_key, evicted_client = self._client_cache.popitem(last=False)
+                logger.debug("MCP client cache LRU 淘汰 (key=%s)", evicted_key[:16])
+                # A4: 淘汰时关闭 client 释放 stdio 子进程
+                await self._safe_close_client(evicted_client)
+
+            # 创建新 client
+            client = MultiServerMCPClient(server_configs)
+            self._client_cache[key] = client
+            return client
+
+    @staticmethod
+    async def _safe_close_client(client: Any) -> None:
+        """安全关闭 MultiServerMCPClient (A5/A6: 释放 stdio 子进程资源).
+
+        多层防护: aclose > close > 忽略异常, 确保 stdio 子进程被正确清理.
+        """
+        try:
+            close_fn = getattr(client, "aclose", None) or getattr(client, "close", None)
+            if close_fn:
+                result = close_fn()
+                if hasattr(result, "__await__"):
+                    await result
+        except Exception as e:  # noqa: BLE001
+            logger.debug("MCP client 关闭失败 (忽略): %s", e)
 
     async def conduct_research(
         self,
@@ -341,11 +391,31 @@ class MCPCoordinator:
                 return []
 
             # 复用缓存的 MultiServerMCPClient (相同配置不重复构建)
-            client = self._get_or_create_client(server_configs)
+            # C1: _get_or_create_client 已改为 async (含 Lock + double-check)
+            client = await self._get_or_create_client(server_configs)
             if client is None:
                 logger.warning("langchain-mcp-adapters 未安装, MCP 数据源不可用")
                 return []
-            tools = await client.get_tools()
+            # A6: get_tools() 失败时 (TaskGroup 异常), 移除缓存中的僵尸 client 并 aclose
+            # 避免后续请求复用必失败的 client, 导致永久性资源泄漏
+            try:
+                tools = await client.get_tools()
+            except Exception as get_tools_err:
+                # A6: 从 _client_cache 移除并关闭僵尸 client
+                logger.warning(
+                    "MCP get_tools() 失败, 移除僵尸 client: %s", get_tools_err
+                )
+                # 计算 key 用于从缓存移除
+                try:
+                    failed_key = hashlib.sha256(
+                        json.dumps(server_configs, sort_keys=True, default=str).encode()
+                    ).hexdigest()
+                    if failed_key in self._client_cache:
+                        del self._client_cache[failed_key]
+                except (TypeError, ValueError):
+                    pass  # 序列化失败时无法计算 key, 跳过移除
+                await self._safe_close_client(client)
+                raise
 
             if not tools:
                 logger.warning("MCP 未返回任何工具")
@@ -385,7 +455,9 @@ class MCPCoordinator:
 
             return contexts
         except Exception as e:  # noqa: BLE001
-            logger.warning("MCP 执行失败: %s", e)
+            # E01: 记录失败的 server_configs 名称, 便于定位是哪个 MCP 报错 (JSONRPC 解析错误等)
+            failed_names = list(server_configs.keys()) if 'server_configs' in locals() else []
+            logger.warning("MCP 执行失败 (servers=%s): %s", failed_names, e)
             return []
 
     async def _call_single_tool(
@@ -612,12 +684,15 @@ class MCPCoordinator:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [tool for _, tool in scored[:max_tools]]
 
-    def clear_cache(self) -> None:
+    async def clear_cache(self) -> None:
         """清空 MCPCoordinator 实例级缓存 (fast 策略复用缓存).
 
-        MCP 配置 CRUD (create/update/delete/clone) 后应调用此方法失效缓存,
+        A2/A5: MCP 配置 CRUD (create/update/delete/clone) 后应调用此方法失效缓存,
         避免用户修改 MCP 配置后命中过期缓存. 同时清空模块级 _MCP_CACHE (TTL 缓存)
         与 _client_cache (MultiServerMCPClient 缓存), 确保下次 conduct_research 重新加载.
+
+        A4: 清空 _client_cache 时调用 aclose() 释放 stdio 子进程资源,
+        避免配置变更后旧 client 被孤立成为僵尸进程.
 
         调用时机:
         - mcp_routes.create_mcp_config 后
@@ -632,10 +707,25 @@ class MCPCoordinator:
         # 实例级缓存 (fast 策略复用)
         self._cache = None
         self._cache_query = None
-        # MultiServerMCPClient 缓存 (避免配置变更后复用旧客户端)
-        self._client_cache.clear()
+        # A4: 关闭所有缓存的 client 并清空 (释放 stdio 子进程)
+        async with self._client_cache_lock:
+            for client in self._client_cache.values():
+                await self._safe_close_client(client)
+            self._client_cache.clear()
         # 模块级 TTL 缓存 (工具调用结果, 全量清空)
         _MCP_CACHE.clear()
+
+    async def close(self) -> None:
+        """关闭 MCPCoordinator, 释放所有资源 (A5: lifespan shutdown 调用).
+
+        关闭所有缓存的 MultiServerMCPClient (释放 stdio 子进程),
+        清空实例级与模块级缓存.
+
+        调用时机:
+        - server.py lifespan shutdown
+        """
+        await self.clear_cache()
+        logger.info("MCPCoordinator 已关闭, 释放所有 MCP client 资源")
 
 
 # ========== 全局单例 (供 conduct_mcp_if_enabled 公共方法使用) ==========

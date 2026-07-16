@@ -51,17 +51,17 @@ class BSMarkdownifyScraper(BaseScraper):
             # 复用 BeautifulSoupScraper 的 HTTP 抓取 + 清理逻辑
             response = await self.session.get(self.url, timeout=15.0)
             response.raise_for_status()
-            html = response.text
-
-            # HTML 大小上限检查 (参考 BeautifulSoupScraper, 5MB)
+            # P1-16: 用 bytes 截断避免全量 str 解码 (节省内存峰值)
             max_html_size = 5 * 1024 * 1024
-            if len(html) > max_html_size:
+            raw = response.content  # bytes, 不触发解码
+            if len(raw) > max_html_size:
                 logger.warning(
                     "HTML 内容过大 (%.2fMB), 截断至 5MB: %s",
-                    len(html) / (1024 * 1024),
+                    len(raw) / (1024 * 1024),
                     self.url,
                 )
-                html = html[:max_html_size]
+                raw = raw[:max_html_size]
+            html = raw.decode(response.encoding or "utf-8", errors="replace")
 
             # str (Unicode) 输入时不应传 from_encoding, 否则 bs4 发出 UserWarning
             # 仅当 html 为 bytes 时 from_encoding 才有意义 (本路径 html 已是 str)

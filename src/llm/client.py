@@ -21,6 +21,7 @@ LLM 降级链 (strategic → smart → fast):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import AsyncIterator
@@ -844,6 +845,19 @@ class LLMClient:
                     }
                 )
                 raise
+            finally:
+                # P1-15: 异常路径显式关闭 stream, 避免底层连接泄漏
+                # LiteLLM stream 可能为 CustomStreamWrapper 或 OpenAI AsyncStream,
+                # 优先 aclose (异步), 兜底 close (同步), 都不存在则跳过.
+                # 关闭已消费完毕的 stream 是幂等的, 不影响正常流式输出.
+                close_method = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+                if close_method is not None:
+                    try:
+                        close_result = close_method()
+                        if asyncio.iscoroutine(close_result):
+                            await close_result
+                    except Exception as close_err:  # noqa: BLE001
+                        logger.debug("LLM stream 关闭异常 (非阻断): %s", close_err)
 
 
 # ========== 全局单例 ==========

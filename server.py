@@ -159,6 +159,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 关闭 JWTAuthMiddleware 的 httpx.AsyncClient (纯 ASGI middleware 无法从 app 获取实例)
     await close_jwt_middleware()
 
+    # A5: 关闭全局 MCPCoordinator 单例 (释放所有缓存的 stdio MCP 子进程)
+    from src.skills.researcher.mcp_coordinator import get_mcp_coordinator
+
+    await get_mcp_coordinator().close()
+
     # 关闭 asyncpg 业务表连接池 (优雅 shutdown, 避免连接泄漏)
     from src.memory.db_initializer import close_pool
 

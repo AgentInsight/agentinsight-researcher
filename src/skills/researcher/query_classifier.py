@@ -497,6 +497,20 @@ class QueryIntentClassifier:
             )
             return intent
 
+    def cleanup_inflight_locks(self, session_id: str) -> None:
+        """清理 singleflight 互斥锁 (会话结束时调用, 防止内存泄漏).
+
+        _inflight_locks 的 key 为 cache_key (agent_name:_global:query_classify:intent:...),
+        不含 session_id 维度 — singleflight 设计为跨会话共享, 同一 query 并发只允许一个
+        LLM 调用 (避免跨会话缓存击穿重复调用). 因此本方法清理全部 inflight locks;
+        进行中的协程仍持有 lock 对象引用, 不受影响 (clear 不取消已持有的锁).
+
+        Args:
+            session_id: 会话 ID (保留参数以与其他 cleanup 函数签名一致;
+                实际清理范围为全局, 因 key 不含 session_id 维度).
+        """
+        self._inflight_locks.clear()
+
 
 # ========== 全局单例 ==========
 _classifier: QueryIntentClassifier | None = None

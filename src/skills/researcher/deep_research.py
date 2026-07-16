@@ -19,6 +19,7 @@ from src.skills.researcher.context_manager import ContextManager
 from src.skills.researcher.mcp_coordinator import (
     MCPCoordinator,
     conduct_mcp_if_enabled,
+    get_mcp_coordinator,
 )
 from src.skills.researcher.scrapers import scrape_urls
 from src.skills.researcher.searchers import (
@@ -139,13 +140,15 @@ class DeepResearcher:
         self._mcp = None
 
     def _get_mcp(self) -> MCPCoordinator:
-        """惰性初始化 MCPCoordinator.
+        """获取全局 MCPCoordinator 单例 (A1: 避免多实例导致缓存隔离失效).
 
-        复用 self._llm 单例, 避免重复构造 LLMClient 导致 step_costs 累计丢失.
+        A1 修复: 改用 get_mcp_coordinator() 全局单例, 不再自建实例.
+        原实现 self._mcp = MCPCoordinator(self.settings, self._llm) 导致:
+        - deep_research 和 research_conductor 各自构造实例
+        - _client_cache 相互独立, stdio 进程倍增
+        - clear_cache() 只清当前实例, 另一实例缓存仍残留
         """
-        if self._mcp is None:
-            self._mcp = MCPCoordinator(self.settings, self._llm)
-        return self._mcp
+        return get_mcp_coordinator()
 
     async def research(
         self,
@@ -500,6 +503,9 @@ class DeepResearcher:
         - 返回值新增 learnings/followUpQuestions/citations/researchGoal
         - researchGoal 由 research() 调用处关联 (此处不设置)
         """
+        # 初始化 searchers 为空列表, 供 finally 块安全访问
+        # (若 get_searchers_async 抛异常, searchers 仍为 [], finally 不报错)
+        searchers: list[Any] = []
         try:
             # 搜索
             region = detect_region(sub_query)
@@ -602,6 +608,15 @@ class DeepResearcher:
                 "followUpQuestions": [],
                 "citations": {},
             }
+        finally:
+            # 释放 searcher 持有的 httpx.AsyncClient (防泄漏)
+            # 每个 httpx.AsyncClient 含 TCP 连接池 + SSL 上下文 + 内部缓冲区 ~5-15MB
+            # 参考 research_conductor.py 的 _process_sub_query try/finally 实现
+            for s in searchers:
+                try:
+                    await s.close()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"searcher {s.name} close 失败 (不阻断): {e}")
 
     async def _process_research_results(
         self,
