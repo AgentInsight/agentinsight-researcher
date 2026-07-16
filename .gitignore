@@ -106,3 +106,4 @@ tests/manual/
 /nginx.conf
 /docs/MCP_INDUSTRY_COMPARISON.md
 /docs/MCP_SERVICE_FLOW.md
+/frontend/.env.frontend
