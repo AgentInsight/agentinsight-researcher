@@ -1,7 +1,7 @@
 # agentinsight-researcher 多 Agent 共享存储层优化方案
 
 > **生成时间**: 2026-07-14
-> **版本**: v1.1.0
+> **版本**: v1.2.0
 > **状态**: ✅ 已实施（2026-07-14，19 处硬编码 S-01~S-19 全部修复 + 3 处 mcp_routes.py 系统 MCP 查询 bug 修复）
 > **场景定义**: 本项目（agentinsight-researcher）是多 Agent 体系中的一个 Agent，**项目内部 `agent_id` 固定不变**（恒为 `agentinsight-researcher`）。本方案的目标是将本项目使用到的 **PostgreSQL / Redis / Embeddings / Qdrant 四大存储层**改造为可被多个不同 Agent 项目（含本项目）共享使用的基础设施。
 > **约束条件**:

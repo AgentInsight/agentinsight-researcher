@@ -18,4 +18,4 @@ def test_health_endpoint():
     data = response.json()
     assert data["status"] == "ok"
     assert data["service"] == "agentinsight-researcher"
-    assert data["version"] == "1.1.0"
+    assert data["version"] == "1.2.0"

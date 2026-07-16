@@ -18,7 +18,7 @@ from src.config.settings import get_settings
 
 router = APIRouter(tags=["agent-discovery"])
 
-_AGENT_VERSION = "1.1.0"
+_AGENT_VERSION = "1.2.0"
 
 
 @router.get("/.well-known/agent-discovery.json")

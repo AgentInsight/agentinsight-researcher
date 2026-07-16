@@ -18,7 +18,75 @@
 
 - RAGAS/DeepEval 评测门禁 CI 化
 - 多模态支持(图片理解 + 表格抽取)
-- Agent Marketplace(技能热插拔)
+- 剩余性能优化（9/52 项）
+
+---
+
+## [1.2.0] - 2026-07-15
+
+### 生产级前端 + 多 Agent 路由 + 性能优化 + 上下文压缩增强
+
+#### ✨ 新增
+
+**生产级前端（Next.js 15 + React 19）**
+- 独立 `frontend/` 工程，基于 Next.js 15 + Vercel AI SDK + shadcn/ui + AI Elements
+- TypeScript strict 模式 + React Server Components + Zustand 状态管理
+- Tailwind CSS + Linear Indigo 设计系统（light/dark 双主题）
+- 响应式设计（移动端/平板/桌面端三档断点）
+
+**认证与用户体系**
+- 登录/注册页面（`/login` + `/register`），密码 + 短信验证码 + 图片验证码
+- `SELF_HOST` 模式跳过登录
+- Token 双重存储（httpOnly cookie + localStorage）
+- IP-based 用户身份解析降级方案
+
+**会话与对话管理**
+- 会话管理（新建/切换/删除/重命名），会话列表持久化到 localStorage
+- 会话级草稿/文件/流式状态隔离
+- 并发研究请求管理（LRU 驱逐 + 用户确认）
+- 对话记录分页（10 条最近，滚动加载更多）
+- 新建会话默认报告类型为 `detailed_report`
+
+**流式渲染与交互**
+- 实时流式显示 + 工具调用展示 + 检索来源展示
+- 节点进度展示（8 类结构化 WebSocket 消息）
+- 人在回路审核（WebSocket + 审核对话框）
+- 报告下载链接（多格式）
+
+**多 Agent 路由（方案B: Nginx 按路径分发）**
+- `agents.config.ts` 多 Agent 配置
+- Nginx `map` 指令按 agentName 路由 SSE/WebSocket/HTTP
+- Next.js `/api/proxy/[...path]` route handler 代理后端 API
+- Nginx SSE/WebSocket/静态资源分离配置
+
+**MCP 配置管理 UI**
+- `/mcp/researcher/setting` 页面，多 tab 布局
+- MCP 配置 CRUD（按 `agent_id` + `user_id` 隔离）
+- 系统级 MCP 预置（23 个系统 MCP）
+
+**上下文压缩增强（V4-P3 两层路由架构）**
+- L1 Fast Path：< 8K 字符跳过压缩
+- L2 标准路径：BM25 Top-50 + 可选 FastEmbed Top-20 rerank
+- FastEmbed 本地 Embeddings（bge-small-zh-v1.5 ONNX INT8，512 维）
+
+**性能优化（52 项，已执行 43 项）**
+- P0: RAF batching / `useShallow` / 模块级常量 / `React.memo`
+- P1: 模块级缓存 / `AbortController` 竞态保护 / Tooltip 动态定位
+
+**UI/UX 优化**
+- 主对话区背景配色统一
+- 自定义 Tooltip 组件（10+ 文件统一）
+- 用户菜单（登出流程）
+
+**后端增强**
+- 会话级 `agent_id:` 前缀 thread_id
+- 业务表 `updated_at` 触发器自动维护
+- MCP 配置 JSONB 字段反序列化
+
+**部署增强**
+- 独立 `frontend` 容器（Node 20-alpine，standalone 输出）
+- 前端环境变量运行时注入
+- Nginx 反向代理
 
 ---
 
@@ -175,7 +243,75 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - RAGAS/DeepEval evaluation gate CI integration
 - Multimodal support (image understanding + table extraction)
-- Agent Marketplace (hot-swappable skills)
+- Remaining performance optimizations (9/52 items)
+
+---
+
+## [1.2.0] - 2026-07-15
+
+### Production-grade frontend + multi-agent routing + performance optimization + context compression enhancement
+
+#### ✨ Added
+
+**Production Frontend (Next.js 15 + React 19)**
+- Standalone `frontend/` project based on Next.js 15 + Vercel AI SDK + shadcn/ui + AI Elements
+- TypeScript strict mode + React Server Components + Zustand state management
+- Tailwind CSS + Linear Indigo design system (light/dark themes)
+- Responsive design (mobile/tablet/desktop breakpoints)
+
+**Authentication & User System**
+- Login/register pages (`/login` + `/register`), password + SMS code + image captcha
+- `SELF_HOST` mode skips login
+- Token dual storage (httpOnly cookie + localStorage)
+- IP-based user identity resolution fallback
+
+**Session & Conversation Management**
+- Session management (new/switch/delete/rename), session list persisted to localStorage
+- Per-session draft/file/streaming state isolation
+- Concurrent research request management (LRU eviction + user confirmation)
+- Conversation record pagination (10 recent, scroll to load more)
+- New session default report type is `detailed_report`
+
+**Streaming Rendering & Interaction**
+- Real-time streaming display + tool call display + retrieval source display
+- Node progress display (8 types of structured WebSocket messages)
+- Human-in-the-loop review (WebSocket + review dialog)
+- Report download links (multiple formats)
+
+**Multi-Agent Routing (Plan B: Nginx path-based dispatch)**
+- `agents.config.ts` multi-agent config
+- Nginx `map` directive routing SSE/WebSocket/HTTP by agentName
+- Next.js `/api/proxy/[...path]` route handler proxying backend API
+- Nginx SSE/WebSocket/static assets separation configuration
+
+**MCP Configuration Management UI**
+- `/mcp/researcher/setting` page, multi-tab layout
+- MCP config CRUD (isolated by `agent_id` + `user_id`)
+- System-level MCP presets (23 system MCPs)
+
+**Context Compression Enhancement (V4-P3 Two-Layer Routing Architecture)**
+- L1 Fast Path: skip compression when < 8K chars
+- L2 Standard Path: BM25 Top-50 + optional FastEmbed Top-20 rerank
+- FastEmbed local embeddings (bge-small-zh-v1.5 ONNX INT8, 512 dims)
+
+**Performance Optimization (52 items, 43 executed)**
+- P0: RAF batching / `useShallow` / module-level constants / `React.memo`
+- P1: Module-level cache / `AbortController` race protection / Tooltip dynamic positioning
+
+**UI/UX Optimization**
+- Unified main conversation area background color
+- Custom Tooltip component (unified across 10+ files)
+- User menu (logout flow)
+
+**Backend Enhancement**
+- Session-level `agent_id:` prefix thread_id
+- Business table `updated_at` trigger auto-maintenance
+- MCP config JSONB field deserialization
+
+**Deployment Enhancement**
+- Standalone `frontend` container (Node 20-alpine, standalone output)
+- Frontend environment variables runtime injection
+- Nginx reverse proxy
 
 ---
 

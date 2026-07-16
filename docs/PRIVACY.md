@@ -8,7 +8,7 @@
 
 > **最后更新**：2026-07-11
 >
-> 本声明适用于 **agentinsight-researcher** 项目及其官方 Demo 环境（`http://43.139.209.145/agent/agentinsight-researcher/`）。
+> 本声明适用于 **agentinsight-researcher** 项目及其官方 Demo 环境（`http://43.139.209.145/`）。
 
 ## 数据收集说明
 
@@ -163,7 +163,7 @@ docker compose -p agentinsight down -v
 
 ### 官方 Demo 环境
 
-- **地址**：`http://43.139.209.145/agent/agentinsight-researcher/`
+- **地址**：`http://43.139.209.145/`
 - **模式**：`SELF_HOST=False`（云托管模式）
 - **鉴权**：测试页面引导鉴权与点数校验
 
@@ -211,7 +211,7 @@ docker compose -p agentinsight down -v
 
 > **Last Updated**: 2026-07-11
 >
-> This policy applies to the **agentinsight-researcher** project and its official demo environment (`http://43.139.209.145/agent/agentinsight-researcher/`).
+> This policy applies to the **agentinsight-researcher** project and its official demo environment (`http://43.139.209.145/`).
 
 ## Data Collection
 
@@ -366,7 +366,7 @@ If data is found to be incorrect, contact the maintenance team via [GitHub Issue
 
 ### Official Demo Environment
 
-- **URL**: `http://43.139.209.145/agent/agentinsight-researcher/`
+- **URL**: `http://43.139.209.145/`
 - **Mode**: `SELF_HOST=False` (cloud-hosted mode)
 - **Auth**: Test page handles authentication and quota validation
 

@@ -7,7 +7,7 @@ authors:
     family-names: Team
 repository-code: https://github.com/AgentInsight/agentinsight-researcher
 license: MIT
-version: 1.1.0
+version: 1.2.0
 date-released: 2026-07-12
 keywords:
   - ai-agent

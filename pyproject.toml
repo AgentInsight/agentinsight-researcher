@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentinsight-researcher"
-version = "1.1.0"
+version = "1.2.0"
 description = "中文优先的研究分析智能体, 基于 LangGraph + LiteLLM + Qdrant"
 requires-python = ">=3.11"
 readme = "README.md"
