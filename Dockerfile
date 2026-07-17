@@ -4,7 +4,7 @@
 # 适用于开源社区贡献者快速起栈
 
 # ========== Builder 阶段: 联网安装 Python 依赖 ==========
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -25,7 +25,7 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # ========== Runtime 阶段 ==========
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \

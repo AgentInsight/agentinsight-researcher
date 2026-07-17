@@ -4,7 +4,7 @@
 # 生产离线模式: 所有依赖预下载到 packages/ (wheels/debs/models/images)
 
 # ========== Builder 阶段: 离线安装 Python wheel ==========
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-index --find-links=/app/packages -r requirements.txt
 
 # ========== Runtime 阶段 ==========
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
