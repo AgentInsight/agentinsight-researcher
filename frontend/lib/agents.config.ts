@@ -76,3 +76,14 @@ export const getAgentByName = (name: string): AgentConfig | undefined =>
 
 /** 当前是否多 Agent (用于决定是否显示切换器) */
 export const isMultiAgent = (): boolean => getEnabledAgents().length > 1;
+
+/**
+ * 人在回路 (Human-in-the-loop) 开关
+ * - false (默认): 前端不建立 WebSocket 连接, 研究流程不插入 human 节点
+ * - true: 前端建立 WebSocket 连接, 接收 human_feedback_request 并弹出审核对话框
+ *
+ * 与后端 settings.human_review_enabled 配置同步:
+ * - 后端默认 false (src/config/settings.py)
+ * - 启用时需同时修改前后端配置
+ */
+export const HUMAN_REVIEW_ENABLED: boolean = false;

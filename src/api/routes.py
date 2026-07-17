@@ -2247,7 +2247,7 @@ async def download_report(
         report = None
     else:
         report = await store.get_report(
-            report_id,
+            report_id=report_id,
             agent_id=get_settings().agent_name,
             user_id=user_id,
         )

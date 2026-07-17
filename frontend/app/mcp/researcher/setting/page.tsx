@@ -3,8 +3,9 @@
 
 import { useState } from "react";
 import { useAgentStore } from "@/lib/agent-store";
+import { useNavStore } from "@/lib/nav-store";
 import { McpConfigPanel } from "@/components/settings/mcp-config-panel";
-import { Blocks } from "lucide-react";
+import { Blocks, ChevronRight } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /**
@@ -25,31 +26,51 @@ type MainTab = "mcp";
 
 export default function McpPage() {
   const { getCurrentAgent } = useAgentStore();
+  const { agentListNavCollapsed, toggleAgentListNav } = useNavStore();
   const currentAgent = getCurrentAgent();
   const [activeTab, setActiveTab] = useState<MainTab>("mcp");
 
   return (
     <div className="flex flex-col h-full">
-      {/* ===== 顶部: 图标 + 智能体名字居中作为标题 (无边框, 用留白分隔) ===== */}
+      {/* ===== 顶部: 图标 + 智能体名字居中作为标题 (无分隔线, 与中部融为一体) ===== */}
+      {/* 任务1: 改用 flex justify-between + 左右 w-24 占位, 与 ChatPage 顶部栏布局完全一致 */}
+      {/* 展开按钮在 flex 流内 (非 absolute), items-center 让按钮垂直居中, 中心 23px 与其他按钮对齐 */}
       <div
-        className="flex-none flex items-center justify-center px-5 py-3"
+        className="flex-none flex items-center justify-between px-3 py-2.5"
         style={{
           backgroundColor: "var(--bg-card)",
-          boxShadow: "var(--shadow-sm)",
         }}
       >
+        {/* 左侧: 智能体导航栏展开按钮(收缩时), w-24 与 ChatPage 左侧占位一致 */}
+        <div className="flex items-center gap-1 w-24">
+          {agentListNavCollapsed && (
+            <Tooltip content="展开智能体导航栏">
+              <button
+                onClick={toggleAgentListNav}
+                className="p-1.5 rounded-md hover:bg-hover transition-colors"
+                style={{ color: "var(--text-secondary)" }}
+                aria-label="展开智能体导航栏"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+        {/* 中间: 智能体名字居中 */}
         <Tooltip content={currentAgent?.displayName || ""}>
           <h1
             className="text-sm font-semibold truncate flex items-center gap-1.5"
             style={{ color: "var(--text-primary)" }}
           >
             <Blocks
-              className="h-4 w-4 flex-shrink-0"
+              className="h-3.5 w-3.5 flex-shrink-0"
               style={{ color: "var(--brand-primary)" }}
             />
             <span>{currentAgent?.displayName || "智能体"}</span>
           </h1>
         </Tooltip>
+        {/* 右侧: w-24 占位保持标题居中 */}
+        <div className="w-24" />
       </div>
 
       {/* ===== Tab 栏 (横向, 后续可扩展) ===== */}

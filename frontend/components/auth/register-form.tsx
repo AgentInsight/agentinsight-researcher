@@ -288,7 +288,7 @@ export function RegisterForm() {
   };
 
   return (
-    <div className="w-[400px] max-w-full">
+    <div className="w-full max-w-[400px]">
       {/* 错误提示 */}
       {error && (
         <div

@@ -31,7 +31,7 @@ import { Tooltip } from "@/components/ui/tooltip";
  * 功能:
  * - 选项卡: "我的配置" / "系统 MCP"
  * - 我的配置: 卡片网格 + 新增/编辑/删除/测试/启用切换
- * - 系统 MCP: 卡片列表 + 克隆到我的配置
+ * - 系统 MCP: 卡片列表 + 添加到我的配置
  * - 编辑器: name/transport_type/server_url/command/args/env_vars/description/enabled
  * - 测试结果展示 (success/message/tools_count/latency_ms)
  *
@@ -809,7 +809,7 @@ function SystemMcpCard({
 
         {/* 克隆按钮 */}
         <div className="pt-3 border-t" style={{ borderColor: "var(--border-color-light)" }}>
-          <Tooltip content="克隆到我的配置">
+          <Tooltip content="添加到我的配置">
             <button
               onClick={onClone}
               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors"
@@ -818,7 +818,7 @@ function SystemMcpCard({
               }}
             >
               <Copy className="h-3.5 w-3.5" />
-              克隆到我的配置
+              添加到我的配置
             </button>
           </Tooltip>
         </div>

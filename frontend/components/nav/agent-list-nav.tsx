@@ -5,22 +5,26 @@ import { useState, useMemo } from "react";
 import { useAgentStore } from "@/lib/agent-store";
 import { useNavStore } from "@/lib/nav-store";
 import { getEnabledAgents, type AgentConfig } from "@/lib/agents.config";
-import { Search, Bot, Blocks } from "lucide-react";
+import { Search, Bot, Blocks, ChevronLeft } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /**
- * 智能体导航栏 (无硬边框, 与左侧导航栏 / 会话侧边栏统一 --bg-sidebar 浅灰,
- * 共同作为侧边栏区域与主对话区 --bg-card 白色形成层次)
+ * 智能体导航栏 (第 2 栏, 可收缩/展开)
  *
- * 3 区域 Flexbox 布局:
- * - 顶部 (flex-none): 标题居中, 无子标题
- *   - mode=agent: "智能体"
- *   - mode=mcp: "智能体配置"
+ * 底色: --bg-card (与主框体一致, 视觉一体)
+ *
+ * 收缩/展开:
+ * - 展开态 (width: 240): 标题居中 + < 按钮 (absolute 右侧)
+ * - 收缩态 (width: 0): 整个导航栏隐藏 (overflow: hidden)
+ *   展开按钮浮在主框体顶部 (由 ChatPage/McpPage 顶部栏渲染)
+ *
+ * 3 区域 Flexbox 布局 (展开态):
+ * - 顶部 (flex-none): 标题居中 + 收缩按钮 (absolute 右侧)
  * - 中间 (flex-none): 搜索框
- * - 底部 (flex-1 min-h-0): 智能体列表 (中文显示 + 图标, 无子标题)
+ * - 底部 (flex-1 min-h-0): 智能体列表
  */
 export function AgentListNav() {
-  const { mode } = useNavStore();
+  const { mode, agentListNavCollapsed, toggleAgentListNav } = useNavStore();
   const { currentAgent, setAgent } = useAgentStore();
   const [query, setQuery] = useState("");
 
@@ -41,30 +45,45 @@ export function AgentListNav() {
 
   return (
     <div
-      className="flex flex-col h-full"
+      className="flex flex-col h-full overflow-hidden"
       style={{
-        backgroundColor: "var(--bg-sidebar)",
-        width: 240,
+        backgroundColor: "var(--bg-card)",
+        width: agentListNavCollapsed ? 0 : 240,
+        transition: "width 0.2s ease",
       }}
     >
-      {/* ===== 顶部: 标题居中 ===== */}
-      <div
-        className="flex-none flex items-center justify-center px-4 py-3.5"
-      >
+      {/* ===== 顶部: 标题居中 + 收缩按钮 (grid 布局, py-2.5 与 ChatPage/AgentNav 顶部对齐) ===== */}
+      {/* 任务1+2: Tooltip 返回 inline-flex div 作为 grid item, justify-self 必须写在外层 wrapper div 上, 否则按钮靠左贴标题 */}
+      <div className="flex-none grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2.5">
+        <div />
         <h2
-          className="text-sm font-semibold text-center"
+          className="justify-self-center text-sm font-semibold"
           style={{ color: "var(--text-primary)" }}
         >
           {title}
         </h2>
+        {/* 任务2: 按钮推到最右 — justify-self-end 写在 wrapper div 上 */}
+        <div className="justify-self-end">
+          <Tooltip content="折叠导航栏">
+            <button
+              onClick={toggleAgentListNav}
+              className="p-1.5 rounded-md hover:bg-hover transition-colors"
+              style={{ color: "var(--text-tertiary)" }}
+              aria-label="折叠导航栏"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
+        </div>
       </div>
 
-      {/* ===== 搜索框 ===== */}
+      {/* ===== 搜索框 (任务4: 背景色改为透明继承导航栏 --bg-card, 用边框区分) ===== */}
       <div className="flex-none flex items-center px-3 pb-2.5">
         <div
           className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-md"
           style={{
-            backgroundColor: "var(--bg-muted)",
+            backgroundColor: "transparent",
+            border: "1px solid var(--border-color-light)",
           }}
         >
           <Search

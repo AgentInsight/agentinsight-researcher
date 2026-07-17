@@ -26,7 +26,6 @@ import asyncio
 import logging
 from typing import Any, ClassVar
 
-import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.api.feedback_queue import get_feedback_queue
@@ -59,56 +58,93 @@ ALL_WS_MSG_TYPES: tuple[str, ...] = (
 )
 
 
-# 模块级 httpx client 单例 (复用 TCP/TLS 连接, 避免 _verify_token 每次握手开销)
-_verify_client: httpx.AsyncClient | None = None
-
-
-def _get_verify_client(settings: Settings) -> httpx.AsyncClient:
-    """懒加载模块级 httpx client (单例).
-
-    timeout 从 settings.user_info_api_timeout 注入, 与 JWTAuthMiddleware 一致.
-    """
-    global _verify_client
-    if _verify_client is None:
-        _verify_client = httpx.AsyncClient(timeout=settings.user_info_api_timeout)
-    return _verify_client
+# 模块级 httpx client 已移除: _verify_token 改用本地 PyJWT 解析 (复用 JWTAuthMiddleware 逻辑),
+# 不再调用远程 /api/user, 不再依赖 settings.user_info_api_url/user_info_api_timeout (字段已移除).
 
 
 async def close_verify_client() -> None:
-    """关闭模块级 httpx client (应用 shutdown 时调用)."""
-    global _verify_client
-    if _verify_client is not None:
-        await _verify_client.aclose()
-        _verify_client = None
+    """关闭 WebSocket token 验证模块级 httpx client (已废弃, 保留为 no-op 兼容).
+
+    历史用途: lifespan shutdown 时关闭模块级 httpx.AsyncClient 单例.
+    现状: ``_verify_token`` 已改用本地 PyJWT 解析, 不再使用 httpx client.
+    保留此函数仅为向后兼容 (``server.py`` lifespan 与单元测试仍引用).
+    幂等: 无副作用.
+    """
+    # no-op: 本地 JWT 解析不使用 httpx client
+    return
 
 
-async def _verify_token(token: str, settings: Settings) -> bool:
-    """验证 JWT token 有效性 (复用 JWTAuthMiddleware 的验证逻辑).
+def _decode_jwt_local(token: str, settings: Settings) -> str | None:
+    """本地 PyJWT 解析 Token, 返回 user_id (复用 JWTAuthMiddleware._verify_jwt_local 逻辑).
 
-    调用 GET /api/user 获取 user_id 验证 token.
+    使用 ``jwt_signing_key`` (HS256) 本地验证, 不调用远程 API.
+    失败返回 None, 由调用方决定降级或拒绝.
+
+    禁止将原始 token 写入日志.
+    """
+    if not settings.jwt_signing_key:
+        logger.error("WebSocket JWT 本地解析失败: jwt_signing_key 未配置")
+        return None
+    try:
+        import jwt  # PyJWT
+
+        payload = jwt.decode(
+            token,
+            settings.jwt_signing_key,
+            algorithms=[settings.jwt_algorithm],
+            issuer=settings.jwt_issuer or None,
+            audience=settings.jwt_audience or None,
+            options={"verify_exp": True, "require": ["exp", "iat"]},
+            leeway=settings.jwt_clock_skew,
+        )
+        # AgentInsightService JWT Claims: UserId (字符串)
+        user_id = str(payload.get("UserId") or payload.get("user_id") or "")
+        if user_id:
+            return user_id
+        logger.warning("WebSocket JWT 本地解析失败: payload 中未包含 UserId/user_id")
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WebSocket JWT 本地解析失败: %s", e)
+        return None
+
+
+async def _verify_token(token: str, settings: Settings) -> tuple[bool, str | None]:
+    """验证 JWT token 有效性 (本地 PyJWT 解析, 复用 JWTAuthMiddleware 逻辑).
+
+    使用 ``settings.jwt_signing_key`` (HS256) 本地验证, 不调用远程 API.
     禁止将原始 token 写入日志.
 
-    返回 True 表示 token 有效, False 表示无效或验证失败.
+    向后兼容:
+        - ``jwt_local_verify=True`` (默认): 走本地 JWT 解析.
+        - ``jwt_local_verify=False``: 远程验证已废弃 (``user_info_api_url`` 字段已从 Settings
+          移除), 为保持安全性降级为本地解析 (若 ``jwt_signing_key`` 已配置), 否则拒绝.
+
+    Returns:
+        ``(True, user_id)`` 表示 token 有效; ``(False, None)`` 表示无效或验证失败.
     """
     if not token:
-        return False
-    try:
-        client = _get_verify_client(settings)
-        response = await client.get(
-            settings.user_info_api_url,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        if response.status_code != 200:
-            return False
-        data = response.json()
-        user_id = str(data.get("id") or data.get("user_id") or "")
-        return bool(user_id)
-    except httpx.TimeoutException:
-        logger.warning("WebSocket token 验证超时 (%ss)", settings.user_info_api_timeout)
-        return False
-    except Exception as e:  # noqa: BLE001
-        logger.warning("WebSocket token 验证失败: %s", e)
-        return False
+        logger.warning("WebSocket token 验证失败: token 为空")
+        return False, None
+
+    # 本地 JWT 解析 (默认启用)
+    if settings.jwt_local_verify:
+        user_id = _decode_jwt_local(token, settings)
+        if user_id:
+            logger.info("WebSocket JWT 本地解析成功: user_id=%s", user_id)
+            return True, user_id
+        return False, None
+
+    # jwt_local_verify=False: 远程验证已废弃 (settings.user_info_api_url 已移除),
+    # 降级为本地解析 (若 jwt_signing_key 已配置), 否则拒绝以保持安全性
+    logger.warning(
+        "WebSocket: jwt_local_verify=False, 远程验证已废弃 (user_info_api_url 字段已移除); "
+        "降级为本地 JWT 解析"
+    )
+    user_id = _decode_jwt_local(token, settings)
+    if user_id:
+        logger.info("WebSocket JWT 降级本地解析成功: user_id=%s", user_id)
+        return True, user_id
+    return False, None
 
 
 class WebSocketManager:
@@ -119,6 +155,8 @@ class WebSocketManager:
 
     def __init__(self) -> None:
         self._active_connections: dict[str, WebSocket] = {}
+        # 连接级 user_id 上下文 (按 session_id 索引, 用于日志关联与数据隔离)
+        self._connection_user_ids: dict[str, str] = {}
         self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
@@ -158,12 +196,21 @@ class WebSocketManager:
                 or websocket.headers.get("authorization", "").replace("Bearer ", "").strip()
             )
             if not token:
+                logger.warning("WebSocket 拒绝连接 (缺少 token): session_id=%s", session_id)
                 await websocket.close(code=4001, reason="Missing authentication token")
                 return False
-            # 复用 JWTAuthMiddleware 的 token 验证逻辑 (调用 /api/user 校验)
-            if not await _verify_token(token, settings):
+            # 本地 JWT 解析 (复用 JWTAuthMiddleware 逻辑, 不再调用远程 /api/user)
+            ok, user_id = await _verify_token(token, settings)
+            if not ok or not user_id:
+                logger.warning(
+                    "WebSocket 拒绝连接 (token 无效或解析失败): session_id=%s",
+                    session_id,
+                )
                 await websocket.close(code=4001, reason="Invalid token")
                 return False
+            # 存入连接上下文 (用于后续日志关联与数据隔离)
+            self._connection_user_ids[session_id] = user_id
+            logger.info("WebSocket JWT 鉴权通过: session_id=%s user_id=%s", session_id, user_id)
         elif settings.env == "dev":
             logger.warning("DEV: WebSocket JWT 鉴权已关闭 (不安全), session_id=%s", session_id)
 
@@ -187,11 +234,19 @@ class WebSocketManager:
     def disconnect(self, session_id: str) -> None:
         """移除连接."""
         self._active_connections.pop(session_id, None)
+        self._connection_user_ids.pop(session_id, None)
         logger.info("WebSocket 已断开: session_id=%s", session_id)
 
     def is_connected(self, session_id: str) -> bool:
         """是否已连接."""
         return session_id in self._active_connections
+
+    def get_user_id(self, session_id: str) -> str:
+        """获取连接级 user_id (用于日志关联与数据隔离).
+
+        无连接或未鉴权时返回空字符串.
+        """
+        return self._connection_user_ids.get(session_id, "")
 
     async def send_message(self, session_id: str, message: dict[str, Any]) -> bool:
         """发送 JSON 消息到指定 session.

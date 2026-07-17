@@ -23,7 +23,7 @@ export default function ChatLayout({
 }) {
   return (
     <div
-      className="flex h-screen"
+      className="flex h-[100dvh]"
       style={{ backgroundColor: "var(--bg-page)" }}
     >
       {/* ===== 桌面端 (md+): 3 栏布局 ===== */}
@@ -33,7 +33,7 @@ export default function ChatLayout({
         <AgentNav />
       </div>
 
-      {/* 第 2 栏: 智能体导航栏 (始终显示) */}
+      {/* 第 2 栏: 智能体导航栏 (可收缩) */}
       <div className="hidden md:flex flex-shrink-0">
         <AgentListNav />
       </div>

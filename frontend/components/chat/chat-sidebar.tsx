@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/lib/auth-store";
 import { useAgentStore } from "@/lib/agent-store";
-import { useSessionStore } from "@/lib/session-store";
+import { useSessionStore, MAX_SESSIONS_PER_USER } from "@/lib/session-store";
 import { useStreamStore } from "@/lib/stream-store";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import {
@@ -223,8 +223,13 @@ export function ChatSidebar() {
   }, [currentAgent, getToken, setSessions, setLoadingSessions, setError]);
 
   // P1-16: 6 个 handler 全部用 useCallback 包裹, 引用稳定确保 SessionItem memo 有效
+  // 任务1: 会话数达到 MAX_SESSIONS_PER_USER (10) 时禁止创建新会话
   const handleNewSession = useCallback(async () => {
     if (isCreatingSession) return;
+    if (sessions.length >= MAX_SESSIONS_PER_USER) {
+      setError(`每用户每智能体最多创建 ${MAX_SESSIONS_PER_USER} 个会话，请先删除不用的会话`);
+      return;
+    }
     setCreatingSession(true);
     setError(null);
     try {
@@ -238,7 +243,7 @@ export function ChatSidebar() {
     } finally {
       setCreatingSession(false);
     }
-  }, [isCreatingSession, getToken, addSession, setCreatingSession, setError]);
+  }, [isCreatingSession, sessions.length, getToken, addSession, setCreatingSession, setError]);
 
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -316,26 +321,30 @@ export function ChatSidebar() {
     <div
       className="flex flex-col h-full"
       style={{
-        backgroundColor: "var(--bg-sidebar)",
+        backgroundColor: "var(--bg-card)",
         width: 260,
         flexShrink: 0,
       }}
     >
       {/* ===== 会话列表 ===== */}
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-        {/* 新建会话按钮 */}
+        {/* 新建会话按钮 (任务1: 会话数达 MAX_SESSIONS_PER_USER=10 时变灰不可点击) */}
         <div className="p-2.5">
           <button
             onClick={handleNewSession}
-            disabled={isCreatingSession}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+            disabled={isCreatingSession || sessions.length >= MAX_SESSIONS_PER_USER}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               backgroundColor: "var(--brand-primary)",
               color: "var(--text-on-brand)",
             }}
           >
             <Plus className="h-4 w-4" />
-            {isCreatingSession ? "创建中..." : "新建会话"}
+            {isCreatingSession
+              ? "创建中..."
+              : sessions.length >= MAX_SESSIONS_PER_USER
+              ? `已达上限 ${MAX_SESSIONS_PER_USER} 个`
+              : "新建会话"}
           </button>
         </div>
 

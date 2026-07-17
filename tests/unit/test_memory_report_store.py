@@ -283,7 +283,11 @@ class TestGetReport:
         _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
-        result = await store.get_report(str(rid))
+        result = await store.get_report(
+            report_id=str(rid),
+            agent_id="agentinsight-researcher",
+            user_id="test-user",
+        )
         assert result is not None
         assert result["report_id"] == str(rid)
         assert result["sources"] == [{"title": "src1"}]
@@ -295,7 +299,11 @@ class TestGetReport:
         _install_mock_pool(monkeypatch, mock_conn)
 
         store = ReportStore(_make_settings())
-        result = await store.get_report(str(uuid.uuid4()))
+        result = await store.get_report(
+            report_id=str(uuid.uuid4()),
+            agent_id="agentinsight-researcher",
+            user_id="test-user",
+        )
         assert result is None
 
 

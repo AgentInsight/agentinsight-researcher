@@ -2,6 +2,9 @@
 import { create } from "zustand";
 import type { Session, ReportConfig } from "./types";
 
+/** 每用户每智能体最多可创建的会话数 (与后端 settings.max_sessions_per_user 保持一致) */
+export const MAX_SESSIONS_PER_USER = 10;
+
 /** 已上传文件信息 (per-session 隔离) */
 export interface UploadedFile {
   file_id: string;

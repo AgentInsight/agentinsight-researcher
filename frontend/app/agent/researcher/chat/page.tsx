@@ -11,12 +11,13 @@ import { HistoryReportPanel } from "@/components/chat/history-report-panel";
 import { SettingsPanel } from "@/components/chat/settings-panel";
 import { ToastContainer, useToast } from "@/components/ui/toast";
 import { useAuthStore } from "@/lib/auth-store";
-import { useSessionStore } from "@/lib/session-store";
+import { useSessionStore, MAX_SESSIONS_PER_USER } from "@/lib/session-store";
 import { useAgentStore } from "@/lib/agent-store";
 import { useNavStore } from "@/lib/nav-store";
 import { useStreamStore, MAX_BACKGROUND_STREAMS } from "@/lib/stream-store";
 import { WsClient } from "@/lib/ws-client";
 import { apiClient } from "@/lib/api-client";
+import { HUMAN_REVIEW_ENABLED } from "@/lib/agents.config";
 import type { ChatMessage } from "@/lib/types";
 import type { ToolCall, Source } from "@/lib/types";
 import {
@@ -25,6 +26,8 @@ import {
   Menu,
   X,
   Bot,
+  ChevronRight,
+  Plus,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 
@@ -73,7 +76,36 @@ export default function ChatPage() {
   const reportConfig = useSessionStore((s) => s.reportConfig);
   const setReportConfig = useSessionStore((s) => s.setReportConfig);
   const { getCurrentAgent } = useAgentStore();
-  const { togglePanel, slideInPanel, sessionNavVisible, toggleSessionNav } = useNavStore();
+  const { togglePanel, slideInPanel, sessionNavVisible, toggleSessionNav, agentListNavCollapsed, toggleAgentListNav } = useNavStore();
+  const sessions = useSessionStore((s) => s.sessions);
+  const isCreatingSession = useSessionStore((s) => s.isCreatingSession);
+
+  /**
+   * 新建会话 (Plus 按钮触发)
+   * - 检查会话数上限 (MAX_SESSIONS_PER_USER = 10)
+   * - 调用后端 POST /v1/sessions 创建
+   * - 自动切换到新会话 (addSession 内部设置 currentSessionId)
+   */
+  const handleNewSession = useCallback(async () => {
+    const state = useSessionStore.getState();
+    if (state.isCreatingSession) return;
+    if (state.sessions.length >= MAX_SESSIONS_PER_USER) {
+      alert(`每用户每智能体最多创建 ${MAX_SESSIONS_PER_USER} 个会话，请先删除不用的会话`);
+      return;
+    }
+    state.setCreatingSession(true);
+    try {
+      const token = getToken();
+      const session = await apiClient.createSession(token, "新会话");
+      if (session && session.session_id) {
+        state.addSession(session);
+      }
+    } catch (err) {
+      console.error("创建会话失败:", err);
+    } finally {
+      state.setCreatingSession(false);
+    }
+  }, [getToken]);
 
   // 从 stream-store 读取当前会话的流式上下文 (per-session 隔离)
   // 切换会话时自动切换到新会话的 stream, 旧会话的流在后台继续
@@ -241,9 +273,10 @@ export default function ChatPage() {
   }, [currentSessionId]);
 
   // WebSocket 连接 (人在回路, 按 currentSessionId 维护单一实例)
+  // 仅当 HUMAN_REVIEW_ENABLED=true 时建立连接, 默认关闭时不发送 WebSocket 请求
   // agentName 从 agent-store 获取, 用于 Nginx 按 agent 路径分发 (方案B)
   useEffect(() => {
-    if (!currentSessionId) return;
+    if (!HUMAN_REVIEW_ENABLED || !currentSessionId) return;
 
     // 关闭旧连接
     if (wsClientRef.current) {
@@ -530,32 +563,51 @@ export default function ChatPage() {
       >
         {/* ===== 顶部: 左侧菜单图标 + 居中标题 + 右侧历史/设置图标 (淡化边界, 融合整体) ===== */}
         <div
-          className="header-blend flex-none flex items-center justify-between px-3 py-2.5"
+          className="header-blend flex-none flex items-center justify-between px-3 py-2.5 pl-12 md:pl-3"
           style={{
             backgroundColor: "var(--bg-card)",
           }}
         >
-          {/* 左侧: 菜单图标 (切换会话列表) */}
-          <div className="flex items-center gap-1 w-20">
+          {/* 左侧: 智能体导航栏展开按钮(收缩时) + 菜单图标 (切换会话列表) + 新建会话 */}
+          <div className="hidden md:flex items-center gap-1 w-24">
+            {agentListNavCollapsed && (
+              <Tooltip content="展开智能体导航栏">
+                <button
+                  onClick={toggleAgentListNav}
+                  className="p-1.5 rounded-md hover:bg-hover transition-colors"
+                  style={{ color: "var(--text-secondary)" }}
+                  aria-label="展开智能体导航栏"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content={sessionNavVisible ? "隐藏会话列表" : "显示会话列表"}>
               <button
                 onClick={toggleSessionNav}
-                className="p-2 rounded-md hover:bg-hover transition-colors"
+                className="p-1.5 rounded-md hover:bg-hover transition-colors"
                 style={{
-                  color: sessionNavVisible
-                    ? "var(--brand-primary)"
-                    : "var(--text-secondary)",
-                  backgroundColor: sessionNavVisible
-                    ? "var(--bg-active)"
-                    : "transparent",
+                  color: sessionNavVisible ? "var(--brand-primary)" : "var(--text-secondary)",
+                  backgroundColor: sessionNavVisible ? "var(--bg-active)" : "transparent",
                 }}
                 aria-label={sessionNavVisible ? "隐藏会话列表" : "显示会话列表"}
               >
                 {sessionNavVisible ? (
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 ) : (
-                  <Menu className="h-4 w-4" />
+                  <Menu className="h-3.5 w-3.5" />
                 )}
+              </button>
+            </Tooltip>
+            <Tooltip content={sessions.length >= MAX_SESSIONS_PER_USER ? `已达上限 ${MAX_SESSIONS_PER_USER} 个会话` : "新建会话"}>
+              <button
+                onClick={handleNewSession}
+                disabled={isCreatingSession || sessions.length >= MAX_SESSIONS_PER_USER}
+                className="p-1.5 rounded-md hover:bg-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ color: "var(--text-secondary)" }}
+                aria-label="新建会话"
+              >
+                <Plus className="h-3.5 w-3.5" />
               </button>
             </Tooltip>
           </div>
@@ -567,7 +619,7 @@ export default function ChatPage() {
               style={{ color: "var(--text-primary)" }}
             >
               <Bot
-                className="h-4 w-4 flex-shrink-0"
+                className="h-3.5 w-3.5 flex-shrink-0"
                 style={{ color: "var(--brand-primary)" }}
               />
               <span className="truncate">{currentAgent?.displayName || "智能体"}</span>
@@ -575,11 +627,11 @@ export default function ChatPage() {
           </Tooltip>
 
           {/* 右侧: 历史报告图标 + 设置图标 */}
-          <div className="flex items-center gap-1 w-20 justify-end">
+          <div className="flex items-center gap-1 w-24 justify-end">
             <Tooltip content="查看历史报告">
               <button
                 onClick={() => togglePanel("history")}
-                className="p-2 rounded-md hover:bg-hover transition-colors"
+                className="p-1.5 rounded-md hover:bg-hover transition-colors"
                 style={{
                   color:
                     slideInPanel === "history"
@@ -592,13 +644,13 @@ export default function ChatPage() {
                 }}
                 aria-label="查看历史报告"
               >
-                <ClipboardList className="h-4 w-4" />
+                <ClipboardList className="h-3.5 w-3.5" />
               </button>
             </Tooltip>
             <Tooltip content="打开设置">
               <button
                 onClick={() => togglePanel("settings")}
-                className="p-2 rounded-md hover:bg-hover transition-colors"
+                className="p-1.5 rounded-md hover:bg-hover transition-colors"
                 style={{
                   color:
                     slideInPanel === "settings"
@@ -611,17 +663,18 @@ export default function ChatPage() {
                 }}
                 aria-label="打开设置"
               >
-                <SettingsIcon className="h-4 w-4" />
+                <SettingsIcon className="h-3.5 w-3.5" />
               </button>
             </Tooltip>
           </div>
         </div>
 
         {/* ===== 中间: 对话区域 (flex-1 自适应填充) ===== */}
+        {/* 任务3: 添加 overflow-x-hidden 防止底部水平滚动条, 超出内容换行 */}
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto min-h-0"
+          className="flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         >
           {/* Toast 提示容器 (右上角, 替代内联错误提示) */}
           <ToastContainer toasts={toasts} onClose={removeToast} />

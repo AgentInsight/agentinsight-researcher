@@ -34,7 +34,7 @@ class SearXNGSearcher(BaseSearcher):
     name = "searxng"  # 与注册表 FREE_QUOTA_MAP 的 "searxng" 一致
     region = SearchRegion.GLOBAL
     cost_tier = "free"  # v1.1 新增
-    quality_score = 65.0  # v1.1 新增
+    quality_score = 90.0  # SearXNG 优先级最高 (覆盖 baidu/bing/sogou 等多引擎, 免费, 无额度限制)
 
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__(settings)

@@ -92,29 +92,39 @@ export function HistoryReportPanel() {
   };
 
   // P2-5: 内联 handleDownload, 用 console.error 替代 alert 避免阻塞主线程
-  const handleDownload = (reportId: string, format: string) => {
+  // 任务4补充: 失败时解析 HTTP 错误详情 (含状态码和响应体), 便于诊断后端 500 根因
+  const handleDownload = async (reportId: string, format: string) => {
     const token = getToken();
     const url = apiClient.getReportDownloadUrl(reportId, format);
-    fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("下载失败");
-        return res.blob();
-      })
-      .then((blob) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `report-${reportId.slice(0, 8)}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
-      })
-      .catch((err) => {
-        console.error("下载失败:", err instanceof Error ? err.message : err);
-        setError(err instanceof Error ? err.message : "下载失败");
+    try {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
+      if (!res.ok) {
+        // 解析响应体错误详情 (后端 FastAPI HTTPException 返回 {"detail": "..."} JSON)
+        const text = await res.text().catch(() => "");
+        let detail = text;
+        try {
+          const j = JSON.parse(text);
+          detail = j.detail || j.message || text;
+        } catch {
+          /* 非 JSON 保持原文 */
+        }
+        throw new Error(`下载失败 (HTTP ${res.status}): ${detail || res.statusText}`);
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `report-${reportId.slice(0, 8)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "下载失败";
+      console.error("下载失败:", msg);
+      setError(msg);
+    }
   };
 
   if (!isOpen) return null;

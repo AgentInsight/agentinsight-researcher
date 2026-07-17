@@ -156,6 +156,47 @@ body {
   box-sizing: border-box;
 }
 
+/* ========== 移动端适配 ========== */
+/* 防止 iOS 横屏时文字大小自动调整 */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 禁用 iOS 长按弹出菜单 (部分元素) */
+button, a {
+  -webkit-touch-callout: none;
+}
+
+/* 允许长按选择文本 (消息内容) */
+.prose, .prose * {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 优化触摸滚动 (惯性滚动) */
+body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;
+}
+
+/* safe-area 安全区适配 (iPhone 刘海屏/底部横条) */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-left {
+    padding-left: env(safe-area-inset-left);
+  }
+  .safe-right {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
 /* ========== 可点击元素光标 (Tailwind v4 不再默认为 button 添加 cursor:pointer) ========== */
 button:not(:disabled),
 [role="button"]:not(:disabled),
@@ -196,11 +237,14 @@ select:disabled {
 .hover\:text-brand:hover { color: var(--brand-primary); }
 
 /* ========== Markdown 渲染样式 (.prose) ========== */
+/* 任务3: 防止长 URL/文本超出边界产生水平滚动条, 超出换行 */
 .prose {
   max-width: none;
   color: var(--text-primary);
   line-height: 1.7;
   font-size: 14px;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .prose h1,
@@ -228,6 +272,8 @@ select:disabled {
 .prose a {
   color: var(--brand-primary);
   text-decoration: none;
+  /* 任务3: 长 URL 换行, 避免产生水平滚动条 */
+  word-break: break-all;
 }
 
 .prose a:hover {
@@ -280,7 +326,10 @@ select:disabled {
   color: var(--code-text);
   padding: 1em;
   border-radius: var(--radius-md);
-  overflow-x: auto;
+  /* 任务3: 移除 overflow-x: auto 避免底部水平滚动条, 改为换行 */
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
   margin: 0.8em 0;
   font-size: 0.875em;
   line-height: 1.5;
@@ -547,10 +596,10 @@ textarea:focus-visible {
   color: var(--brand-primary);
 }
 
-/* ========== 整体视觉融合 (任务2-3: 消除明显界限) ========== */
-/* 顶部栏: 去除 boxShadow, 用极浅 border 替代 */
+/* ========== 整体视觉融合 (任务4: 移除主框体分隔线) ========== */
+/* 顶部栏: 无 border-bottom, 与中部融为一体 */
 .header-blend {
-  border-bottom: 1px solid var(--border-color-light);
+  border-bottom: none;
 }
 
 /* 面板分隔: 用渐变 border 替代硬 border */

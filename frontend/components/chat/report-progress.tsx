@@ -34,26 +34,36 @@ export const ReportProgress = memo(function ReportProgress({
   const { getToken } = useAuthStore();
   const token = getToken();
 
-  const handleDownload = (format: string) => {
+  // 任务4补充: 失败时解析 HTTP 错误详情 (含状态码和响应体), 便于诊断后端 500 根因
+  const handleDownload = async (format: string) => {
     const url = apiClient.getReportDownloadUrl(reportId, format);
     // 使用 fetch 带 Authorization 头下载 (避免暴露 token 在 URL)
-    fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("下载失败");
-        return res.blob();
-      })
-      .then((blob) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `report-${reportId.slice(0, 8)}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
-      })
-      .catch((err) => alert(err.message));
+    try {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        let detail = text;
+        try {
+          const j = JSON.parse(text);
+          detail = j.detail || j.message || text;
+        } catch {
+          /* 非 JSON 保持原文 */
+        }
+        throw new Error(`下载失败 (HTTP ${res.status}): ${detail || res.statusText}`);
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `report-${reportId.slice(0, 8)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "下载失败");
+    }
   };
 
   return (

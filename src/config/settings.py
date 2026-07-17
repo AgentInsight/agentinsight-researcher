@@ -192,6 +192,8 @@ class Settings(BaseSettings):
     context_session_ttl: int = 2_592_000
     debounce_seconds: float = 1.0
     flush_interval_seconds: float = 0.5
+    # 每用户每智能体最多可创建的会话数 (防止滥用, 默认 10)
+    max_sessions_per_user: int = 10
 
     # ========== 数据隔离 ==========
     agent_name: str = "agentinsight-researcher"
@@ -415,8 +417,9 @@ class Settings(BaseSettings):
     # human_review_enabled=True 时, 多 Agent 图在 agent_creator 之后、supervisor 之前
     # 插入 human 节点: agent_creator → human → (accept → supervisor | revise → agent_creator)
     # HumanAgent 通过 WebSocket 推送计划给前端, 阻塞等待用户反馈 (asyncio.Future, 带超时).
-    # 默认开启: WebSocket 未连接时 HumanAgent 自动通过 (不阻断研究流程).
-    human_review_enabled: bool = True  # 默认开启, WebSocket 未连接时自动通过
+    # 默认关闭: 前端无需建立 WebSocket 连接, 研究流程不插入 human 节点.
+    # 启用后: 多 Agent 图在 agent_creator 之后插入 human 节点, 通过 WebSocket 推送计划, 阻塞等待反馈.
+    human_review_enabled: bool = False  # 默认关闭, 前端无需 WebSocket
     human_review_timeout: int = 300  # 等待用户反馈超时 (秒), 超时自动通过
     graph_total_timeout: int = 300  # graph.ainvoke 总超时 (秒, 防止节点卡死永久挂起)
     max_plan_revisions: int = 3  # 研究计划修订上限, 达上限强制通过 (守卫防死循环)

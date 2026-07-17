@@ -6,14 +6,20 @@ import { useRouter } from "next/navigation";
 import { GlowBackground } from "./glow-background";
 
 /**
- * 认证页共用布局 (复制自 traceability-platform)
- * - 全屏居中式布局 (非卡片式)
- * - 光晕背景动画 (GlowBackground)
- * - 品牌元素: 小标题"欢迎使用" + 大标题 AgentInsight + 副标题 + 官网链接
- * - 切换提示: 登录↔注册
+ * 认证页共用布局 (响应式, 适配手机/平板/桌面)
+ *
+ * 布局:
+ * - 全屏居中, 光晕背景动画 (GlowBackground)
+ * - 品牌标题区: 小标题 + 大标题 + 官网引导 + 切换提示
+ * - 表单区: 最大 400px 宽, 小屏自适应
  * - 底部版权
  *
- * 背景色保持 frontend 现有 (--bg-page)
+ * 响应式断点:
+ * - 手机 (<sm, 640px): 标题缩小, padding 减小, 版权移至流式布局
+ * - 平板 (sm-md, 640-768px): 适中
+ * - 桌面 (md+, 768px+): 原始尺寸
+ *
+ * 使用 100dvh (动态视口高度) 替代 100vh, 解决移动端地址栏遮挡问题
  */
 export function AuthLayout({
   children,
@@ -27,21 +33,20 @@ export function AuthLayout({
   const router = useRouter();
   return (
     <div
-      className="relative flex flex-col items-center justify-center min-h-screen overflow-hidden"
+      className="relative flex flex-col items-center justify-center min-h-[100dvh] overflow-hidden px-4 py-8"
       style={{ backgroundColor: "var(--bg-page)" }}
     >
       {/* 光晕背景 */}
       <GlowBackground />
 
       {/* 主内容容器 */}
-      <div className="relative z-10 flex flex-col items-center min-h-[500px] px-4">
+      <div className="relative z-10 flex flex-col items-center w-full max-w-[440px]">
         {/* 品牌标题区 */}
-        <div className="flex flex-col items-start mb-8">
+        <div className="flex flex-col items-start mb-6 sm:mb-8 w-full">
           {/* 小标题 "欢迎使用" */}
           <h1
-            className="mb-1"
+            className="mb-1 text-xl sm:text-2xl"
             style={{
-              fontSize: "160%",
               opacity: 0.5,
               color: "var(--text-secondary)",
               fontWeight: 400,
@@ -52,7 +57,7 @@ export function AuthLayout({
 
           {/* 大标题 AgentInsight */}
           <h1
-            className="flex items-center text-3xl font-bold"
+            className="flex items-center text-2xl sm:text-3xl font-bold flex-wrap"
             style={{ color: "var(--text-primary)" }}
           >
             <span style={{ color: "var(--brand-primary)" }}>A</span>
@@ -63,11 +68,11 @@ export function AuthLayout({
 
           {/* 官网引导 */}
           <p
-            className="mt-2 flex items-center gap-1 text-sm"
+            className="mt-2 flex items-center gap-1 text-xs sm:text-sm flex-wrap"
             style={{ color: "var(--text-secondary)" }}
           >
             <span>新用户可先访问</span>
-			<a
+            <a
               href="https://agentinsight.goldebridge.com"
               target="_blank"
               rel="noopener noreferrer"
@@ -75,12 +80,11 @@ export function AuthLayout({
               style={{ color: "var(--brand-primary)" }}
             >官网
             </a>
-			<span>了解详情</span>
-            
+            <span>了解详情</span>
           </p>
 
           {/* 切换提示 */}
-          <div className="mt-8 flex items-center gap-2 text-sm">
+          <div className="mt-6 sm:mt-8 flex items-center gap-2 text-xs sm:text-sm">
             <span style={{ color: "var(--text-secondary)" }}>
               {mode === "register" ? "已有账号?" : "没有账号吗?"}
             </span>
@@ -100,7 +104,7 @@ export function AuthLayout({
 
       {/* 底部版权 */}
       <footer
-        className="absolute bottom-16 left-1/2 -translate-x-1/2 text-sm z-10"
+        className="relative mt-8 text-xs sm:text-sm text-center z-10"
         style={{ color: "var(--text-secondary)" }}
       >
         Copyright @ 2026 AgentInsight. All Rights Reserved

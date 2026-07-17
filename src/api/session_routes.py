@@ -159,17 +159,29 @@ async def create_session(request: CreateSessionRequest) -> dict[str, Any]:
     - title 不传则默认为空字符串
 
     返回: {"session_id", "title", "created_at"}
+
+    限制: 每用户每智能体最多 max_sessions_per_user 个会话 (默认 10)
     """
     user_id, agent_id = _get_user_agent()
     session_id = request.session_id or generate_session_id()
     title = request.title or ""
+
+    # 会话数上限检查 (每用户每智能体)
+    store = get_session_store()
+    existing_sessions = await store.list_sessions(agent_id, user_id, limit=200)
+    from src.config.settings import get_settings
+    max_sessions = get_settings().max_sessions_per_user
+    if len(existing_sessions) >= max_sessions:
+        raise HTTPException(
+            status_code=429,
+            detail=f"每用户每智能体最多创建 {max_sessions} 个会话，请先删除不用的会话",
+        )
 
     # 获取客户端 IP (审计追溯用, 从 contextvars 恢复)
     from src.api.middleware import get_request_client_ip
 
     client_ip = get_request_client_ip()
 
-    store = get_session_store()
     await store.create_session(session_id, agent_id, user_id, title=title, client_ip=client_ip)
 
     # 返回创建的会话信息

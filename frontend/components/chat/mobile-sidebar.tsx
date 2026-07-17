@@ -19,11 +19,21 @@ export function MobileSidebar() {
   const [open, setOpen] = useState(false);
   const { mode } = useNavStore();
 
+  // 打开抽屉时重置收缩状态, 确保移动端抽屉内导航栏始终展开
+  // (移动端和桌面端不同时使用, 重置不影响桌面端体验)
+  const handleOpen = () => {
+    useNavStore.setState({
+      agentNavCollapsed: false,
+      agentListNavCollapsed: false,
+    });
+    setOpen(true);
+  };
+
   return (
     <>
       {/* 移动端汉堡菜单按钮 */}
       <button
-        onClick={() => setOpen(true)}
+        onClick={handleOpen}
         className="md:hidden fixed top-3 left-3 z-30 p-2 rounded-md shadow-sm"
         style={{ backgroundColor: "var(--bg-card)", color: "var(--text-primary)" }}
         aria-label="打开菜单"
